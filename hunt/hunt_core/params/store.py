@@ -132,9 +132,9 @@ UNIVERSAL_DEFAULTS: dict[str, Any] = {
         "tp1_partial_fix_pct_hot": 80.0,
         "bias_flip_chop_adx_max": 20.0,
         "prep_confirm_window_hours": 8.0,
-        "breakeven_buffer_pct": 0.15,
-        # Memecoin 1m wicks: 0.15% BE after TP1 caused false stop_hit (EPIC/UBU 2026-06-12).
-        "breakeven_buffer_min_pct": 1.0,
+        # Post-TP1 stop locks this fraction of the realised entry->TP1 distance as
+        # profit (sits between entry and TP1: in profit, clear of entry-noise wicks).
+        "tp1_profit_lock_fraction": 0.5,
         # Trailing room = fraction of initial structural risk (orig SL distance).
         "breakeven_risk_fraction": 0.25,
         "mfe_stall_hours": 8.0,

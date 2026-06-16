@@ -13,7 +13,7 @@ Target: standalone hunter per [HUNT_ARCHITECTURE.md](HUNT_ARCHITECTURE.md).
 | `hunt_research/` | logic_verify offline | **removed** — `_dev/check_*` + live-smoke |
 | `hunt/scripts/` | ~50 ops scripts | **removed** |
 
-LOC budget gate: **44 000** hot path (`_dev/budget.py` excludes `_dev/`, `cycle/_impl.py`, `_engine_impl.py`, `_dump_core.py`).  
+LOC budget gate: **44 000** hot path (`_dev/budget.py` excludes `_dev/`, `cycle/_impl.py`, `_dump_core.py`).  
 Stretch target **32 000** — wave 4 (`cycle/_impl`, `gate/delivery`, `deliver/telegram` splits); wave 3C scanner split **done**.
 
 ## God modules — keep whole until split
@@ -21,7 +21,7 @@ Stretch target **32 000** — wave 4 (`cycle/_impl`, `gate/delivery`, `deliver/t
 | Module | LOC | Policy |
 |--------|-----|--------|
 | `runtime/cycle/_impl.py` | ~2556 | watch loop |
-| `scan/_engine_impl.py` | ~15 | compat facade only |
+| `scan/scoring.py` | ~600 | dump/long scoring |
 | `scan/predump.py` | ~340 | dump confirm path |
 | `scan/prepump.py` | ~260 | long confirm path |
 | `scan/_confirm_shared.py` | ~1150 | shared fuel/confirm helpers |
@@ -39,7 +39,7 @@ Stretch target **32 000** — wave 4 (`cycle/_impl`, `gate/delivery`, `deliver/t
 |------|-------|
 | hot LOC 44k → 32k | further cycle/_impl + gate/delivery splits (wave 4) |
 | `data/lake.py` | **done** — feature parquet + tracker/tick batch flush |
-| config unification | **done** — `domain/config.py` TOML + watch constants; `runtime/state.py` session memory; `params/store.py` calibration overlay; shims: `settings.py`, `config_defaults.py` |
+| config unification | **done** — `domain/config.py` TOML + watch constants; `runtime/state.py` session memory; `params/store.py` calibration overlay |
 | Long TG | off until n≥30 |
 
 ## Verification

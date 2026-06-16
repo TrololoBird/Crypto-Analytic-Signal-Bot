@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Independent Binance + Polars probe (Hunt autonomous loop — ФАЗА 5, источник 4).
+"""Independent CCXT + Polars probe (Hunt autonomous loop — ФАЗА 5).
 
-НЕ импортирует hunt_watch. Свои публичные REST-запросы к Binance USDⓈ-M +
-пересчёт индикаторов в Polars + независимый вердикт. Сравнивается с тем, что
-отдаёт охотник, чтобы ловить баги hunt path (а не подгонять зонд под баг).
+НЕ импортирует hunt runtime. Публичные данные только через CCXT (sync), как в
+``hunt_core.market.factory.fetch_klines_sync`` — для сравнения с hunt path.
 
 Запуск:
     .venv/bin/python scripts/hunt_probe_independent.py BEATUSDT VELVETUSDT PLAYUSDT
     .venv/bin/python scripts/hunt_probe_independent.py --watchlist --top 5
     .venv/bin/python scripts/hunt_probe_independent.py BEATUSDT --interval 5m --limit 200
 
-Вывод — компактный JSONL (одна строка на символ) в stdout. Никакой прозы.
+Вывод — компактный JSONL (одна строка на символ) в stdout.
 """
 
 from __future__ import annotations
@@ -20,26 +19,31 @@ import json
 import math
 import os
 import sys
-import time
 from pathlib import Path
 
 import polars as pl
-import requests
 
-FAPI = "https://fapi.binance.com"
 ROOT = Path(__file__).resolve().parent.parent
+HUNT = ROOT / "hunt"
+if str(HUNT) not in sys.path:
+    sys.path.insert(0, str(HUNT))
+
+from hunt_core.market.factory import (  # noqa: E402
+    close_exchange_sync,
+    create_sync_binance_future,
+    fetch_klines_sync,
+)
+from hunt_core.market.symbols import to_ccxt_symbol  # noqa: E402
+
 WATCHLIST = ROOT / "hunt" / "data" / "hunt_watchlist.json"
-
-
-WARMUP_MIN = 60  # минимум баров для устойчивого Wilder/ADX; меньше — отказ, не приближение
+WARMUP_MIN = 60
 
 
 class ProbeError(RuntimeError):
-    """Громкая ошибка зонда: данные недостаточны/битые. Никогда не глушится."""
+    """Громкая ошибка зонда: данные недостаточны/битые."""
 
 
 def _fin(name: str, symbol: str, val: float) -> float:
-    """Гарантия конечного числа. Не конечно → raise (NaN/inf/None запрещены)."""
     if val is None or not isinstance(val, (int, float)) or not math.isfinite(val):
         raise ProbeError(
             f"{symbol}: {name}={val!r} не конечно — баг вычисления, не валидное состояние"
@@ -47,77 +51,72 @@ def _fin(name: str, symbol: str, val: float) -> float:
     return float(val)
 
 
-def _get(path: str, params: dict, proxy: str | None) -> object:
-    """Транзиентные сетевые ошибки ретраятся; финальный провал — raise с диагностикой."""
-    proxies = {"https": proxy, "http": proxy} if proxy else None
-    last: Exception | None = None
-    for attempt in range(3):
-        try:
-            r = requests.get(FAPI + path, params=params, timeout=10, proxies=proxies)
-            r.raise_for_status()
-            return r.json()
-        except requests.RequestException as exc:
-            last = exc
-            time.sleep(0.4 * (attempt + 1))
-    raise ProbeError(f"GET {path} {params} провалился после 3 попыток: {last!r}")
+def _ccxt_exchange(proxy: str | None):
+    return create_sync_binance_future(
+        proxy_url=proxy,
+        trust_env=proxy is None,
+    )
 
 
 def fetch_klines(symbol: str, interval: str, limit: int, proxy: str | None) -> pl.DataFrame:
-    raw = _get("/fapi/v1/klines", {"symbol": symbol, "interval": interval, "limit": limit}, proxy)
-    if not isinstance(raw, list) or len(raw) < WARMUP_MIN:
+    rows = fetch_klines_sync(
+        symbol,
+        interval,
+        limit=limit,
+        proxy_url=proxy,
+        trust_env=proxy is None,
+    )
+    if len(rows) < WARMUP_MIN:
         raise ProbeError(
-            f"{symbol}: klines вернул {len(raw) if isinstance(raw, list) else type(raw)} баров, нужно ≥{WARMUP_MIN}"
+            f"{symbol}: klines вернул {len(rows)} баров, нужно ≥{WARMUP_MIN}"
         )
-    cols = [
-        "open_time",
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "close_time",
-        "quote_vol",
-        "trades",
-        "taker_base",
-        "taker_quote",
-        "ignore",
-    ]
-    df = pl.DataFrame(raw, schema=cols, orient="row").select(
-        pl.col("open_time").cast(pl.Int64),
-        *[
-            pl.col(c).cast(pl.Float64)
-            for c in ("open", "high", "low", "close", "volume", "quote_vol")
-        ],
+    df = pl.DataFrame(
+        {
+            "open_time": [int(r[0]) for r in rows],
+            "open": [float(r[1]) for r in rows],
+            "high": [float(r[2]) for r in rows],
+            "low": [float(r[3]) for r in rows],
+            "close": [float(r[4]) for r in rows],
+            "volume": [float(r[5]) for r in rows],
+            "quote_vol": [float(r[7]) if len(r) > 7 else 0.0 for r in rows],
+        }
     )
     nulls = df.null_count().sum_horizontal().item()
     if nulls:
-        raise ProbeError(f"{symbol}: klines содержит {nulls} null после cast — битые данные")
+        raise ProbeError(f"{symbol}: klines содержит {nulls} null после cast")
     return df
 
 
 def fetch_oi_delta(symbol: str, proxy: str | None) -> float:
-    raw = _get(
-        "/futures/data/openInterestHist", {"symbol": symbol, "period": "5m", "limit": 12}, proxy
-    )
-    if not isinstance(raw, list) or len(raw) < 2:
-        raise ProbeError(
-            f"{symbol}: openInterestHist вернул <2 точек — OI недоступен (не None, а явная ошибка)"
-        )
-    oi = [float(x["sumOpenInterest"]) for x in raw]
-    if oi[0] == 0.0:
-        raise ProbeError(f"{symbol}: первая точка OI = 0, деление невозможно")
-    return _fin("oi_delta_pct", symbol, round((oi[-1] - oi[0]) / oi[0] * 100.0, 3))
+    ex = _ccxt_exchange(proxy)
+    try:
+        ex.load_markets()
+        ccxt_sym = to_ccxt_symbol(symbol, exchange=ex)
+        raw = ex.fetch_open_interest_history(ccxt_sym, timeframe="5m", limit=12)
+        if not isinstance(raw, list) or len(raw) < 2:
+            raise ProbeError(f"{symbol}: openInterestHist <2 точек")
+        oi = [float(x.get("openInterestAmount") or x.get("openInterest") or 0) for x in raw]
+        if oi[0] == 0.0:
+            raise ProbeError(f"{symbol}: первая точка OI = 0")
+        return _fin("oi_delta_pct", symbol, round((oi[-1] - oi[0]) / oi[0] * 100.0, 3))
+    finally:
+        close_exchange_sync(ex, label="probe_oi")
 
 
 def fetch_funding(symbol: str, proxy: str | None) -> float:
-    raw = _get("/fapi/v1/premiumIndex", {"symbol": symbol}, proxy)
-    if not isinstance(raw, dict) or "lastFundingRate" not in raw:
-        raise ProbeError(f"{symbol}: premiumIndex без lastFundingRate — funding недоступен")
-    return _fin("funding_pct", symbol, round(float(raw["lastFundingRate"]) * 100.0, 5))
+    ex = _ccxt_exchange(proxy)
+    try:
+        ex.load_markets()
+        ccxt_sym = to_ccxt_symbol(symbol, exchange=ex)
+        raw = ex.fetch_funding_rate(ccxt_sym)
+        if not isinstance(raw, dict) or raw.get("fundingRate") is None:
+            raise ProbeError(f"{symbol}: fetchFundingRate без fundingRate")
+        return _fin("funding_pct", symbol, round(float(raw["fundingRate"]) * 100.0, 5))
+    finally:
+        close_exchange_sync(ex, label="probe_funding")
 
 
 def _wilder(expr: pl.Expr, n: int) -> pl.Expr:
-    # Wilder smoothing == EWM с alpha = 1/n, adjust=False.
     return expr.ewm_mean(alpha=1.0 / n, adjust=False)
 
 
@@ -136,7 +135,6 @@ def compute(df: pl.DataFrame, symbol: str, n: int = 14) -> dict:
     avg_loss = _wilder(loss, n)
     atr = _wilder(tr, n)
     out = df.with_columns(
-        # avg_loss==0 → RSI=100 по определению (корректный предел, не маскировка)
         rsi=pl.when(avg_loss <= 0.0)
         .then(100.0)
         .otherwise(100.0 - 100.0 / (1.0 + avg_gain / avg_loss)),
@@ -163,15 +161,14 @@ def compute(df: pl.DataFrame, symbol: str, n: int = 14) -> dict:
     vol_now = win["volume"].tail(3).mean()
     vol_base = win["volume"].mean()
 
-    # Дегенеративные знаменатели — явная ошибка, не подстановка epsilon
     if close <= 0.0:
         raise ProbeError(f"{symbol}: close={close} ≤ 0")
     if atr_v <= 0.0:
-        raise ProbeError(f"{symbol}: ATR={atr_v} ≤ 0 (плоский рынок) — индикаторы не определены")
+        raise ProbeError(f"{symbol}: ATR={atr_v} ≤ 0")
     if rng <= 0.0:
-        raise ProbeError(f"{symbol}: диапазон 60 баров = {rng} ≤ 0 — позиция не определена")
+        raise ProbeError(f"{symbol}: диапазон 60 баров = {rng} ≤ 0")
     if not vol_base or vol_base <= 0.0:
-        raise ProbeError(f"{symbol}: средний объём={vol_base} ≤ 0 — vol_expansion не определён")
+        raise ProbeError(f"{symbol}: средний объём={vol_base} ≤ 0")
 
     rsi_series = out["rsi"].tail(4).to_list()
     for i, v in enumerate(rsi_series):
@@ -193,8 +190,6 @@ def compute(df: pl.DataFrame, symbol: str, n: int = 14) -> dict:
 
 
 def verdict(m: dict, oi_delta: float) -> tuple[str, str]:
-    """Прозрачная эвристика: pump-start(long) / dump|exhaustion(short) / none.
-    Все входы уже гарантированно конечны (compute/_fin) — никаких `or 0.0`."""
     rsi, slope = m["rsi"], m["rsi_slope"]
     pos, vdev, vol, adx = m["pos_in_range"], m["vwap_dev_atr"], m["vol_expansion_x"], m["adx"]
     oi = oi_delta
@@ -220,7 +215,7 @@ def watchlist_symbols(top: int) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("symbols", nargs="*")
-    ap.add_argument("--watchlist", action="store_true", help="use top of hunt watchlist")
+    ap.add_argument("--watchlist", action="store_true")
     ap.add_argument("--top", type=int, default=5)
     ap.add_argument("--interval", default="1m")
     ap.add_argument("--limit", type=int, default=180)
@@ -230,7 +225,7 @@ def main() -> int:
     symbols = list(args.symbols)
     if args.watchlist or not symbols:
         symbols += watchlist_symbols(args.top)
-    symbols = list(dict.fromkeys(symbols))  # dedupe, keep order
+    symbols = list(dict.fromkeys(symbols))
     if not symbols:
         raise ProbeError("не задано ни одного символа")
 
@@ -251,11 +246,9 @@ def main() -> int:
                 "funding_pct": fund,
                 **m,
             }
-            # Финальный контракт: каждое число конечно — иначе строку не выпускаем.
             print(json.dumps(rec, allow_nan=False))
             sys.stdout.flush()
         except ProbeError as exc:
-            # Громко: stderr + регистрируем провал, НЕ выдаём фейковую строку в stdout.
             print(f"PROBE_FAIL {sym}: {exc}", file=sys.stderr)
             failures.append(sym)
     if failures:

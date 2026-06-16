@@ -7,12 +7,15 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import ccxt.async_support as ccxt
 
 from hunt_core.errors import DEFENSIVE_EXC
-from hunt_core.market.factory import create_async_binance_spot
-from hunt_core.market.symbols import to_binance_symbol
+from hunt_core.market.ccxt_guard import ccxt_method_available, is_ccxt_rate_limited
+from hunt_core.market.ccxt_rest import HuntCcxtRestGate
+from hunt_core.market.factory import close_exchange_async, create_async_binance_spot
+from hunt_core.market.symbols import to_binance_symbol, to_ccxt_symbol
 
 LOG = logging.getLogger("hunt_core.market.spot")
 
@@ -41,24 +44,39 @@ class HuntCcxtSpotCompanion:
             trust_env=trust_env,
             timeout_ms=timeout_ms,
         )
+        self._rest_gate = HuntCcxtRestGate()
         self._cache: dict[str, SpotMetrics] = {}
         self._lock = asyncio.Lock()
         self._markets_loaded = False
 
     async def close(self) -> None:
-        await self._ex.close()
+        await close_exchange_async(self._ex, label="binance_spot")
 
     async def _ensure_markets(self) -> None:
         if not self._markets_loaded:
             await self._ex.load_markets()
             self._markets_loaded = True
 
-    @staticmethod
-    def _spot_ccxt_symbol(symbol: str) -> str:
-        sym = to_binance_symbol(symbol)
-        if sym.endswith("USDT"):
-            return f"{sym[:-4]}/USDT"
-        return sym
+    async def _spot_fetch(
+        self,
+        factory: Any,
+        *,
+        context: str,
+        weight: int,
+        method: str,
+    ) -> Any:
+        if not ccxt_method_available(self._ex, method):
+            raise ccxt.NotSupported(f"{method} unavailable on {self._ex.id}")
+        await self._rest_gate.acquire_binance_weight(weight=weight, label=context)
+        try:
+            result = factory()
+            if asyncio.iscoroutine(result):
+                result = await result
+        except ccxt.BaseError as exc:
+            self._rest_gate.record_error(exc, context=context)
+            raise
+        self._rest_gate.sync_weight_from_exchange(self._ex)
+        return result
 
     @staticmethod
     def _lead_return_1m(ohlcv: list[list]) -> float | None:
@@ -90,12 +108,22 @@ class HuntCcxtSpotCompanion:
             return None
         try:
             await self._ensure_markets()
-            ccxt_sym = self._spot_ccxt_symbol(sym)
-            ticker = await self._ex.fetch_ticker(ccxt_sym)
+            ccxt_sym = to_ccxt_symbol(sym, exchange=self._ex)
+            ticker = await self._spot_fetch(
+                lambda: self._ex.fetch_ticker(ccxt_sym),
+                context=f"spot_ticker:{sym}",
+                weight=1,
+                method="fetchTicker",
+            )
             spot_price = float(ticker.get("last") or 0.0)
             if spot_price <= 0.0:
                 return None
-            ohlcv = await self._ex.fetch_ohlcv(ccxt_sym, "1m", limit=2)
+            ohlcv = await self._spot_fetch(
+                lambda: self._ex.fetch_ohlcv(ccxt_sym, "1m", limit=2),
+                context=f"spot_ohlcv:{sym}",
+                weight=1,
+                method="fetchOHLCV",
+            )
             lead = self._lead_return_1m(ohlcv)
             spread = self._spread_bps(spot_price, futures_mid)
             return SpotMetrics(
@@ -105,6 +133,11 @@ class HuntCcxtSpotCompanion:
                 spot_futures_spread_bps=spread,
                 fetched_at=time.monotonic(),
             )
+        except ccxt.BaseError as exc:
+            if is_ccxt_rate_limited(exc):
+                raise
+            LOG.warning("spot_fetch_failed | symbol=%s error=%s", sym, exc)
+            return None
         except DEFENSIVE_EXC as exc:
             LOG.warning("spot_fetch_failed | symbol=%s error=%s", sym, exc)
             return None

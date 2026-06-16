@@ -1,1 +1,1 @@
-from hunt_core.levels.levels import *  # noqa: F403
+"""SL/TP geometry — import hunt_core.levels.levels directly."""

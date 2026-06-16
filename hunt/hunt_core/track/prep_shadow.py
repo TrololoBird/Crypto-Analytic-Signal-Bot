@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 import polars as pl
 
-from hunt_core.scan._engine_impl import (
+from hunt_core.scan.early import (
     early_cooldown_ok,
     evaluate_early_alert,
     mark_early_sent,
@@ -67,7 +67,7 @@ def _append_event(event: str, *, shadow: dict[str, Any], extra: dict[str, Any] |
         "symbol": shadow.get("symbol"),
         "direction": shadow.get("direction"),
         "tier": shadow.get("tier"),
-        "payload": {**(extra or {}), "paper_pnl_pct": shadow.get("paper_pnl_pct")},
+        "payload": {**(extra or {}), "paper_pnl_pct": shadow.get("paper_pnl_pct", 0.0)},
     }
     PREP_SHADOW_EVENTS.parent.mkdir(parents=True, exist_ok=True)
     with PREP_SHADOW_EVENTS.open("a", encoding="utf-8") as fh:
@@ -267,6 +267,7 @@ def _open_shadow(
         "trough_price": price,
         "mfe_pct": 0.0,
         "mae_pct": 0.0,
+        "paper_pnl_pct": 0.0,
         "confirmed_later": bool(setup.get("confirmed")),
         "triggers": list(setup.get("triggers") or [])[:8],
     }

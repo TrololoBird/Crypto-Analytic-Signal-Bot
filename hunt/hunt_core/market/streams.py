@@ -17,6 +17,10 @@ from hunt_core.market.factory import close_exchange_async, create_pro_secondary_
 from hunt_core.market.client import HuntCcxtClient
 from hunt_core.market.cross import configured_secondary_exchanges
 from hunt_core.market.client import build_liquidation_heatmap, heatmap_to_market_dict
+from hunt_core.market.ccxt_guard import (
+    ccxt_ws_method_available,
+    is_ccxt_rate_limited,
+)
 from hunt_core.market.symbols import (
     from_ccxt_symbol,
     to_binance_symbol,
@@ -196,6 +200,17 @@ class HuntCcxtStreams:
     _pro_specs: list[tuple[str, Any]] = field(default_factory=list)
     _reset_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _last_pro_reset: float = 0.0
+    _reconnect_task: asyncio.Task[None] | None = field(default=None, repr=False)
+
+    def _schedule_pro_reconnect(self) -> None:
+        """Schedule Pro reconnect off the failing watch task (never self-await)."""
+        task = self._reconnect_task
+        if task is not None and not task.done():
+            return
+        self._reconnect_task = asyncio.create_task(
+            self._reconnect_binance_pro(),
+            name="hunt_ccxt_pro_reconnect",
+        )
 
     @property
     def kline_5m_enabled(self) -> bool:
@@ -229,7 +244,7 @@ class HuntCcxtStreams:
 
     @staticmethod
     def _ws_has(ex: Any, method: str) -> bool:
-        return getattr(ex, "has", {}).get(method) is True
+        return ccxt_ws_method_available(ex, method)
 
     @staticmethod
     def _ws_binance_id(ex: Any, raw: str) -> str | None:
@@ -248,6 +263,8 @@ class HuntCcxtStreams:
     def _ws_transport_fatal(exc: Exception) -> bool:
         text = repr(exc)
         name = type(exc).__name__
+        if is_ccxt_rate_limited(exc):
+            return True
         return (
             "1006" in text
             or name in {"NetworkError", "RequestTimeout", "ExchangeNotAvailable"}
@@ -291,8 +308,11 @@ class HuntCcxtStreams:
 
     async def _on_ws_loop_error(self, label: str, exc: Exception) -> None:
         LOG.warning("hunt_ccxt_%s_error | %s", label, repr(exc))
+        if is_ccxt_rate_limited(exc):
+            self.client.rest_gate.record_error(exc, context=f"ws:{label}")
+            return
         if self._ws_transport_fatal(exc):
-            await self._reconnect_binance_pro()
+            self._schedule_pro_reconnect()
             return
         await asyncio.sleep(2.0)
 
@@ -709,6 +729,14 @@ class HuntCcxtStreams:
         if prev_open is not None and latest_open != prev_open and len(ohlcv) >= 2:
             self._on_closed_kline(sym, ohlcv[-2], interval=interval)
         last_open[sym] = latest_open
+        try:
+            from hunt_core.data.frame_cache import get_frame_cache
+
+            ex = self._pro_ex
+            if ex is not None:
+                get_frame_cache().update_ohlcv(sym, interval, ohlcv, exchange=ex)
+        except Exception:
+            LOG.debug("frame_cache_ws_update_skipped", exc_info=True)
 
     async def start(self) -> None:
         if self._tasks:
@@ -996,7 +1024,10 @@ class HuntCcxtStreams:
                 await asyncio.sleep(0.5)
                 continue
             try:
-                book = await ex.watch_order_book_for_symbols(syms)
+                # limit=_TOP_BOOK_DEPTH_LEVELS keeps the REST seed snapshot at
+                # weight 2 (vs 20 at the ccxt default 1000) — see factory option
+                # watchOrderBookLimit. We never use deeper levels anyway.
+                book = await ex.watch_order_book_for_symbols(syms, _TOP_BOOK_DEPTH_LEVELS)
                 self._touch()
                 if not isinstance(book, dict):
                     continue
@@ -1024,6 +1055,12 @@ class HuntCcxtStreams:
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
+                # CCXT Pro order-book checksum mismatch (PORTAL etc.) — reconnect path.
+                exc_name = exc.__class__.__name__
+                if exc_name == "ChecksumError":
+                    LOG.debug("hunt_ccxt_book_checksum_reset | error=%s", exc)
+                    await self._on_ws_loop_error("book_checksum", exc)
+                    continue
                 await self._on_ws_loop_error("book", exc)
 
     async def _watch_bids_asks_mux(self) -> None:
@@ -1120,6 +1157,12 @@ class HuntCcxtStreams:
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
+                if self._funding_ws_permanent(exc):
+                    LOG.info(
+                        "hunt_ccxt_funding_disabled | reason=not_supported error=%s",
+                        exc,
+                    )
+                    return
                 await self._on_ws_loop_error("funding", exc)
 
     @staticmethod
@@ -1232,14 +1275,14 @@ class HuntCcxtStreams:
                 )
                 if usdt_swap <= 0:
                     LOG.warning("secondary_no_usdt_swap_markets | exchange=%s", name)
-                    await ex.close()
+                    await close_exchange_async(ex, label=f"secondary_pro_skip:{name}")
                     continue
                 if not self._ws_has(ex, "watchFundingRates"):
                     LOG.info(
                         "secondary_funding_ws_skipped | exchange=%s reason=watchFundingRates_unsupported",
                         name,
                     )
-                    await ex.close()
+                    await close_exchange_async(ex, label=f"secondary_pro_skip:{name}")
                     continue
                 self._secondary_pro_clients[name] = ex
                 task = asyncio.create_task(

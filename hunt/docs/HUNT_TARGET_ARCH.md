@@ -1,8 +1,7 @@
 # Hunter — target architecture (H-B rewrite)
 
 > **Status:** redesign cutover (2026-06-15).  
-> **Package:** `hunt_core/` (~113 files, ~44k hot LOC budget).  
-> **Product:** [HUNT_PRODUCT_DEFINITION.md](HUNT_PRODUCT_DEFINITION.md)
+> **Package:** `hunt_core/` (~110 files, ~44k hot LOC budget).
 
 Canonical detail: [HUNT_ARCHITECTURE.md](HUNT_ARCHITECTURE.md).
 
@@ -12,7 +11,7 @@ Canonical detail: [HUNT_ARCHITECTURE.md](HUNT_ARCHITECTURE.md).
 ingest → features → scan → regime → gate → deliver → track → outcomes
 ```
 
-Offline: `hunt_core/_dev/check_*` + `check_logic` + CI live-smoke (no separate `hunt_research/` package).
+Offline: `hunt_core/_dev/check_*` + `check_logic` + CI live-smoke.
 
 ## Contracts
 
@@ -31,7 +30,7 @@ Single module: [hunt_core/contract.py](../hunt_core/contract.py)
 | data | `collect.py`, `universe.py`, `completeness.py`, `lake.py`, `scanner.py` |
 | market | `factory.py`, `client.py`, `network.py`, `cross.py`, `streams.py` |
 | features | `prepare_frame.py`, `snapshot.py`, `factors.py`, `structure.py`, `fib.py` |
-| scan | `_engine_impl.py` (facade), `routing.py`, `predump.py`, `prepump.py`, `presqueeze.py`, `early.py`, `scanner.py` |
+| scan | `routing.py`, `predump.py`, `prepump.py`, `presqueeze.py`, `early.py`, `scoring.py`, `scanner.py` |
 | regime | `leg_fsm.py`, `regime.py` |
 | levels | `levels.py` (canonical SL/TP) |
 | confluence | `confluence.py`, `mtf.py` |
@@ -40,7 +39,7 @@ Single module: [hunt_core/contract.py](../hunt_core/contract.py)
 | track | `tracker.py`, `events.py`, `outcomes.py`, `candidates.py` |
 | analysis | `pinned_deep.py`, `deep_signal.py`, `confluence_grid.py` |
 | setups | `catalog.py`, `scan/detectors.py` |
-| domain | `config.py`, `setup_registry.py`, `schemas.py` |
+| domain | `config.py`, `schemas.py`, `policy.py` |
 | dev gates | `_dev/budget`, `check_*`, `check_logic`, `smoke_signals`, `watch_once_smoke` |
 
 ## Entrypoints

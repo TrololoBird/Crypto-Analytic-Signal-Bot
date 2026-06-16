@@ -1592,6 +1592,22 @@ def format_followup_telegram(followup: Any, row: dict[str, Any]) -> str:
             f"<i>Hunt follow-up · не auto-trade</i>"
         )
 
+    if event == "early_breakeven":
+        new_sl = fmt_price(payload.get("stop_loss"))
+        try:
+            mfe_str = f"{float(payload.get('mfe_pct')):.1f}%"
+        except (TypeError, ValueError):
+            mfe_str = "—"
+        phase = str(payload.get("entry_lifecycle_phase") or "—")
+        return (
+            f"🔒 <b>EARLY BE · {sym} {direction}</b>\n"
+            f"MFE <b>{mfe_str}</b> · фаза <code>{phase}</code>\n"
+            f"Стоп → <code>{new_sl}</code> (безубыток+buf)\n"
+            f"⚡ На бирже вручную подтяни SL до этого уровня (Hunt не торгует).\n"
+            f"{entry_ref}\n"
+            f"<i>Hunt follow-up · не auto-trade</i>"
+        )
+
     if event == "entry_triggered":
         return (
             f"🎯 <b>TRIGGERED · {sym} {direction}</b>\n"

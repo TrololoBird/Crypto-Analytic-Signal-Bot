@@ -15,7 +15,13 @@ import ccxt.async_support as ccxt_async
 import ccxt.pro as ccxtpro
 import polars as pl
 
-from hunt_core.market.network import ProxyPool, mask_proxy_url
+from hunt_core import clock
+from hunt_core.market.network import (
+    ProxyPool,
+    filter_working_proxies_ccxt,
+    mask_proxy_url,
+    probe_ccxt_direct,
+)
 from hunt_core.market.symbols import to_ccxt_symbol
 
 if TYPE_CHECKING:
@@ -53,21 +59,40 @@ def build_network_config(
     trust_env: bool = True,
     timeout_ms: int = 45_000,
     default_type: str = FUTURES_DEFAULT_TYPE,
+    pro: bool = False,
 ) -> dict[str, Any]:
     """Base kwargs for ``ccxt.binance`` / ``ccxt.pro.binance`` (public endpoints only)."""
+    options: dict[str, Any] = {
+        "defaultType": default_type,
+        "adjustForTimeDifference": True,
+        # ccxt.pro seeds watch_order_book with a REST /fapi/v1/depth snapshot.
+        # Its default watchOrderBookLimit=1000 costs weight 20 PER SYMBOL and
+        # re-fires for every symbol on each WS reconnect — 135 symbols × 20 =
+        # 2700 weight in seconds → 429 → 418 IP ban. We only consume the top
+        # _TOP_BOOK_DEPTH_LEVELS (20), and limit≤50 costs weight 2, so cap the
+        # snapshot at 20 (10× less weight, identical usable data).
+        "watchOrderBookLimit": 20,
+        **(
+            {"fetchMarkets": ["linear"]}
+            if default_type == FUTURES_DEFAULT_TYPE
+            else {}
+        ),
+    }
+    if pro:
+        options["tradesLimit"] = 500
+        options["OHLCVLimit"] = 200
     config: dict[str, Any] = {
         "enableRateLimit": True,
         "timeout": timeout_ms,
-        "options": {
-            "defaultType": default_type,
-            "adjustForTimeDifference": True,
-            **(
-                {"fetchMarkets": ["linear"]}
-                if default_type == FUTURES_DEFAULT_TYPE
-                else {}
-            ),
-        },
+        "options": options,
     }
+    if pro:
+        # CCXT Pro manual: delta-only updates reduce hot-path work in watch loops.
+        config["newUpdates"] = True
+        config["streaming"] = {
+            "keepAlive": 30_000,
+            "maxPingPongMisses": 2.0,
+        }
     if proxy_url:
         config["aiohttp_proxy"] = proxy_url
         config["proxies"] = {"http": proxy_url, "https": proxy_url}
@@ -104,6 +129,7 @@ def create_pro_binance_future(
             trust_env=trust_env,
             timeout_ms=timeout_ms,
             default_type=FUTURES_DEFAULT_TYPE,
+            pro=True,
         )
     )
 
@@ -156,6 +182,7 @@ def create_pro_secondary_swap(
             trust_env=trust_env,
             timeout_ms=timeout_ms,
             default_type="swap",
+            pro=True,
         )
     )
 
@@ -336,12 +363,12 @@ def _ohlcv_frame_has_incomplete_tail(
     if "close_time" in df.columns:
         last_close = df["close_time"].tail(1).item()
         if isinstance(last_close, datetime):
-            return datetime.now(UTC) <= last_close
+            return clock.now_utc() <= last_close
     timeframe_seconds = interval_to_seconds(timeframe, exchange)
     last_open = df["time"].tail(1).item()
     if not isinstance(last_open, datetime):
         return False
-    return datetime.now(UTC) < last_open + timedelta(seconds=timeframe_seconds)
+    return clock.now_utc() < last_open + timedelta(seconds=timeframe_seconds)
 
 
 def _drop_incomplete_ohlcv_tail(
@@ -353,7 +380,7 @@ def _drop_incomplete_ohlcv_tail(
     if df.is_empty():
         return df
     if "close_time" in df.columns:
-        now = datetime.now(UTC)
+        now = clock.now_utc()
         closed = df.filter(pl.col("close_time") < pl.lit(now))
         if closed.height != df.height:
             return closed
@@ -380,11 +407,31 @@ class HuntMarketPlane:
     streams: "HuntCcxtStreams"
     spot: "HuntCcxtSpotCompanion"
 
+    async def aclose(self) -> None:
+        """Release CCXT REST + Pro WS resources (probes, one-shot scripts)."""
+        try:
+            await self.streams.stop()
+        except Exception:
+            pass
+        try:
+            await self.client.close()
+        except Exception:
+            pass
+        try:
+            await self.spot.close()
+        except Exception:
+            pass
+
+    async def close(self) -> None:
+        """Alias for ``aclose()`` — matches probe/smoke call sites."""
+        await self.aclose()
+
 
 async def _create_plane_once(
     *,
     proxy_url: str | None,
     trust_env: bool,
+    proxy_pool: ProxyPool | None = None,
 ) -> HuntMarketPlane:
     from hunt_core.market.client import HuntCcxtClient
     from hunt_core.market.spot import HuntCcxtSpotCompanion
@@ -395,14 +442,17 @@ async def _create_plane_once(
         trust_env=trust_env,
         timeout_ms=_PROBE_TIMEOUT_MS,
     )
+    client.attach_proxy_pool(proxy_pool)
     try:
         await client.load_markets()
     except Exception:
         await client.close()
         raise
+    streams = HuntCcxtStreams(client=client)
+    client.set_streams_reconnect(streams._reconnect_binance_pro)
     return HuntMarketPlane(
         client=client,
-        streams=HuntCcxtStreams(client=client),
+        streams=streams,
         spot=HuntCcxtSpotCompanion(
             proxy_url=proxy_url,
             trust_env=trust_env,
@@ -429,7 +479,7 @@ async def _attempt_with_pool(
     trust_env: bool,
 ) -> HuntMarketPlane:
     if pool is None:
-        return await _create_plane_once(proxy_url=None, trust_env=trust_env)
+        return await _create_plane_once(proxy_url=None, trust_env=trust_env, proxy_pool=None)
 
     last_exc: BaseException | None = None
     tried: set[str] = set()
@@ -441,7 +491,11 @@ async def _attempt_with_pool(
             break
         tried.add(proxy_url)
         try:
-            plane = await _create_plane_once(proxy_url=proxy_url, trust_env=trust_env)
+            plane = await _create_plane_once(
+                proxy_url=proxy_url,
+                trust_env=trust_env,
+                proxy_pool=pool,
+            )
             pool.mark_success(proxy_url)
             LOG.info("hunt_market_plane_ready | proxy=%s", mask_proxy_url(proxy_url))
             return plane
@@ -466,7 +520,7 @@ async def create_hunt_market_plane(
     proxy_url: str | None = None,
     trust_env: bool = True,
 ) -> HuntMarketPlane:
-    return await _create_plane_once(proxy_url=proxy_url, trust_env=trust_env)
+    return await _create_plane_once(proxy_url=proxy_url, trust_env=trust_env, proxy_pool=None)
 
 
 async def create_hunt_market_plane_from_settings(settings: Any) -> HuntMarketPlane:
@@ -477,18 +531,36 @@ async def create_hunt_market_plane_from_settings(settings: Any) -> HuntMarketPla
         urls = list(effective())
 
     config_path = Path(getattr(settings, "config_path", "config.toml"))
+    if urls:
+        urls = await filter_working_proxies_ccxt(urls)
+
     pool = ProxyPool.from_urls(urls, cooldown_seconds=120.0) if urls else None
 
+    # Hold the failure outside the except block: Python 3 unbinds the `as`
+    # target once the block exits, so a later `raise first_exc` would itself
+    # raise NameError and mask the real cause.
+    first_exc: Exception
     try:
         return await _attempt_with_pool(pool, trust_env=False)
-    except Exception as first_exc:
+    except Exception as exc:
+        first_exc = exc
         LOG.warning(
             "hunt_market_plane_initial_fail | error=%s — rediscovering proxies",
-            type(first_exc).__name__,
+            type(exc).__name__,
         )
 
     fresh = await _discover_and_refresh_proxies(config_path)
     if not fresh:
+        if await probe_ccxt_direct():
+            LOG.info("hunt_market_plane_direct | reason=proxy_pool_exhausted_ccxt_direct_ok")
+            return await _create_plane_once(proxy_url=None, trust_env=False, proxy_pool=pool)
+        raise first_exc
+
+    fresh = await filter_working_proxies_ccxt(fresh)
+    if not fresh:
+        if await probe_ccxt_direct():
+            LOG.info("hunt_market_plane_direct | reason=no_ccxt_proxy_ccxt_direct_ok")
+            return await _create_plane_once(proxy_url=None, trust_env=False, proxy_pool=pool)
         raise first_exc
 
     fresh_pool = ProxyPool.from_urls(fresh, cooldown_seconds=120.0)

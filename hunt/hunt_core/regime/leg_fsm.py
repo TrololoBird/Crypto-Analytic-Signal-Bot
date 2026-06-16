@@ -441,7 +441,11 @@ def assess_hunt_lifecycle(
     # rally_from_24h_low — NOT "bounce after dump". On BEAT +400% this was +33% while
     # price was still in a parabolic leg, mislabeling post_dump_bounce + long bias.
     rally_from_24h_low = max(0.0, (price - sess_lo) / sess_lo) * 100.0 if sess_lo > 0 else 0.0
-    bounce_from_low = rally_from_24h_low  # telemetry alias
+    # Post-dump bounce from impulse leg low — NOT 24h session rally (BEAT +400% lesson).
+    if hunt_low > 0 and fall_from_high >= pre_dump_max_fall:
+        bounce_from_low = max(0.0, (price - hunt_low) / hunt_low) * 100.0
+    else:
+        bounce_from_low = 0.0
     leg_gain_pct = (
         max(0.0, (hunt_high - hunt_low) / hunt_low) * 100.0 if hunt_low > 0 else 0.0
     )
@@ -550,7 +554,7 @@ def assess_hunt_lifecycle(
     # COAI/RIF: fall from hunt_high dominates pos_in_range on parabolic memecoins.
     bounce_recovery_candidate = (
         meaningful_dump
-        and rally_from_24h_low >= bounce_min
+        and bounce_from_low >= bounce_min
         and pos >= post_dump_pos
         and (taker_buy or bull_cascade)
         and fall_from_high < 18.0
@@ -672,7 +676,7 @@ def assess_hunt_lifecycle(
             )
     elif (
         meaningful_dump
-        and rally_from_24h_low >= bounce_min
+        and bounce_from_low >= bounce_min
         and pos >= post_dump_pos
         and (
             fall_from_high < violent_dump_pct
@@ -725,13 +729,13 @@ def assess_hunt_lifecycle(
     elif (
         meaningful_dump
         and not mega_parabolic_leg
-        and rally_from_24h_low >= 15.0
+        and bounce_from_low >= 15.0
         and fall_from_high >= 10.0
         and fall_from_high < violent_dump_pct
     ):
         phase = HuntPhase.POST_DUMP_BOUNCE
         reasons.append(
-            f"deep_post_dump_bounce_fall{fall_from_high:.1f}%_rally{rally_from_24h_low:.1f}%"
+            f"deep_post_dump_bounce_fall{fall_from_high:.1f}%_bounce{bounce_from_low:.1f}%"
         )
     elif fall_from_high >= 2.0 and fall_from_high < 10.0 and pos >= 0.55 and bear_cascade:
         phase = HuntPhase.DISTRIBUTION
@@ -1141,7 +1145,7 @@ def capped_setup_fuel(
     lifecycle: dict[str, Any] | None = None,
 ) -> float:
     """Fuel after cluster/prokol math and lifecycle invalidate_short cap."""
-    from hunt_core.scan._engine_impl import compute_setup_fuel
+    from hunt_core.scan._confirm_shared import compute_setup_fuel
 
     fuel = compute_setup_fuel(setup, direction=direction, symbol=symbol, tf=tf)
     if (

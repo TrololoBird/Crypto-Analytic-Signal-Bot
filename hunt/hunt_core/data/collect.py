@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 
+import ccxt
 import polars as pl
+
+if TYPE_CHECKING:
+    from hunt_core.market.client import HuntCcxtClient
 
 LOG = logging.getLogger("hunt_core.data.collect")
 
@@ -14,6 +19,7 @@ from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.data_readiness import kline_fetch_limit
 from hunt_core.errors import DEFENSIVE_EXC
 from hunt_core.market import HuntCcxtClient, HuntCcxtStreams
+from hunt_core.market.ccxt_guard import is_ccxt_rate_limited
 
 def kline_limits(minimums: dict[str, int], symbol: str = "") -> dict[str, int]:
     """Hunt watch pulls deeper history than default bot warmup (max 1500 bars)."""
@@ -27,6 +33,14 @@ def kline_limits(minimums: dict[str, int], symbol: str = "") -> dict[str, int]:
     }
     if symbol.upper() in PINNED_SYMBOLS:
         limits["1w"] = 52  # ~1 year of weekly bars for MTF structure
+    return limits
+
+
+def probe_kline_limits(minimums: dict[str, int], symbol: str = "") -> dict[str, int]:
+    """Shallow kline budget for dev delivery probes — meets minimums, no 1w."""
+    limits = kline_limits(minimums, symbol)
+    limits["1m"] = min(limits["1m"], max(360, int(minimums.get("5m", 200)) * 2))
+    limits.pop("1w", None)
     return limits
 
 
@@ -54,13 +68,47 @@ def _kline_integrity_reject(
 
 
 
-async def safe_fetch(coro: Any, *, context: str = "") -> Any:
+async def safe_fetch(
+    target: Any,
+    *,
+    context: str = "",
+    client: HuntCcxtClient | None = None,
+) -> Any:
+    """Await REST via callable factory; 418/429 pause is handled inside client._rest_call."""
+    is_factory = callable(target) and not inspect.iscoroutine(target)
+
+    async def _invoke() -> Any:
+        if is_factory:
+            result = target()
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
+        return await target
+
     try:
-        return await coro
+        if client is not None:
+            await client.await_rate_limit_pause()
+        return await _invoke()
+    except ccxt.BaseError as exc:
+        if client is not None:
+            client.rest_gate.record_error(exc, context=context or "safe_fetch")
+        if is_ccxt_rate_limited(exc):
+            LOG.warning(
+                "safe_fetch_ccxt_rate_limited | context=%s error=%s",
+                context or type(target).__name__,
+                exc,
+            )
+            raise
+        LOG.warning(
+            "safe_fetch_ccxt_failed | context=%s error=%s",
+            context or type(target).__name__,
+            exc,
+        )
+        return None
     except DEFENSIVE_EXC as exc:
         LOG.warning(
             "safe_fetch_failed | context=%s error=%s",
-            context or type(coro).__name__,
+            context or type(target).__name__,
             exc,
         )
         return None
@@ -388,7 +436,7 @@ _fetch_rest_pack = fetch_rest_pack
 
 
 
-SnapshotTier = Literal["full", "fast"]
+SnapshotTier = Literal["full", "fast", "hot"]
 
 PREMIUM_BATCH_TTL_S = 30.0
 FUNDING_BATCH_TTL_S = 30.0
@@ -397,7 +445,7 @@ BTC_1H_TTL_S = 900.0
 
 _FAST_FRESH_KLINES = frozenset({"1m", "5m"})
 _FAST_CACHE_KLINES = ("15m", "1h", "4h", "1d")
-FULL_KLINE_ORDER = ("1m", "5m", "15m", "1h", "4h", "1d")
+FULL_KLINE_ORDER = ("1m", "5m", "15m", "1h", "4h", "1d", "1w")
 
 
 def _fetch_error_label(exc: BaseException) -> str:
@@ -419,21 +467,18 @@ async def resolve_kline_map(
     kline_map: dict[str, Any] = {}
     fetch_errors: dict[str, str] = {}
     if tier == "full":
-        tasks = {}
         for name in FULL_KLINE_ORDER:
             if name not in limits:
                 continue
-            if name in _FAST_FRESH_KLINES:
-                tasks[name] = client.fetch_klines(symbol, name, limit=limits[name])
-            else:
-                tasks[name] = client.fetch_klines_cached(symbol, name, limit=limits[name])
-        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-        for name, res in zip(tasks.keys(), results, strict=True):
-            if isinstance(res, BaseException):
-                kline_map[name] = None
-                fetch_errors[name] = _fetch_error_label(res)
-            else:
-                kline_map[name] = res
+            def factory(n: str = name, fresh: bool = name in _FAST_FRESH_KLINES) -> Any:
+                if fresh:
+                    return client.fetch_klines(symbol, n, limit=limits[n])
+                return client.fetch_klines_cached(symbol, n, limit=limits[n])
+
+            res = await safe_fetch(factory, context=f"klines.{name}", client=client)
+            kline_map[name] = res
+            if res is None:
+                fetch_errors[name] = "fetch_failed"
         return kline_map, fetch_errors
 
     for name in _FAST_FRESH_KLINES:
@@ -441,8 +486,9 @@ async def resolve_kline_map(
             continue
         # Fast tier bypasses kline cache (5m TTL up to 300s) — delivery must be fresh.
         res = await safe_fetch(
-            client.fetch_klines(symbol, name, limit=limits[name]),
+            lambda n=name: client.fetch_klines(symbol, n, limit=limits[n]),
             context=f"klines.{name}",
+            client=client,
         )
         kline_map[name] = res
         if res is None:
@@ -456,8 +502,9 @@ async def resolve_kline_map(
             kline_map[name] = cached
             continue
         res = await safe_fetch(
-            client.fetch_klines_cached(symbol, name, limit=limits[name]),
+            lambda n=name: client.fetch_klines_cached(symbol, n, limit=limits[n]),
             context=f"klines.{name}",
+            client=client,
         )
         kline_map[name] = res
         if res is None:
@@ -579,17 +626,17 @@ async def refresh_tick_batch_cache(
     """Refresh shared batch data — fast tier reuses fresh batch snapshots."""
     now = time.monotonic()
     if tier == "full" or not cache._fresh(cache.premium_at, PREMIUM_BATCH_TTL_S):
-        cache.premium_all = await safe_fetch(client.fetch_premium_index_all()) or {}
+        cache.premium_all = await safe_fetch(client.fetch_premium_index_all, context="premium_index_all", client=client) or {}
         cache.premium_at = now
     if tier == "full" or not cache._fresh(cache.funding_at, FUNDING_BATCH_TTL_S):
-        cache.funding_info_all = await safe_fetch(client.fetch_funding_info_all()) or {}
+        cache.funding_info_all = await safe_fetch(client.fetch_funding_info_all, context="funding_info_all", client=client) or {}
         cache.funding_at = now
     if not cache._fresh(cache.exchange_at, EXCHANGE_INFO_TTL_S):
-        exchange_list = await safe_fetch(client.fetch_exchange_symbols()) or []
+        exchange_list = await safe_fetch(client.fetch_exchange_symbols, context="exchange_symbols", client=client) or []
         cache.exchange_by_sym = {r.symbol: r for r in exchange_list}
         cache.exchange_at = now
     if need_btc and (tier == "full" or not cache._fresh(cache.btc_at, BTC_1H_TTL_S)):
-        btc_df = await safe_fetch(client.fetch_klines_cached("BTCUSDT", "1h", limit=500))
+        btc_df = await safe_fetch(lambda: client.fetch_klines_cached("BTCUSDT", "1h", limit=500), context="btc_1h", client=client)
         if btc_df is not None and not btc_df.is_empty():
             cache.btc_work_1h = prepare_frame(btc_df)
         cache.btc_at = now
@@ -603,6 +650,7 @@ __all__ = [
     "TickBatchCache",
     "safe_fetch",
     "kline_limits",
+    "probe_kline_limits",
     "fetch_rest_pack",
     "_fetch_rest_pack",
     "resolve_kline_map",

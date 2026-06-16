@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     from hunt_core.domain.schemas import PreparedSymbol, UniverseSymbol
 
 
+from hunt_core.contract import MARKET_FIELD_CCXT_SOURCE
+
 REQUIRED_DERIVATIVES_KEYS: tuple[str, ...] = (
     "oi_change_pct",
     "ls_ratio",
@@ -149,6 +151,7 @@ def assess_symbol_data_readiness(
     settings: BotSettings,
     *,
     universe_item: UniverseSymbol | None = None,
+    snapshot_tier: str | None = None,
 ) -> DataReadinessResult:
     """Return whether required frames and live enrichments are fresh enough."""
     filters = settings.filters
@@ -179,7 +182,10 @@ def assess_symbol_data_readiness(
         return DataReadinessResult(
             ready=False,
             reason="data.mark_price_missing",
-            details=details,
+            details={
+                **details,
+                "ccxt_source": MARKET_FIELD_CCXT_SOURCE.get("mark_price"),
+            },
         )
 
     spread_bps = getattr(prepared, "spread_bps", None)
@@ -193,6 +199,7 @@ def assess_symbol_data_readiness(
             )
 
     strict = bool(getattr(settings.runtime, "strict_data_quality", True))
+    is_fast_tier = snapshot_tier == "fast"
     if strict and not radar_promoted:
         book_missing = [
             column
@@ -200,23 +207,42 @@ def assess_symbol_data_readiness(
             if _last_column_finite(prepared.work_15m, column) is None
         ]
         if book_missing:
+            ccxt_sources = {
+                col: MARKET_FIELD_CCXT_SOURCE.get(col, "see hunt/docs/CCXT.md")
+                for col in book_missing
+            }
             return DataReadinessResult(
                 ready=False,
                 reason="data.orderbook_columns_missing",
-                details={**details, "missing_book_columns": book_missing},
+                details={
+                    **details,
+                    "missing_book_columns": book_missing,
+                    "ccxt_sources": ccxt_sources,
+                },
             )
 
-        missing_live = [
-            field_name
-            for field_name in REQUIRED_PREPARED_LIVE_FIELDS
-            if getattr(prepared, field_name, None) is None
-        ]
-        if missing_live:
-            return DataReadinessResult(
-                ready=False,
-                reason="data.derivatives_context_missing",
-                details={**details, "missing_live_fields": missing_live},
-            )
+        if not is_fast_tier:
+            missing_live = [
+                field_name
+                for field_name in REQUIRED_PREPARED_LIVE_FIELDS
+                if getattr(prepared, field_name, None) is None
+            ]
+            if missing_live:
+                ccxt_sources = {
+                    f: MARKET_FIELD_CCXT_SOURCE.get(f, "see hunt/docs/CCXT.md")
+                    for f in missing_live
+                }
+                return DataReadinessResult(
+                    ready=False,
+                    reason="data.derivatives_context_missing",
+                    details={
+                        **details,
+                        "missing_live_fields": missing_live,
+                        "ccxt_sources": ccxt_sources,
+                    },
+                )
+        else:
+            details["fast_tier_derivatives_skipped"] = True
     elif strict and radar_promoted:
         details["strict_derivatives_skipped"] = True
 

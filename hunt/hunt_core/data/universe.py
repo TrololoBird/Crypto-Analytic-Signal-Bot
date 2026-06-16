@@ -21,6 +21,8 @@ DEFAULT_MODES: dict[str, WatchMode] = {
     "XAGUSDT": "both",
 }
 MAX_DYNAMIC_SYMBOLS = 12
+# Debounced prescan outliers merged per tick (on top of resolve_watch_universe cap).
+MAX_PRESCAN_MERGE = 8
 
 
 def _bias_to_mode(bias: str) -> WatchMode:
@@ -138,6 +140,7 @@ __all__ = [
     "DEFAULT_MODES",
     "DEFAULT_SYMBOLS",
     "MAX_DYNAMIC_SYMBOLS",
+    "MAX_PRESCAN_MERGE",
     "PINNED_SYMBOLS",
     "WatchMode",
     "effective_watch_mode",
@@ -436,29 +439,7 @@ def register_signal_notify(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-# --- merged from data/sources.py ---
-
-from abc import ABC, abstractmethod
-
-
-class SourceAdapter(ABC):
-    @abstractmethod
-    async def fetch_tick_features(self, symbol: str) -> dict[str, Any]:
-        raise NotImplementedError
-
-
-class BinanceFuturesAdapter(SourceAdapter):
-    async def fetch_tick_features(self, symbol: str) -> dict[str, Any]:
-        return {"symbol": symbol, "source": "binance_futures"}
-
-
-class SpotCompanionAdapter(SourceAdapter):
-    async def fetch_tick_features(self, symbol: str) -> dict[str, Any]:
-        raise NotImplementedError(
-            "SpotCompanionAdapter is not wired in hunt_core; use HuntCcxtSpotCompanion "
-            "from hunt_core.market instead."
-        )
-
+# Market I/O: HuntCcxtClient / HuntCcxtSpotCompanion (see hunt/docs/CCXT.md).
 
 class OfflineEnricher:
     """Pass-through enricher for offline replay — no synthetic fields."""

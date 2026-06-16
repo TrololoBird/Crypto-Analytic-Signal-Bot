@@ -27,7 +27,7 @@ hunt/
 ├── hunt_core/              # production hot path (~88 .py)
 │   ├── __main__.py         # python -m hunt_core watch
 │   ├── contract.py         # trade plan + feature payload + delivery contract
-│   ├── market/             # factory, client, network, cross, streams (9 files)
+│   ├── market/             # factory, client, streams, cross, symbols, … (13 files — CCXT.md)
 │   ├── data/               # collect, universe, lake, completeness (5 files)
 │   ├── features/           # prepare, prepare_frame, prepare_columns, levels (~14 files)
 │   ├── regime/             # leg_fsm (canonical lifecycle), regime.py
@@ -39,14 +39,14 @@ hunt/
 │   ├── track/              # tracker, events, outcomes, …
 │   ├── analysis/           # pinned_deep, deep_signal, adx_thresholds, trend_engine
 │   ├── setups/             # detectors, catalog
-│   ├── runtime/            # cycle/_impl, settings, telegram_commands
-│   ├── domain/             # config, setup_registry, schemas, policy
+│   ├── runtime/            # cycle/_impl, state, telegram_commands
+│   ├── domain/             # config, schemas, policy
 │   └── _dev/               # budget, check_*, smoke_signals, watch_once_smoke
 ├── docs/
 └── data/baseline/          # smoke regression snapshots
 ```
 
-Wave 3C scanner split **done** (2026-06-15): `_engine_impl.py` is a 17 LOC compat facade; logic in `predump`/`prepump`/`early`/`_confirm_shared`/`predump_dump_hunt`; `presqueeze` owns squeeze detection.
+Wave 3C scanner split **done** (2026-06-15): logic in `predump`/`prepump`/`early`/`_confirm_shared`/`predump_dump_hunt`/`scoring`; `presqueeze` owns squeeze detection.
 
 ## Hot path (one watch tick)
 
@@ -78,7 +78,7 @@ python -m hunt_core._dev.smoke_signals --baseline data/baseline/hunt_baseline.js
 | File | LOC | Policy |
 |------|-----|--------|
 | `runtime/cycle/_impl.py` | ~2500 | watch loop |
-| `scan/_engine_impl.py` | ~17 | compat facade (wave 3C done) |
+| `scan/scoring.py` | ~600 | dump/long scoring wrappers |
 | `scan/predump.py` + `early.py` | ~1300 | dump confirm + adaptive |
 | `scan/presqueeze.py` | ~50 | squeeze detection (canonical) |
 | `regime/leg_fsm.py` | ~1600 | lifecycle FSM |
@@ -91,12 +91,33 @@ Merge small modules into fewer files; never split these.
 
 ## Library-first
 
-`polars` + `polars_ta` + `polars-ols` + `polars-ds` + `polars-trading` + `bottleneck` + `ccxt`. See [LIBRARY_STACK.md](LIBRARY_STACK.md).
+`polars` + `polars_ta` + `polars-ols` + `polars-ds` + `polars-trading` + `bottleneck` + `ccxt` (100% market plane — [CCXT.md](CCXT.md)). See [LIBRARY_STACK.md](LIBRARY_STACK.md).
+
+## Market plane (CCXT)
+
+```
+hunt_core/market/
+├── factory.py      # create_hunt_market_plane(), build_network_config(pro=True)
+├── client.py       # HuntCcxtClient — REST + lazy Pro
+├── streams.py      # HuntCcxtStreams — watch* multiplex
+├── ccxt_rest.py    # HuntCcxtRestGate — invoke / invoke_fapi / invoke_secondary
+├── ccxt_guard.py   # ccxt_method_available(), ccxt_ws_method_available()
+├── network.py      # CCXT proxy probe + ProxyPool
+├── spot.py         # HuntCcxtSpotCompanion
+├── cross.py        # multi-venue REST + secondary Pro funding WS
+├── symbols.py      # exchange.market() resolution
+├── live_price.py   # price from streams snapshot
+├── rate_limit.py   # sliding weight windows
+└── capacity.py     # HuntLoadPlanner per-tick budget
+```
+
+**Funding WS:** Binance primary = `watchMarkPrices` only; `watchFundingRates` on secondaries when `HUNT_CROSS_WS=1` (default on via `load_cross_exchange_config`).
 
 ## Forbidden
 
 - `from engine.*` / `from bot.*`
-- `hunt/scripts/`
+- Raw `fapi.binance.com` HTTP in `hunt_core/` (use CCXT only — `python -m hunt_core._dev.check_ccxt`)
+- `hunt/scripts/` on hot path
 - Auto-trading, private Binance auth
 - Indicator fallback chains on hot path
 

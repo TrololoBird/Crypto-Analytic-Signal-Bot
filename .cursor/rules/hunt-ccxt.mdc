@@ -1,0 +1,17 @@
+---
+description: CCXT skill mandatory for Hunter market plane (hunt/)
+globs: hunt/**/*
+alwaysApply: false
+---
+
+# Hunter — CCXT mandatory
+
+When editing anything under `hunt/`, especially `hunt_core/market/`:
+
+1. **Read skill `ccxt-python`** (`.cursor/skills/ccxt-python/SKILL.md` or `/ccxt-python`)
+2. **Read skill `hunt-ccxt`** (`.cursor/skills/hunt-ccxt/SKILL.md`)
+3. **Read canon** `hunt/docs/CCXT.md`
+
+Do not invent raw Binance FAPI HTTP in `hunt/hunt_core/market/` — use CCXT unified + implicit API per `hunt/docs/CCXT.md` (100% CCXT market plane).
+
+Public data only. `binance` + `defaultType: future`. `enableRateLimit: True`. Gate REST with `ccxt_method_available()`; Pro WS with `ccxt_ws_method_available()` from `ccxt_guard.py`. CI: `check_ccxt`.

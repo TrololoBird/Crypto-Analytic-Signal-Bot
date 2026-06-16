@@ -298,11 +298,15 @@ def ema_series(df: pl.DataFrame, period: int) -> pl.Series:
 
 
 def rsi_series(df: pl.DataFrame, period: int = 14) -> pl.Series:
+    # clip to the oscillator's mathematical bound: a 1.0 backend value → 100.0 can
+    # carry float noise (100.0000001) that otherwise trips the [0,100] range-defect
+    # and rejects the whole symbol. Matches adx_from_polars_ta / mfi_from_polars_ta.
     return _series_from_expr(
         df,
         plta.RSI(pl.col("close"), timeperiod=int(period)),
         name=f"rsi{period}",
         percent=True,
+        clip=(0.0, 100.0),
     )
 
 
@@ -366,8 +370,11 @@ def stochastic_series(
         ("fastk", "stoch_k14"),
         ("fastd", "stoch_d14"),
     )
-    k = _clean(_maybe_percent(k_raw, name="stoch_k14"), fill=50.0)
-    d = _clean(_maybe_percent(d_raw, name="stoch_d14"), fill=50.0)
+    # clip to [0,100]: a 1.0 backend extreme → 100.0 can carry float noise that
+    # trips the stoch_k14/stoch_d14 range-defect and rejects the whole symbol
+    # (notably deep oversold/overbought = prime capitulation/exhaustion setups).
+    k = _clean(_maybe_percent(k_raw, name="stoch_k14"), fill=50.0).clip(0.0, 100.0)
+    d = _clean(_maybe_percent(d_raw, name="stoch_d14"), fill=50.0).clip(0.0, 100.0)
     return k, d
 
 

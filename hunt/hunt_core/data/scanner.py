@@ -350,7 +350,7 @@ class PrescanDebounceQueue:
 from dataclasses import dataclass
 from typing import Literal
 
-from hunt_core.scan._engine_impl import (
+from hunt_core.scan.early import (
     AdaptiveStore,
     adaptive_extreme_pct,
     adaptive_hot_pct,
@@ -367,7 +367,7 @@ import structlog
 
 from hunt_core.domain.config import load_settings
 from hunt_core.market import HuntCcxtClient
-from hunt_core.scan._engine_impl import (
+from hunt_core.scan.early import (
     load_adaptive_store,
     save_adaptive_store,
     update_change_24h,
@@ -691,10 +691,15 @@ def _enrich_ticker_rows(raw_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 async def run_scan(
-    *, limit: int = 30, min_score: float = HUNT_SCORE_WATCH_THRESHOLD
+    *,
+    limit: int = 30,
+    min_score: float = HUNT_SCORE_WATCH_THRESHOLD,
+    client: HuntCcxtClient | None = None,
 ) -> dict[str, Any]:
     settings = load_settings()
-    client = HuntCcxtClient.from_settings(settings)
+    owned_client = client is None
+    if client is None:
+        client = HuntCcxtClient.from_settings(settings)
     await client.load_markets()
     try:
         tickers = _enrich_ticker_rows(await client.fetch_ticker_24h())
@@ -743,7 +748,9 @@ async def run_scan(
             or ("dump_in_progress" in c.flags and c.hunt_score >= 32.0)
         ]
         priority = [c for c in candidates if c.hunt_score >= HUNT_SCORE_PRIORITY_THRESHOLD]
-        pinned = {str(s).upper() for s in settings.universe.pinned_symbols}
+        from hunt_core.data.universe import PINNED_SYMBOLS
+
+        pinned = {str(s).upper() for s in PINNED_SYMBOLS}
         summary: dict[str, Any] = {
             "ts": datetime.now(UTC).isoformat(),
             "ticker_count": len(tickers),
@@ -796,4 +803,5 @@ async def run_scan(
             )
         return summary
     finally:
-        await client.close()
+        if owned_client:
+            await client.close()

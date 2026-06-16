@@ -67,6 +67,25 @@ def main() -> int:
     if MIN_RR < 1.5:
         issues.append(f"levels MIN_RR expected >=1.5 got {MIN_RR}")
 
+    from hunt_core.deliver.dispatch import _contract_issues_for_setup, _repair_setup_rr_for_contract
+
+    repair_setup = {
+        "confirmed": True,
+        "entry_zone": [0.98, 1.0],
+        "stop_loss": 1.02,
+        "tp1": 0.99,
+        "tp2": 0.97,
+        "impulse_low": 0.95,
+    }
+    _repair_setup_rr_for_contract(repair_setup, direction="short", min_rr=1.15)
+    repair_issues = _contract_issues_for_setup(
+        direction="short",
+        setup=repair_setup,
+        min_risk_reward=1.15,
+    )
+    if repair_issues:
+        issues.append(f"rr repair expected pass got {repair_issues}")
+
     if Regime.RANGE.value != "range":
         issues.append("regime enum drift")
 

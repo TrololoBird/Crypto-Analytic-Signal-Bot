@@ -12,14 +12,18 @@ from typing import Any
 import ccxt.async_support as ccxt
 import polars as pl
 
+from hunt_core import clock
 from hunt_core.errors import finite_float_or_none
 from hunt_core.domain.schemas import AggTradeSnapshot, SymbolMeta
+from hunt_core.market.ccxt_guard import ccxt_method_available, is_ccxt_rate_limited
+from hunt_core.market.ccxt_rest import HuntCcxtRestGate
 from hunt_core.market.factory import (
     close_exchange_async,
     create_async_binance_future,
     create_async_secondary_swap,
     create_pro_binance_future,
 )
+from hunt_core.market.network import ProxyPool, mask_proxy_url
 from hunt_core.market.factory import ccxt_ohlcv_to_frame, finalize_kline_frame
 from hunt_core.market.symbols import (
     is_linear_usdt_swap_market,
@@ -67,7 +71,7 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 
 class HuntCcxtClient:
-    """Drop-in for ``BinanceFuturesMarketData`` across hunt runtime/scripts."""
+    """CCXT REST + lazy Pro client for hunt runtime and offline scripts."""
 
     def __init__(
         self,
@@ -119,6 +123,153 @@ class HuntCcxtClient:
         self._secondary_exchange_ids: dict[str, str] = {
             name: name for name in configured_secondary_exchanges()
         }
+        self._proxy_pool: ProxyPool | None = None
+        self._rest_gate = HuntCcxtRestGate()
+        self._proxy_failover_lock = asyncio.Lock()
+        self._streams_reconnect: Any | None = None
+
+    def attach_proxy_pool(self, pool: ProxyPool | None) -> None:
+        self._proxy_pool = pool
+
+    def set_streams_reconnect(self, callback: Any | None) -> None:
+        """Optional async callback after proxy swap at cycle boundary."""
+        self._streams_reconnect = callback
+
+    @property
+    def rest_gate(self) -> HuntCcxtRestGate:
+        return self._rest_gate
+
+    @property
+    def ccxt_guard(self) -> Any:
+        return self._rest_gate.guard
+
+    async def await_rate_limit_pause(self, *, cap_s: float = 120.0) -> float:
+        return await self._rest_gate.await_pause(cap_s=cap_s)
+
+    async def _rest_call(
+        self,
+        factory: Any,
+        *,
+        context: str,
+        weight: int = 5,
+    ) -> Any:
+        return await self._rest_gate.invoke(
+            self._ex,
+            factory,
+            context=context,
+            weight=weight,
+        )
+
+    async def _direct_binance_fetch(
+        self,
+        factory: Any,
+        *,
+        context: str,
+        weight: int = 5,
+        method: str | None = None,
+    ) -> Any:
+        """Gated direct ``_ex.fetch_*`` with CCXT error recording."""
+        if method and not self._ccxt_has(self._ex, method):
+            raise ccxt.NotSupported(f"{method} unavailable on {self._ex.id}")
+        await self._rest_gate.acquire_binance_weight(weight=weight, label=context)
+        try:
+            result = factory()
+            if asyncio.iscoroutine(result):
+                result = await result
+        except ccxt.BaseError as exc:
+            self._rest_gate.record_error(exc, context=context)
+            raise
+        self._rest_gate.sync_weight_from_exchange(self._ex)
+        return result
+
+    async def _fapi_call(
+        self,
+        factory: Any,
+        *,
+        context: str,
+    ) -> Any:
+        return await self._rest_gate.invoke_fapi(
+            self._ex,
+            factory,
+            context=context,
+        )
+
+    async def apply_pending_proxy_at_cycle(self) -> bool:
+        """Rotate proxy only between ticks — never during concurrent symbol gather."""
+        if not self._rest_gate.consume_proxy_failover_flag():
+            return False
+        async with self._proxy_failover_lock:
+            pool = self._proxy_pool
+            if pool is None or not pool.has_alternatives():
+                LOG.warning("hunt_proxy_failover_deferred | reason=no_pool")
+                self._rest_gate.schedule_proxy_failover()
+                return False
+            attempts = 0
+            while attempts < len(pool.urls):
+                attempts += 1
+                nxt = pool.rotate_after_failure(
+                    self._proxy_url or pool.current(),
+                    "ip_ban_cycle_boundary",
+                )
+                if not nxt:
+                    break
+                try:
+                    await self._apply_proxy(nxt)
+                    self._rest_gate.guard.telemetry.pause_until_mono = 0.0
+                    if self._streams_reconnect is not None:
+                        asyncio.create_task(
+                            self._run_streams_reconnect(),
+                            name="hunt_streams_reconnect",
+                        )
+                    return True
+                except Exception as exc:  # noqa: BLE001
+                    LOG.warning(
+                        "hunt_ccxt_proxy_apply_skip | proxy=%s error=%s",
+                        mask_proxy_url(nxt),
+                        exc,
+                    )
+            self._rest_gate.schedule_proxy_failover()
+        return False
+
+    async def _run_streams_reconnect(self) -> None:
+        if self._streams_reconnect is None:
+            return
+        try:
+            result = self._streams_reconnect()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as re_exc:  # noqa: BLE001
+            LOG.warning("hunt_ccxt_streams_reconnect_failed | error=%s", re_exc)
+
+    async def _apply_proxy(self, proxy_url: str | None) -> None:
+        """Hot-swap REST + Pro CCXT clients onto a new egress proxy."""
+        self._proxy_url = proxy_url
+        for name, ex in list(self._secondary_clients.items()):
+            await close_exchange_async(ex, label=f"secondary_rest:{name}")
+        self._secondary_clients.clear()
+        self._secondary_failed.clear()
+        if self._pro_ex is not None:
+            await close_exchange_async(self._pro_ex, label="binance_pro_swap")
+            self._pro_ex = None
+        await close_exchange_async(self._ex, label="binance_rest_swap")
+        self._ex = create_async_binance_future(
+            proxy_url=proxy_url,
+            trust_env=self._trust_env,
+            timeout_ms=self._timeout_ms,
+        )
+        self._markets_loaded = False
+        try:
+            await self.load_markets()
+        except Exception as exc:
+            if self._proxy_pool is not None and proxy_url:
+                self._proxy_pool.mark_failed(proxy_url, f"apply_failed:{type(exc).__name__}")
+            raise
+        if self._proxy_pool is not None and proxy_url:
+            self._proxy_pool.mark_success(proxy_url)
+        LOG.info(
+            "hunt_ccxt_proxy_applied | proxy=%s",
+            mask_proxy_url(proxy_url) if proxy_url else "direct",
+        )
 
     @classmethod
     def from_settings(cls, settings: Any) -> HuntCcxtClient:
@@ -131,6 +282,24 @@ class HuntCcxtClient:
     @property
     def exchange(self) -> ccxt.binance:
         return self._ex
+
+    def used_weight_1m(self) -> int | None:
+        """Latest Binance ``X-MBX-USED-WEIGHT-1M`` header value (per-IP weight used
+        in the trailing minute). Binance reports the cumulative per-IP weight on
+        every fapi response, so the REST instance's last header reflects the whole
+        host budget (incl. ccxt.pro order-book snapshots). Hard cap is 2400/min.
+        """
+        try:
+            hdrs = getattr(self._ex, "last_response_headers", None) or {}
+        except AttributeError:
+            return None
+        raw = hdrs.get("x-mbx-used-weight-1m") or hdrs.get("X-MBX-USED-WEIGHT-1M")
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
 
     def _share_markets_to(self, target: ccxt.binance) -> None:
         """Reuse bootstrapped REST markets on Pro/secondary CCXT instances."""
@@ -170,61 +339,79 @@ class HuntCcxtClient:
                 await self._pro_ex.load_markets()
             return self._pro_ex
 
+    async def _sync_time_offset(self) -> None:
+        """Anchor the wall clock to Binance server time (local OS clock may drift).
+
+        A constant offset is enough; failure is non-fatal (offset stays 0 = local
+        clock). See hunt_core.clock for why cross-clock paths need this.
+        """
+        try:
+            server_ms = float(await self._ex.fetch_time())
+        except Exception as exc:  # noqa: BLE001 — never let a time probe block startup
+            LOG.warning("hunt_clock_sync_failed | err=%s", type(exc).__name__)
+            return
+        local_ms = time.time() * 1000.0
+        offset = server_ms - local_ms
+        clock.set_offset_ms(offset)
+        if abs(offset) >= 60_000.0:
+            LOG.warning("hunt_clock_skew | offset_h=%.2f (local OS clock off)", offset / 3_600_000.0)
+        else:
+            LOG.info("hunt_clock_synced | offset_ms=%.0f", offset)
+
     async def load_markets(self) -> None:
         if self._markets_loaded:
             return
-        try:
-            await self._ex.load_markets()
-            self._markets_loaded = True
-            return
-        except Exception as exc:
-            LOG.warning(
-                "ccxt_load_markets_failed | proxy=%s err=%s — fapi bootstrap",
-                self._proxy_url or "direct",
-                type(exc).__name__,
-            )
-        await self._bootstrap_markets_via_fapi_http()
+        last_exc: BaseException | None = None
+        for attempt in range(3):
+            try:
+                await self._ex.load_markets()
+                self._markets_loaded = True
+                await self._sync_time_offset()
+                return
+            except ccxt.BaseError as exc:
+                last_exc = exc
+                self._rest_gate.record_error(exc, context="load_markets")
+                if is_ccxt_rate_limited(exc):
+                    await self._rest_gate.await_pause(cap_s=60.0)
+                elif attempt < 2:
+                    await asyncio.sleep(2**attempt)
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 2:
+                    await asyncio.sleep(2**attempt)
+        LOG.warning(
+            "ccxt_load_markets_failed | proxy=%s err=%s — ccxt implicit bootstrap",
+            self._proxy_url or "direct",
+            type(last_exc).__name__ if last_exc else "unknown",
+        )
+        await self._bootstrap_markets_via_ccxt_implicit()
         self._markets_loaded = True
+        await self._sync_time_offset()
 
-    async def _bootstrap_markets_via_fapi_http(self) -> None:
-        """SOCKS-aware fapi exchangeInfo when CCXT load_markets transport fails."""
-        import aiohttp
+    async def _bootstrap_markets_via_ccxt_implicit(self) -> None:
+        """CCXT implicit ``fapiPublicGetExchangeInfo`` when ``load_markets`` fails."""
+        from hunt_core.market.network import mask_proxy_url
 
-        from hunt_core.market.network import (
-            aiohttp_request_proxy,
-            close_aiohttp_session,
-            create_aiohttp_session,
-            mask_proxy_url,
+        fetcher = getattr(self._ex, "fapipublicGetExchangeinfo", None)
+        if not callable(fetcher):
+            fetcher = getattr(self._ex, "fapiPublicGetExchangeInfo", None)
+        if not callable(fetcher):
+            raise ccxt.NotSupported("fapiPublicGetExchangeInfo unavailable")
+        payload = await self._rest_call(
+            fetcher,
+            context="bootstrap_exchange_info",
+            weight=10,
         )
-
-        timeout = aiohttp.ClientTimeout(total=25)
-        session = create_aiohttp_session(
-            proxy_url=self._proxy_url,
-            trust_env=self._trust_env,
-            timeout=timeout,
-            connector_limit=8,
+        symbols = payload.get("symbols") if isinstance(payload, dict) else None
+        if not isinstance(symbols, list) or not symbols:
+            raise RuntimeError("ccxt_exchange_info_empty")
+        markets = self._ex.parse_markets(symbols)
+        self._ex.set_markets(markets)
+        LOG.info(
+            "hunt_markets_bootstrapped | via=ccxt_implicit n=%d proxy=%s",
+            len(markets),
+            mask_proxy_url(self._proxy_url) if self._proxy_url else "direct",
         )
-        req_proxy = aiohttp_request_proxy(session, self._proxy_url)
-        try:
-            url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
-            async with session.get(url, proxy=req_proxy) as resp:
-                if resp.status == 418:
-                    body = await resp.text()
-                    raise ccxt.DDoSProtection(f"binance 418 {body[:200]}")
-                resp.raise_for_status()
-                payload = await resp.json(content_type=None)
-            symbols = payload.get("symbols") if isinstance(payload, dict) else None
-            if not isinstance(symbols, list) or not symbols:
-                raise RuntimeError("fapi_exchange_info_empty")
-            markets = self._ex.parse_markets(symbols)
-            self._ex.set_markets(markets)
-            LOG.info(
-                "hunt_markets_bootstrapped | via=fapi_http proxy=%s n=%d",
-                mask_proxy_url(self._proxy_url) if self._proxy_url else "direct",
-                len(markets),
-            )
-        finally:
-            await close_aiohttp_session(session)
 
     async def close(self) -> None:
         for name, ex in list(self._secondary_clients.items()):
@@ -248,8 +435,7 @@ class HuntCcxtClient:
 
     @staticmethod
     def _ccxt_has(exchange: ccxt.Exchange, method: str) -> bool:
-        flag = getattr(exchange, "has", {}).get(method)
-        return flag is True
+        return ccxt_method_available(exchange, method)
 
     def _fapi_market_id(self, symbol: str) -> str:
         market = self._ex.market(self._ccxt_sym(symbol))
@@ -285,15 +471,30 @@ class HuntCcxtClient:
         cached = cache.get(cache_key)
         if self._cache_fresh(cached, _CACHE_TTL[ttl_key]):
             return cached[1]  # type: ignore[index]
+        if not callable(fetcher):
+            LOG.debug("fapi_metric_unavailable | symbol=%s period=%s", sym, period)
+            return None
         try:
             await self.load_markets()
-            payload = await fetcher(
-                {"symbol": self._fapi_market_id(sym), "period": period, "limit": 1}
+            payload = await self._fapi_call(
+                lambda: fetcher(
+                    {"symbol": self._fapi_market_id(sym), "period": period, "limit": 1}
+                ),
+                context=f"{ttl_key}:{sym}:{period}",
             )
             value = self._fapi_latest_ratio(payload, *ratio_keys)
             if value is not None and value > 0:
                 cache[cache_key] = (now, value)
                 return value
+        except ccxt.BaseError as exc:
+            if is_ccxt_rate_limited(exc):
+                raise
+            LOG.warning(
+                "fapi_metric_failed | symbol=%s period=%s error=%s",
+                sym,
+                period,
+                exc,
+            )
         except Exception as exc:
             LOG.warning(
                 "fapi_metric_failed | symbol=%s period=%s error=%s",
@@ -332,7 +533,11 @@ class HuntCcxtClient:
             assert self._ticker_24h_cache is not None
             return self._ticker_24h_cache[1]
         await self.load_markets()
-        tickers = await self._ex.fetch_tickers()
+        tickers = await self._rest_call(
+            lambda: self._ex.fetch_tickers(),
+            context="ticker_24h",
+            weight=40,
+        )
         rows: list[dict[str, float | str]] = []
         for ccxt_sym, item in tickers.items():
             if not is_linear_usdt_swap_market(self._ex.markets.get(ccxt_sym)):
@@ -371,18 +576,26 @@ class HuntCcxtClient:
     ) -> list[list[Any]]:
         await self.load_markets()
         ccxt_sym = self._ccxt_sym(symbol)
-        rows = await self._ex.fetch_ohlcv(
-            ccxt_sym,
-            interval,
-            since=since,
-            limit=min(1500, max(1, int(limit))),
+        rows = await self._rest_call(
+            lambda: self._ex.fetch_ohlcv(
+                ccxt_sym,
+                interval,
+                since=since,
+                limit=min(1500, max(1, int(limit))),
+            ),
+            context=f"ohlcv.{interval}",
+            weight=10,
         )
         return list(rows)
 
     async def fetch_klines(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
         await self.load_markets()
         ccxt_sym = self._ccxt_sym(symbol)
-        rows = await self._ex.fetch_ohlcv(ccxt_sym, interval, limit=max(1, int(limit)))
+        rows = await self._rest_call(
+            lambda: self._ex.fetch_ohlcv(ccxt_sym, interval, limit=max(1, int(limit))),
+            context=f"ohlcv.{interval}",
+            weight=10 if interval in {"1m", "5m"} else 5,
+        )
         frame = finalize_kline_frame(
             ccxt_ohlcv_to_frame(rows, interval, exchange=self._ex),
             interval,
@@ -401,11 +614,15 @@ class HuntCcxtClient:
     ) -> pl.DataFrame:
         await self.load_markets()
         ccxt_sym = self._ccxt_sym(symbol)
-        rows = await self._ex.fetch_ohlcv(
-            ccxt_sym,
-            interval,
-            since=max(0, int(start_time_ms)),
-            limit=min(1500, max(1, int(limit))),
+        rows = await self._rest_call(
+            lambda: self._ex.fetch_ohlcv(
+                ccxt_sym,
+                interval,
+                since=max(0, int(start_time_ms)),
+                limit=min(1500, max(1, int(limit))),
+            ),
+            context=f"ohlcv.{interval}",
+            weight=10,
         )
         end_ms = max(0, int(end_time_ms))
         trimmed = [r for r in rows if r and int(r[0]) <= end_ms]
@@ -457,7 +674,18 @@ class HuntCcxtClient:
         if self._cache_fresh(cached, _CACHE_TTL["order_book_depth"]):
             return dict(cached[1])  # type: ignore[index]
         await self.load_markets()
-        ob = await self._ex.fetch_order_book(self._ccxt_sym(sym), limit=depth_limit)
+        try:
+            ob = await self._direct_binance_fetch(
+                lambda: self._ex.fetch_order_book(self._ccxt_sym(sym), limit=depth_limit),
+                context=f"order_book:{sym}",
+                weight=5,
+                method="fetchOrderBook",
+            )
+        except ccxt.BaseError:
+            raise
+        except Exception as exc:
+            LOG.warning("fetch_order_book failed | symbol=%s error=%s", sym, exc)
+            raise
         bids = [(float(row[0]), float(row[1])) for row in (ob.get("bids") or []) if row]
         asks = [(float(row[0]), float(row[1])) for row in (ob.get("asks") or []) if row]
         if not bids or not asks:
@@ -483,11 +711,20 @@ class HuntCcxtClient:
             return cached[1]  # type: ignore[index]
         await self.load_markets()
         try:
-            payload = await self._ex.fetch_open_interest(self._ccxt_sym(sym))
+            payload = await self._direct_binance_fetch(
+                lambda: self._ex.fetch_open_interest(self._ccxt_sym(sym)),
+                context=f"open_interest:{sym}",
+                weight=1,
+                method="fetchOpenInterest",
+            )
             value = _safe_float(payload.get("openInterestAmount") or payload.get("info", {}).get("openInterest"))
             if value > 0:
                 self._open_interest_cache[sym] = (now, value)
                 return value
+        except ccxt.BaseError as exc:
+            if is_ccxt_rate_limited(exc):
+                raise
+            LOG.warning("fetch_open_interest failed | symbol=%s error=%s", sym, exc)
         except Exception as exc:
             LOG.warning("fetch_open_interest failed | symbol=%s error=%s", sym, exc)
         return None
@@ -501,8 +738,13 @@ class HuntCcxtClient:
             return cached[1]  # type: ignore[index]
         try:
             await self.load_markets()
-            payload = await self._ex.fetch_open_interest_history(
-                self._ccxt_sym(sym), timeframe=period, limit=2
+            payload = await self._direct_binance_fetch(
+                lambda: self._ex.fetch_open_interest_history(
+                    self._ccxt_sym(sym), timeframe=period, limit=2
+                ),
+                context=f"oi_change:{sym}:{period}",
+                weight=1,
+                method="fetchOpenInterestHistory",
             )
             series = [float(item["openInterestAmount"]) for item in payload
                       if item.get("openInterestAmount") is not None]
@@ -511,6 +753,10 @@ class HuntCcxtClient:
             change = series[-1] / series[-2] - 1.0
             self._open_interest_change_cache[cache_key] = (now, change)
             return change
+        except ccxt.BaseError as exc:
+            if is_ccxt_rate_limited(exc):
+                raise
+            LOG.warning("oi_change failed | symbol=%s period=%s error=%s", sym, period, exc)
         except Exception as exc:
             LOG.warning("oi_change failed | symbol=%s period=%s error=%s", sym, period, exc)
         return None
@@ -559,10 +805,15 @@ class HuntCcxtClient:
                 return cached[1]  # type: ignore[index]
             try:
                 await self.load_markets()
-                rows = await self._ex.fetch_taker_buy_sell_volume(
-                    self._ccxt_sym(sym),
-                    timeframe=period,
-                    limit=1,
+                rows = await self._direct_binance_fetch(
+                    lambda: self._ex.fetch_taker_buy_sell_volume(
+                        self._ccxt_sym(sym),
+                        timeframe=period,
+                        limit=1,
+                    ),
+                    context=f"taker_ratio:{sym}:{period}",
+                    weight=1,
+                    method="fetchTakerBuySellVolume",
                 )
                 if rows:
                     item = rows[-1]
@@ -572,6 +823,10 @@ class HuntCcxtClient:
                         value = buy / sell
                         self._taker_ratio_cache[cache_key] = (now, value)
                         return value
+            except ccxt.BaseError as exc:
+                if is_ccxt_rate_limited(exc):
+                    raise
+                LOG.warning("fetch_taker_buy_sell_volume failed | sym=%s error=%s", sym, exc)
             except Exception as exc:
                 LOG.warning("fetch_taker_buy_sell_volume failed | sym=%s error=%s", sym, exc)
             return None
@@ -594,14 +849,29 @@ class HuntCcxtClient:
             return cached[1]  # type: ignore[index]
         try:
             await self.load_markets()
-            payload = await self._ex.fetch_open_interest_history(
-                self._ccxt_sym(sym), timeframe=period, limit=int(limit)
+            payload = await self._direct_binance_fetch(
+                lambda: self._ex.fetch_open_interest_history(
+                    self._ccxt_sym(sym), timeframe=period, limit=int(limit)
+                ),
+                context=f"oi_series:{sym}:{period}",
+                weight=1,
+                method="fetchOpenInterestHistory",
             )
             series = [float(item["openInterestAmount"]) for item in payload
                       if item.get("openInterestAmount") is not None]
             if series:
                 self._oi_series_cache[cache_key] = (time.monotonic(), series)
             return series
+        except ccxt.BaseError as exc:
+            if is_ccxt_rate_limited(exc):
+                raise
+            LOG.warning(
+                "fetch_open_interest_history_series failed | symbol=%s period=%s error=%s",
+                sym,
+                period,
+                exc,
+            )
+            raise
         except Exception as exc:
             LOG.warning(
                 "fetch_open_interest_history_series failed | symbol=%s period=%s error=%s",
@@ -621,14 +891,29 @@ class HuntCcxtClient:
             return cached[1]  # type: ignore[index]
         try:
             await self.load_markets()
-            payload = await self._ex.fetch_long_short_ratio_history(
-                self._ccxt_sym(sym), timeframe=period, limit=int(limit)
+            payload = await self._direct_binance_fetch(
+                lambda: self._ex.fetch_long_short_ratio_history(
+                    self._ccxt_sym(sym), timeframe=period, limit=int(limit)
+                ),
+                context=f"gls_series:{sym}:{period}",
+                weight=1,
+                method="fetchLongShortRatioHistory",
             )
             series = [float(item["longShortRatio"]) for item in payload
                       if item.get("longShortRatio") is not None]
             if series:
                 self._gls_series_cache[cache_key] = (time.monotonic(), series)
             return series
+        except ccxt.BaseError as exc:
+            if is_ccxt_rate_limited(exc):
+                raise
+            LOG.warning(
+                "fetch_long_short_ratio_history failed | symbol=%s period=%s error=%s",
+                sym,
+                period,
+                exc,
+            )
+            raise
         except Exception as exc:
             LOG.warning(
                 "fetch_long_short_ratio_history failed | symbol=%s period=%s error=%s",
@@ -646,15 +931,23 @@ class HuntCcxtClient:
             return cached[1]  # type: ignore[index]
         await self.load_markets()
         try:
-            payload = await self._ex.fetch_funding_rate(self._ccxt_sym(sym))
+            payload = await self._direct_binance_fetch(
+                lambda: self._ex.fetch_funding_rate(self._ccxt_sym(sym)),
+                context=f"funding_rate:{sym}",
+                weight=1,
+                method="fetchFundingRate",
+            )
             value = payload.get("fundingRate")
             if value is not None:
                 rate = float(value)
                 self._funding_rate_cache[sym] = (now, rate)
                 return rate
+        except ccxt.BaseError as exc:
+            if is_ccxt_rate_limited(exc):
+                raise
+            LOG.warning("fetch_funding_rate failed | symbol=%s error=%s", sym, exc)
         except Exception as exc:
             LOG.warning("fetch_funding_rate failed | symbol=%s error=%s", sym, exc)
-            raise
         return None
 
     async def fetch_funding_rate_history(
@@ -667,7 +960,12 @@ class HuntCcxtClient:
             return cached[1]
         await self.load_markets()
         try:
-            payload = await self._ex.fetch_funding_rate_history(self._ccxt_sym(sym), limit=limit)
+            payload = await self._direct_binance_fetch(
+                lambda: self._ex.fetch_funding_rate_history(self._ccxt_sym(sym), limit=limit),
+                context=f"funding_hist:{sym}",
+                weight=1,
+                method="fetchFundingRateHistory",
+            )
             rows: list[dict[str, Any]] = []
             for item in payload:
                 rows.append(
@@ -689,8 +987,16 @@ class HuntCcxtClient:
         if self._cache_fresh(self._premium_index_all_cache, 30):
             assert self._premium_index_all_cache is not None
             return self._premium_index_all_cache[1]
+        if not self._ccxt_has(self._ex, "fetchFundingRates"):
+            raise ccxt.NotSupported(
+                f"fetchFundingRates unavailable on {self._ex.id}"
+            )
         await self.load_markets()
-        funding = await self._ex.fetch_funding_rates()
+        funding = await self._rest_call(
+            lambda: self._ex.fetch_funding_rates(),
+            context="premium_index_all",
+            weight=10,
+        )
         rows: dict[str, dict[str, float]] = {}
         for ccxt_sym, item in funding.items():
             if not is_linear_usdt_swap_market(self._ex.markets.get(ccxt_sym)):
@@ -717,7 +1023,15 @@ class HuntCcxtClient:
             assert self._funding_info_all_cache is not None
             return self._funding_info_all_cache[1]
         await self.load_markets()
-        intervals = await self._ex.fetch_funding_intervals()
+        if not self._ccxt_has(self._ex, "fetchFundingIntervals"):
+            raise ccxt.NotSupported(
+                f"fetchFundingIntervals unavailable on {self._ex.id}"
+            )
+        intervals = await self._rest_call(
+            lambda: self._ex.fetch_funding_intervals(),
+            context="funding_info_all",
+            weight=10,
+        )
         rows: dict[str, dict[str, float | int]] = {}
         for ccxt_sym, item in intervals.items():
             if not is_linear_usdt_swap_market(self._ex.markets.get(ccxt_sym)):
@@ -745,14 +1059,21 @@ class HuntCcxtClient:
             return cached[1]  # type: ignore[index]
         if sym in self._basis_api_unsupported:
             return await self._fetch_basis_fallback(symbol, period=period)
+        if not callable(getattr(self._ex, "fapiDataGetBasis", None)):
+            self._basis_api_unsupported.add(sym)
+            return await self._fetch_basis_fallback(symbol, period=period)
         try:
-            payload = await self._ex.fapiDataGetBasis(
-                {
-                    "pair": sym,
-                    "contractType": "PERPETUAL",
-                    "period": period,
-                    "limit": limit,
-                }
+            await self.load_markets()
+            payload = await self._fapi_call(
+                lambda: self._ex.fapiDataGetBasis(
+                    {
+                        "pair": sym,
+                        "contractType": "PERPETUAL",
+                        "period": period,
+                        "limit": limit,
+                    }
+                ),
+                context=f"basis:{sym}:{period}",
             )
             basis_series: list[float] = []
             for row in payload if isinstance(payload, list) else []:
@@ -782,7 +1103,8 @@ class HuntCcxtClient:
                 },
             )
             return basis_pct
-        except Exception as exc:
+        except ccxt.BaseError as exc:
+            self._rest_gate.record_error(exc, context=f"basis:{sym}")
             err = str(exc)
             if "-4104" in err or "Invalid contract type" in err:
                 self._basis_api_unsupported.add(sym)
@@ -792,13 +1114,29 @@ class HuntCcxtClient:
                     period,
                 )
                 return await self._fetch_basis_fallback(symbol, period=period)
-            LOG.debug(
-                "fetch_basis_history failed | symbol=%s period=%s error=%s",
+            if is_ccxt_rate_limited(exc):
+                LOG.warning(
+                    "fetch_basis_rate_limited | symbol=%s period=%s error=%s",
+                    sym,
+                    period,
+                    exc,
+                )
+                raise
+            LOG.warning(
+                "fetch_basis_failed | symbol=%s period=%s error=%s",
                 sym,
                 period,
                 exc,
             )
-            return None
+            return await self._fetch_basis_fallback(symbol, period=period)
+        except Exception as exc:
+            LOG.warning(
+                "fetch_basis_failed | symbol=%s period=%s error=%s",
+                sym,
+                period,
+                exc,
+            )
+            return await self._fetch_basis_fallback(symbol, period=period)
 
     async def _fetch_basis_fallback(self, symbol: str, *, period: str) -> float | None:
         """Mark/index OHLCV basis for symbols without PERPETUAL fapiDataGetBasis."""
@@ -809,7 +1147,14 @@ class HuntCcxtClient:
     async def fetch_agg_trade_snapshot(self, symbol: str, *, limit: int = 100) -> AggTradeSnapshot:
         sym = self._bin_sym(symbol)
         await self.load_markets()
-        trades = await self._ex.fetch_trades(self._ccxt_sym(sym), limit=min(1000, max(1, limit)))
+        trades = await self._direct_binance_fetch(
+            lambda: self._ex.fetch_trades(
+                self._ccxt_sym(sym), limit=min(1000, max(1, limit))
+            ),
+            context=f"agg_trades:{sym}",
+            weight=5,
+            method="fetchTrades",
+        )
         buy_qty = sell_qty = 0.0
         for trade in trades:
             qty = _safe_float(trade.get("amount"))
@@ -1000,9 +1345,16 @@ class HuntCcxtClient:
         self, symbol: str, interval: str = "1h", *, limit: int = 96
     ) -> pl.DataFrame:
         """Mark price OHLCV via ccxt fetch_mark_ohlcv."""
+        if not self._ccxt_has(self._ex, "fetchMarkOHLCV"):
+            raise ccxt.NotSupported(f"fetchMarkOHLCV unavailable on {self._ex.id}")
         await self.load_markets()
         from hunt_core.market.factory import ccxt_ohlcv_to_frame, finalize_kline_frame
-        rows = await self._ex.fetch_mark_ohlcv(self._ccxt_sym(symbol), interval, limit=limit)
+        rows = await self._direct_binance_fetch(
+            lambda: self._ex.fetch_mark_ohlcv(self._ccxt_sym(symbol), interval, limit=limit),
+            context=f"mark_ohlcv:{symbol}",
+            weight=2,
+            method="fetchMarkOHLCV",
+        )
         return finalize_kline_frame(
             ccxt_ohlcv_to_frame(rows, interval, exchange=self._ex),
             interval,
@@ -1013,9 +1365,16 @@ class HuntCcxtClient:
         self, symbol: str, interval: str = "1h", *, limit: int = 96
     ) -> pl.DataFrame:
         """Index price OHLCV via ccxt fetch_index_ohlcv."""
+        if not self._ccxt_has(self._ex, "fetchIndexOHLCV"):
+            raise ccxt.NotSupported(f"fetchIndexOHLCV unavailable on {self._ex.id}")
         await self.load_markets()
         from hunt_core.market.factory import ccxt_ohlcv_to_frame, finalize_kline_frame
-        rows = await self._ex.fetch_index_ohlcv(self._ccxt_sym(symbol), interval, limit=limit)
+        rows = await self._direct_binance_fetch(
+            lambda: self._ex.fetch_index_ohlcv(self._ccxt_sym(symbol), interval, limit=limit),
+            context=f"index_ohlcv:{symbol}",
+            weight=2,
+            method="fetchIndexOHLCV",
+        )
         return finalize_kline_frame(
             ccxt_ohlcv_to_frame(rows, interval, exchange=self._ex),
             interval,
@@ -1026,9 +1385,20 @@ class HuntCcxtClient:
         self, symbol: str, interval: str = "1h", *, limit: int = 96
     ) -> pl.DataFrame:
         """Premium index (basis %) OHLCV via ccxt fetch_premium_index_ohlcv."""
+        if not self._ccxt_has(self._ex, "fetchPremiumIndexOHLCV"):
+            raise ccxt.NotSupported(
+                f"fetchPremiumIndexOHLCV unavailable on {self._ex.id}"
+            )
         await self.load_markets()
         from hunt_core.market.factory import ccxt_ohlcv_to_frame, finalize_kline_frame
-        rows = await self._ex.fetch_premium_index_ohlcv(self._ccxt_sym(symbol), interval, limit=limit)
+        rows = await self._direct_binance_fetch(
+            lambda: self._ex.fetch_premium_index_ohlcv(
+                self._ccxt_sym(symbol), interval, limit=limit
+            ),
+            context=f"premium_ohlcv:{symbol}",
+            weight=2,
+            method="fetchPremiumIndexOHLCV",
+        )
         return finalize_kline_frame(
             ccxt_ohlcv_to_frame(rows, interval, exchange=self._ex),
             interval,
@@ -1108,7 +1478,7 @@ class HuntCcxtClient:
                 )
                 if usdt_swap <= 0:
                     LOG.warning("secondary_rest_no_usdt_swap | exchange=%s", name)
-                    await ex.close()
+                    await close_exchange_async(ex, label=f"secondary_rest_skip:{name}")
                     self._secondary_failed.add(name)
                     return None
             except Exception as exc:
@@ -1135,6 +1505,24 @@ class HuntCcxtClient:
             )
             return None
 
+    async def _secondary_call(
+        self,
+        name: str,
+        ex: ccxt.Exchange,
+        factory: Any,
+        *,
+        context: str,
+        method: str,
+    ) -> Any:
+        if not ccxt_method_available(ex, method):
+            raise ccxt.NotSupported(f"{method} unavailable on {ex.id}")
+        return await self._rest_gate.invoke_secondary(
+            name,
+            ex,
+            factory,
+            context=context,
+        )
+
     async def _fetch_secondary_funding(
         self, name: str, ccxt_sym: str
     ) -> dict[str, float | None]:
@@ -1148,9 +1536,17 @@ class HuntCcxtClient:
             if ex is None:
                 result: dict[str, float | None] = {"fundingRate": None}
             else:
-                r = await ex.fetch_funding_rate(ccxt_sym)
+                r = await self._secondary_call(
+                    name,
+                    ex,
+                    lambda: ex.fetch_funding_rate(ccxt_sym),
+                    context=f"funding:{ccxt_sym}",
+                    method="fetchFundingRate",
+                )
                 result = {"fundingRate": float(r.get("fundingRate") or 0)}
-        except Exception as exc:
+        except ccxt.NotSupported:
+            result = {"fundingRate": None}
+        except ccxt.BaseError as exc:
             LOG.warning(
                 "secondary_funding_failed | exchange=%s sym=%s error=%s",
                 name,
@@ -1174,12 +1570,20 @@ class HuntCcxtClient:
             if ex is None:
                 result: dict[str, float | None] = {"oi_usd": None}
             else:
-                r = await ex.fetch_open_interest(ccxt_sym)
+                r = await self._secondary_call(
+                    name,
+                    ex,
+                    lambda: ex.fetch_open_interest(ccxt_sym),
+                    context=f"oi:{ccxt_sym}",
+                    method="fetchOpenInterest",
+                )
                 oi_val = (
                     float(r.get("openInterestValue") or r.get("openInterest") or 0) or None
                 )
                 result = {"oi_usd": oi_val}
-        except Exception as exc:
+        except ccxt.NotSupported:
+            result = {"oi_usd": None}
+        except ccxt.BaseError as exc:
             LOG.warning(
                 "secondary_oi_failed | exchange=%s sym=%s error=%s",
                 name,
@@ -1197,10 +1601,18 @@ class HuntCcxtClient:
             ex = await self._get_secondary(name)
             if ex is None:
                 return {"mark_price": None}
-            t = await ex.fetch_ticker(ccxt_sym)
+            t = await self._secondary_call(
+                name,
+                ex,
+                lambda: ex.fetch_ticker(ccxt_sym),
+                context=f"ticker:{ccxt_sym}",
+                method="fetchTicker",
+            )
             mark = float(t.get("mark") or t.get("last") or 0) or None
             return {"mark_price": mark}
-        except Exception as exc:
+        except ccxt.NotSupported:
+            return {"mark_price": None}
+        except ccxt.BaseError as exc:
             LOG.warning(
                 "secondary_ticker_failed | exchange=%s sym=%s error=%s",
                 name,
@@ -1220,8 +1632,16 @@ class HuntCcxtClient:
         if ex is None:
             return []
         try:
-            tickers = await ex.fetch_tickers()
-        except Exception as exc:
+            tickers = await self._secondary_call(
+                name,
+                ex,
+                lambda: ex.fetch_tickers(),
+                context="tickers_all",
+                method="fetchTickers",
+            )
+        except ccxt.NotSupported:
+            return []
+        except ccxt.BaseError as exc:
             LOG.warning("secondary_tickers_failed | exchange=%s error=%s", name, exc)
             return []
         rows: list[dict[str, float | str]] = []

@@ -48,6 +48,14 @@ def confirm_dump(
     lifecycle_bias: str = "",
 ) -> tuple[bool, list[str]]:
     """Confirmed dump = structural hard + fuel floor + second factor (no score self-confirm)."""
+    from datetime import UTC, datetime
+
+    from hunt_core.track.tracker import load_tracker_state, symbol_repeat_loser_blocked
+
+    if symbol and symbol_repeat_loser_blocked(
+        load_tracker_state(), symbol=symbol, now=datetime.now(UTC)
+    ):
+        return False, ["veto_symbol_repeat_loser"]
 
     if dump.get("levels_viable") is False:
         return False, ["veto_levels:" + ",".join(dump.get("levels_veto") or [])]
@@ -154,7 +162,6 @@ def confirm_dump(
         for cond in (
             bool(div),
             "oi_flush" in triggers,
-            "dump_continuation" in triggers,
             any(str(t).startswith("ws_liq_cascade") for t in triggers),
             any(str(t).startswith("lost_support") for t in triggers),
             ask_heavy,
@@ -172,20 +179,79 @@ def confirm_dump(
     )
     if bounce_recovery:
         confirmed = fuel >= cal.confirm_min_score and len(structural) >= 2
+    elif dump_continuation:
+        # Mid-dump: never confirm on generic 2× structural alone (Jun-16 dump_active WR).
+        confirmed = False
+        late_dump = fall_pct >= 40.0
+        extreme_dump = fall_pct >= 60.0
+        deep_dump = fall_pct >= 25.0
+        htf_close_break = any(
+            h in structural
+            for h in (
+                "5m_close_below_support",
+                "15m_close_below_support",
+                "1h_close_below_support",
+            )
+        )
+        if extreme_dump:
+            cont_sec_min = 3
+        elif late_dump:
+            cont_sec_min = 2
+        elif deep_dump:
+            cont_sec_min = 1
+        else:
+            cont_sec_min = 2
+        if (
+            fuel >= cal.confirm_min_score
+            and closed_break
+            and secondary >= cont_sec_min
+            and (not extreme_dump or (len(structural) >= 2 and htf_close_break))
+        ):
+            confirmed = True
+            hard.append("dump_continuation_confirm")
+        if (
+            not confirmed
+            and not late_dump
+            and fuel >= cal.confirm_min_score
+            and closed_break
+            and secondary >= 1
+            and entry_tf in {"1m", "3m"}
+            and dump_fast_confirm_enabled(symbol)
+        ):
+            confirmed = True
+            hard.append("dump_fast_confirm")
+        px = float(price or 0)
+        if px > 0 and fuel >= cal.confirm_min_score and not confirmed:
+            from hunt_core.gate.delivery import price_in_entry_zone  # noqa: PLC0415
+
+            in_zone = price_in_entry_zone(dump, px, direction="short")
+            ez = dump.get("entry_zone") or []
+            try:
+                zone_hi = float(ez[1])
+            except (TypeError, ValueError, IndexError):
+                zone_hi = 0.0
+            near_zone_top = zone_hi > 0 and px >= zone_hi * 0.97
+            zone_sec = 2 if late_dump else 1
+            if (in_zone or near_zone_top) and closed_break:
+                if late_dump:
+                    if secondary >= zone_sec and (
+                        not extreme_dump or htf_close_break
+                    ):
+                        confirmed = True
+                        hard.append("dump_continuation_confirm")
+                elif secondary >= zone_sec or len(structural) >= 2:
+                    confirmed = True
+                    hard.append("dump_continuation_confirm")
+            elif (in_zone or near_zone_top) and any(
+                "cascade" in h for h in structural
+            ):
+                if not late_dump and len(structural) >= 1:
+                    confirmed = True
+                    hard.append("dump_continuation_confirm")
     else:
         confirmed = fuel >= cal.confirm_min_score and (
             len(structural) >= 2 or (closed_break and secondary >= 2)
         )
-        # Dump continuation (dump_active + fall >= 15%): structure already broke earlier,
-        # so the structural-close-below gate is replaced by secondary signal alignment.
-        # `dump_continuation` is always in secondary for these symbols; a 2nd independent
-        # secondary (oi_flush, liq, ask_heavy, div) is required to avoid noise entries.
-        # Market-data-missing ticks only have count=1 → naturally deferred to next tick.
-        if not confirmed and dump_continuation and fuel >= cal.confirm_min_score and secondary >= 2:
-            confirmed = True
-            hard.append("dump_continuation_confirm")
-        # Fast dump confirm: on a sub-5m confirm TF a single closed break + 1 secondary
-        # is enough — a 5–8% dump completes in minutes, waiting 2× 5m bars misses it.
         if (
             not confirmed
             and fuel >= cal.confirm_min_score
@@ -232,9 +298,13 @@ def confirm_dump(
             if rejection and (bool(div) or secondary >= 1):
                 confirmed = True
                 hard.append("peak_fade_confirm")
-    aligned, of_reason = _orderflow_confirm_aligned("short", mkt, symbol=symbol)
-    if not aligned:
-        return False, [f"veto_{of_reason}"]
+    # Skip 60s orderflow alignment for dump_continuation_confirm: mid-dump tokens
+    # routinely show buy-pressure ticks (bottom-fishers) even as the dump continues.
+    # The delivery gate has additional checks; structural secondary>=2 is sufficient here.
+    if "dump_continuation_confirm" not in hard:
+        aligned, of_reason = _orderflow_confirm_aligned("short", mkt, symbol=symbol)
+        if not aligned:
+            return False, [f"veto_{of_reason}"]
     return confirmed, hard
 
 

@@ -586,8 +586,9 @@ def validate_signal_contract(
                     SignalContractIssue("targets", "short_targets_not_ordered", (tp1, tp2, tp3))
                 )
             if stop_loss is not None:
-                risk = abs(entry_mid - stop_loss)
-                reward = abs(tp1 - entry_mid)
+                worst = entry_high if direction == "short" else entry_low
+                risk = abs(worst - stop_loss)
+                reward = abs(tp1 - worst)
                 if risk <= 0.0:
                     issues.append(SignalContractIssue("risk_reward", "zero_or_negative_risk", risk))
                 else:
@@ -890,6 +891,37 @@ PUBLIC_FEATURE_FIELDS: tuple[str, ...] = (
     "funding_rate_zscore_48h",
     "liquidation_cascade_5m",
 )
+
+# CCXT source map for ops/debug when readiness gates fail (see hunt/docs/CCXT.md).
+MARKET_FIELD_CCXT_SOURCE: dict[str, str] = {
+    "mark_price": "WS watchMarkPrices | REST fetchMarkOHLCV",
+    "funding_rate": "REST fetchFundingRate | WS watchMarkPrices",
+    "funding_trend": "REST fetchFundingRateHistory",
+    "oi_current": "REST fetchOpenInterest",
+    "oi_change_pct": "REST fetchOpenInterest + history",
+    "oi_slope_5m": "REST fetchOpenInterest series",
+    "ls_ratio": "implicit fapiDataGetTopLongShortAccountRatio",
+    "top_position_ls_ratio": "implicit fapiDataGetTopLongShortPositionRatio",
+    "global_ls_ratio": "implicit fapiDataGetGlobalLongShortAccountRatio",
+    "taker_ratio": "implicit fapiDataGetTakerlongshortRatio",
+    "premium_zscore_5m": "REST fetchPremiumIndexOHLCV / mark-index",
+    "premium_slope_5m": "REST fetchPremiumIndexOHLCV",
+    "mark_index_spread_bps": "WS watchMarkPrices | REST mark/index",
+    "bid_price": "REST fetchOrderBook | WS watchOrderBookForSymbols | watchBidsAsks",
+    "ask_price": "REST fetchOrderBook | WS watchOrderBookForSymbols | watchBidsAsks",
+    "bid_qty": "REST fetchOrderBook | WS watchOrderBookForSymbols",
+    "ask_qty": "REST fetchOrderBook | WS watchOrderBookForSymbols",
+    "depth_imbalance": "REST fetchOrderBook depth | WS watchOrderBookForSymbols",
+    "microprice_bias": "REST fetchOrderBook | WS watchOrderBookForSymbols",
+    "agg_trade_delta_30s": "REST fetchTrades | WS watchTradesForSymbols",
+    "aggression_shift": "REST fetchTrades | WS watchTradesForSymbols",
+    "liquidation_score": "WS watchLiquidationsForSymbols",
+    "liquidation_cascade_5m": "WS watchLiquidationsForSymbols",
+    "spot_lead_return_1m": "REST spot fetchOHLCV (HuntCcxtSpotCompanion)",
+    "spot_futures_spread_bps": "REST spot + futures ticker",
+    "basis": "implicit fapiDataGetBasis | REST mark/index OHLCV",
+}
+
 PRIVATE_KEYS = {"balance", "position", "order", "account", "margin"}
 
 
@@ -921,7 +953,7 @@ def _normalized_float(value: Any, default: float | None = None) -> float | None:
         return default
     try:
         parsed = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     if math.isnan(parsed) or math.isinf(parsed):
         return default

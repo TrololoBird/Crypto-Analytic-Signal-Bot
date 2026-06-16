@@ -11,7 +11,8 @@ from typing import Any
 from hunt_core.analysis.deep_signal import resolve_trade_direction
 from hunt_core.params.store import effective_hunt_params
 from hunt_core.paths import DATA, SIGNAL_EVENTS
-from hunt_core.scan._engine_impl import confirm_dump, confirm_long
+from hunt_core.scan.predump import confirm_dump
+from hunt_core.scan.prepump import confirm_long
 
 AUDIT_LOG = DATA / "signal_audit.jsonl"
 
@@ -146,7 +147,7 @@ def backtest_levels_on_bars(
     setup: dict[str, Any],
     direction: str,
 ) -> dict[str, Any]:
-    """bars = (high, low, close) per 5m since probe."""
+    """bars = (high, low, close) per 5m since probe. Check chronologically."""
     if not bars:
         return {"bars": 0}
     mid = _entry_mid(setup)
@@ -158,20 +159,28 @@ def backtest_levels_on_bars(
     last = bars[-1][2]
     outcome, exit_px = "open", last
     if direction == "short":
-        if sl and hi >= sl:
-            outcome, exit_px = "stop_hit", sl
-        elif tp2 and lo <= tp2:
-            outcome, exit_px = "tp2", tp2
-        elif tp1 and lo <= tp1:
-            outcome, exit_px = "tp1", tp1
+        for h, low, c in bars:
+            if sl and h >= sl:
+                outcome, exit_px = "stop_hit", sl
+                break
+            if tp2 and low <= tp2:
+                outcome, exit_px = "tp2", tp2
+                break
+            if tp1 and low <= tp1:
+                outcome, exit_px = "tp1", tp1
+                break
         pnl = round(-(exit_px - mid) / mid * 100, 2) if mid else None
     else:
-        if sl and lo <= sl:
-            outcome, exit_px = "stop_hit", sl
-        elif tp2 and hi >= tp2:
-            outcome, exit_px = "tp2", tp2
-        elif tp1 and hi >= tp1:
-            outcome, exit_px = "tp1", tp1
+        for h, low, c in bars:
+            if sl and low <= sl:
+                outcome, exit_px = "stop_hit", sl
+                break
+            if tp2 and h >= tp2:
+                outcome, exit_px = "tp2", tp2
+                break
+            if tp1 and h >= tp1:
+                outcome, exit_px = "tp1", tp1
+                break
         pnl = round((exit_px - mid) / mid * 100, 2) if mid else None
     return {
         "bars": len(bars),

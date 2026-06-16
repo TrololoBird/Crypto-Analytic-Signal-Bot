@@ -664,6 +664,7 @@ def delivery_freshness_block(
     row: dict[str, Any],
     chase_tol: float | None = None,
     max_progress: float | None = None,
+    lifecycle: dict[str, Any] | None = None,
 ) -> str | None:
     """Return block code when price is too late for a new manual entry, else None."""
     price = float(row.get("price") or 0)
@@ -684,7 +685,15 @@ def delivery_freshness_block(
     tp1 = float(setup.get("tp1") or 0)
     _ = max_progress  # tp1_progress demotion handled in dispatch + delivery_tier
 
-    if direction == "short":
+    lc = lifecycle if isinstance(lifecycle, dict) else row.get("lifecycle")
+    lc_dict = lc if isinstance(lc, dict) else {}
+    phase = str(lc_dict.get("phase") or "")
+    fall = float(lc_dict.get("fall_from_high_pct") or 0)
+
+    if direction == "short" and phase == "dump_active" and fall >= 40.0:
+        if price < zone_lo or price > zone_hi * (1.0 + tol):
+            return "delivery_dump_entry_stale"
+    elif direction == "short":
         if tp1 > 0 and price <= tp1:
             return "delivery_past_tp1"
         if price < zone_lo * (1.0 - tol):
@@ -882,6 +891,51 @@ def _setup_fuel(setup: dict[str, Any], direction: str) -> float:
     return float(setup.get(key) or setup.get(alt) or 0)
 
 
+def _row_chg24_abs(row: dict[str, Any]) -> float:
+    sess = row.get("session") or {}
+    raw = (
+        row.get("chg_24h_pct")
+        or row.get("change_24h_pct")
+        or sess.get("change_24h_pct")
+    )
+    return abs(float(raw or 0))
+
+
+def _row_rng24(row: dict[str, Any]) -> float:
+    sess = row.get("session") or {}
+    return float(sess.get("range_pct_24h") or row.get("range_pct_24h") or 0)
+
+
+def _passes_meme_anomaly_gate(
+    *,
+    sym: str,
+    row: dict[str, Any],
+    lc: dict[str, Any],
+    cal: Any,
+    fuel: float,
+) -> bool:
+    """Meme hunt volatility floor — waive for high-fuel dump confirms near threshold."""
+    if sym in PINNED_SYMBOLS:
+        return True
+    if bool(row.get("young_listing")):
+        return True
+    chg24 = _row_chg24_abs(row)
+    rng24 = _row_rng24(row)
+    min_chg = float(cal.anomaly_min_chg_24h_pct)
+    min_rng = float(cal.anomaly_min_range_24h_pct)
+    if chg24 >= min_chg or rng24 >= min_rng:
+        return True
+    fall = float(lc.get("fall_from_high_pct") or 0)
+    if fuel >= 130 and (rng24 >= min_rng * 0.95 or fall >= 15.0):
+        return True
+    if fuel >= 120 and fall >= 18.0:
+        return True
+    # Confirmed mid-dump: range just under regime floor (PLAY 14.9% vs 15.3%).
+    if fuel >= 75 and fall >= 8.0 and rng24 >= min_rng * 0.975:
+        return True
+    return False
+
+
 _PUMP_PHASES_LONG = frozenset({"impulse_initiating", "breakout_arming"})
 _FADE_PHASES_SHORT = frozenset({"exhaustion_at_high", "distribution"})
 # Mid-dump continuation is monitor-only — Telegram ships at dump *start* (fade/top).
@@ -954,7 +1008,25 @@ def _short_dump_delivery_too_late(
         # not a blind mid-dump chase — it's a confirmed continuation with structural
         # and secondary signal alignment (see confirm_dump() in predump.py).
         hard = setup.get("confirm_hard") or []
+        if fall >= 70.0:
+            if "dump_continuation_confirm" in hard:
+                return None
+            if _structural_hard_count(hard, direction="short") >= 2 and any(
+                str(h).startswith(("5m_", "15m_", "1h_"))
+                and "close_below_support" in str(h)
+                for h in hard
+            ):
+                return None
+            return GateResult(
+                False,
+                "dump_late_chase",
+                f"Fall {fall:.1f}% ≥70% — поздний chase, нужен fresh structural break",
+            )
         if "dump_continuation_confirm" in hard:
+            return None
+        # Fresh multi-TF breaks (1m+15m close below support) within an active dump —
+        # valid continuation even when fall > 50% (BEATUSDT lesson).
+        if _structural_hard_count(hard, direction="short") >= 2:
             return None
         return GateResult(
             False,
@@ -996,20 +1068,29 @@ def _dump_continuation_short_ok(
 ) -> bool:
     """Allow confirmed dump continuation: fresh structural break within dump_active.
 
-    Only fires when confirm_dump() set dump_continuation_confirm — which requires
-    fall >= 15%, structural signals (support break / pp_short_break), and secondary
-    alignment (secondary >= 2). This is not a blind mid-dump chase.
+    Fires when confirm_dump() tagged dump_continuation_confirm, or when fall >= 15%
+    with >=2 structural hard factors (1m+pp breaks) — same bar as dump_mid_leg bypass.
     """
     if phase != "dump_active":
         return False
     if fuel < cal_min_fuel:
         return False
     hard = setup.get("confirm_hard") or []
-    return "dump_continuation_confirm" in hard
+    if "dump_continuation_confirm" in hard:
+        return True
+    if "dump_fast_confirm" in hard:
+        return True
+    fall = float(lc.get("fall_from_high_pct") or 0)
+    if fall >= 15.0 and _structural_hard_count(hard, direction="short") >= 2:
+        if any("close_below_support" in str(h) for h in hard):
+            return True
+    return False
 
 
 _DUMP_CONTINUATION_MIN_RR = 1.05
+_CONTINUATION_PCT_MIN_RR = 0.85
 _CONFIRMED_STRUCTURAL_DUMP_MIN_RR = 1.05
+_PRE_DUMP_STRUCTURAL_MIN_RR = 1.15
 _DELIVERY_MIN_RR_FLOOR = 1.6
 _STRUCTURAL_DUMP_PHASES = frozenset(
     {
@@ -1019,6 +1100,23 @@ _STRUCTURAL_DUMP_PHASES = frozenset(
         "dump_imminent",
     }
 )
+_PRE_DUMP_LC_PHASES = frozenset(
+    {
+        "exhaustion_at_high",
+        "distribution",
+        "dump_initiating",
+    }
+)
+
+
+def _continuation_pct_min_rr(setup: dict[str, Any]) -> float | None:
+    mode = str(setup.get("level_mode") or "")
+    if "continuation_pct" in mode:
+        return _CONTINUATION_PCT_MIN_RR
+    tp2_label = str(setup.get("tp2_label") or "")
+    if "cont" in tp2_label.lower():
+        return _CONTINUATION_PCT_MIN_RR
+    return None
 
 
 def _confirmed_structural_dump_min_rr(
@@ -1027,10 +1125,13 @@ def _confirmed_structural_dump_min_rr(
 ) -> float | None:
     if not bool(setup.get("confirmed")):
         return None
-    phase = str(lc.get("phase") or "")
-    if phase not in _STRUCTURAL_DUMP_PHASES and phase not in _DUMP_CONTINUATION_PHASES:
+    hard = setup.get("confirm_hard") or []
+    if not _structural_dump_hard(hard) and _structural_hard_count(hard, direction="short") < 1:
         return None
-    if not _structural_dump_hard(setup.get("confirm_hard") or []):
+    phase = str(lc.get("phase") or "")
+    if phase in _PRE_DUMP_LC_PHASES:
+        return _PRE_DUMP_STRUCTURAL_MIN_RR
+    if phase not in _STRUCTURAL_DUMP_PHASES and phase not in _DUMP_CONTINUATION_PHASES:
         return None
     return _CONFIRMED_STRUCTURAL_DUMP_MIN_RR
 
@@ -1069,6 +1170,9 @@ def _effective_min_rr(
     base = _min_rr(symbol, direction, lc)
     if direction != "short":
         return max(_DELIVERY_MIN_RR_FLOOR, base)
+    cont_floor = _continuation_pct_min_rr(setup)
+    if cont_floor is not None:
+        return min(base, cont_floor)
     # For confirmed structural dumps (price broke key support on closed bar),
     # allow lower RR floor (1.05) — the structural trigger IS the edge.
     structural_floor = _confirmed_structural_dump_min_rr(setup, lc)
@@ -1148,11 +1252,13 @@ def _structural_hard_count(hard: list[Any], *, direction: str) -> int:
         "rejection",
         "cascade",
         "ws_liq",
+        "1m_close",
         "5m_close",
         "15m_close",
         "bear_cascade",
         "lost_support",
         "pp_short",
+        "dump_continuation_confirm",
     )
     keys_long = (
         "close_above_resistance",
@@ -1181,19 +1287,65 @@ def _delivery_quality_gate(
     base_min_fuel = float(dl.get("min_fuel", 72.0))
     hard = [str(h) for h in (setup.get("confirm_hard") or [])]
     fuel_adj, adj_reason = prep_shadow_delivery_fuel_adjustment()
+    score = float(setup.get("dump_score") or setup.get("dump_fuel") or 0)
+    fall = float(lifecycle.get("fall_from_high_pct") or 0)
+    struct = _structural_dump_hard(hard)
+    continuation = (
+        direction == "short"
+        and bool(setup.get("confirmed"))
+        and fall >= 20.0
+        and score >= 120.0
+        and ("dump_continuation_confirm" in hard or struct)
+    )
+    phase = str(lifecycle.get("phase") or "")
     waive_prep_bump = (
         direction == "short"
         and bool(setup.get("confirmed"))
-        and fuel >= base_min_fuel
-        and _structural_dump_hard(hard)
+        and (
+            (
+                fuel >= base_min_fuel
+                and (struct or "dump_continuation_confirm" in hard or score >= 130.0)
+            )
+            or (
+                phase in {"distribution", "exhaustion_at_high"}
+                and fall < 8.0
+                and struct
+                and fuel >= max(62.0, base_min_fuel - 10.0)
+            )
+            or (
+                continuation
+                and fuel >= max(65.0, base_min_fuel - 8.0)
+            )
+            or (
+                score >= 115.0
+                and ("dump_continuation_confirm" in hard or struct)
+                and fuel >= max(65.0, base_min_fuel - 10.0)
+            )
+            or (
+                score >= 105.0
+                and fall >= 50.0
+                and ("dump_continuation_confirm" in hard or struct)
+                and fuel >= max(62.0, base_min_fuel - 13.0)
+            )
+        )
     )
     if waive_prep_bump:
         fuel_adj = 0.0
         adj_reason = None
+    elif fuel_adj > 0 and score >= 115.0:
+        fuel_adj = min(fuel_adj, 1.0)
     min_fuel = max(68.0, base_min_fuel + fuel_adj)
+    distribution_fade = (
+        phase in {"distribution", "exhaustion_at_high"}
+        and fall < 8.0
+        and struct
+    )
+    if distribution_fade:
+        min_fuel = min(min_fuel, max(62.0, base_min_fuel - 10.0))
+    if continuation and fuel >= 65.0:
+        min_fuel = min(min_fuel, 65.0)
     min_struct = int(dl.get("min_structural_hard", 2))
     struct_n = _structural_hard_count(hard, direction=direction)
-    phase = str(lifecycle.get("phase") or "")
 
     if fuel < min_fuel:
         tier_note = f" (adj +{fuel_adj:.0f})" if fuel_adj > 0 else ""
@@ -1234,6 +1386,12 @@ def _delivery_quality_gate(
         and phase == "exhaustion_at_high"
         and fuel >= min_fuel
         and any("rejection" in str(h) for h in hard)
+    ):
+        min_struct_eff = 1
+    if (
+        direction == "short"
+        and "dump_continuation_confirm" in hard
+        and fuel >= min_fuel
     ):
         min_struct_eff = 1
     if struct_n < min_struct_eff and not (
@@ -1382,7 +1540,6 @@ def collect_report_blockers(
     cal = effective_hunt_params(sym)
     lc = _lifecycle_dict(lifecycle)
     r = row or {}
-    sess = r.get("session") or {}
     fuel = _setup_fuel(setup, direction)
     confirmed = bool(setup.get("confirmed"))
     blockers: list[GateResult] = []
@@ -1496,14 +1653,9 @@ def collect_report_blockers(
         txt = ", ".join(str(b) for b in filter_blocks)
         blockers.append(GateResult(False, "filter_block", f"Фильтр тренда/VWAP: {txt}"))
 
-    sess = r.get("session") or {}
-    chg24 = abs(float(r.get("chg_24h_pct") or 0))
-    rng24 = float(sess.get("range_pct_24h") or 0)
-    if sym not in PINNED_SYMBOLS and not (
-        bool(r.get("young_listing"))
-        or chg24 >= cal.anomaly_min_chg_24h_pct
-        or rng24 >= cal.anomaly_min_range_24h_pct
-    ):
+    if not _passes_meme_anomaly_gate(sym=sym, row=r, lc=lc, cal=cal, fuel=fuel):
+        chg24 = _row_chg24_abs(r)
+        rng24 = _row_rng24(r)
         blockers.append(
             GateResult(
                 False,
@@ -1730,14 +1882,9 @@ def evaluate_alert_gate(
         txt = ", ".join(str(b) for b in blocks)
         return GateResult(False, "filter_block", f"Фильтр тренда/VWAP: {txt}")
 
-    sess = r.get("session") or {}
-    chg24 = abs(float(r.get("chg_24h_pct") or 0))
-    rng24 = float(sess.get("range_pct_24h") or 0)
-    if sym not in PINNED_SYMBOLS and not (
-        bool(r.get("young_listing"))
-        or chg24 >= cal.anomaly_min_chg_24h_pct
-        or rng24 >= cal.anomaly_min_range_24h_pct
-    ):
+    if not _passes_meme_anomaly_gate(sym=sym, row=r, lc=lc, cal=cal, fuel=fuel):
+        chg24 = _row_chg24_abs(r)
+        rng24 = _row_rng24(r)
         return GateResult(
             False,
             "not_anomaly",
@@ -2047,10 +2194,14 @@ def run_gate_pipeline(
     lifecycle: dict[str, Any] | None,
     symbol: str = "",
     sniper_config: SniperConfig | None = None,
+    fast_lane: bool = False,
 ) -> GateResult:
     """Run registered gates, then legacy alert gate."""
     sym = symbol or str(row.get("symbol", ""))
-    for _name, checker in _GATE_REGISTRY:
+    skip = {"wash", "kinematic"} if fast_lane else set()
+    for name, checker in _GATE_REGISTRY:
+        if name in skip:
+            continue
         blocked = checker(
             direction=direction,
             setup=setup,
@@ -2073,7 +2224,15 @@ def run_gate_pipeline(
             "deliver",
             symbol=sym,
             direction=direction,
-            detail=gate.code,
+            detail=gate.code or "ok",
+            payload={
+                "score": setup.get("dump_score") or setup.get("long_score"),
+                "fuel": setup.get("dump_fuel") or setup.get("long_fuel"),
+                "phase": setup.get("phase") or setup.get("lifecycle_phase"),
+                "delivery_tier": setup.get("delivery_tier"),
+                "risk_reward": setup.get("risk_reward"),
+                "gate_code": gate.code or "ok",
+            },
         )
     return gate
 

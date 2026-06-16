@@ -78,11 +78,49 @@ def outcome_kind(reason: str, *, pnl_pct: float | None = None) -> str:
     return "unknown"
 
 
+def outcome_archive_key(record: dict[str, Any]) -> tuple[str, str, str] | None:
+    """Stable id for one tracker open → close leg (dedupe concurrent watch writers)."""
+    opened = record.get("opened_at")
+    if not opened:
+        return None
+    return (
+        str(record.get("symbol") or "").upper(),
+        str(record.get("direction") or "").lower(),
+        str(opened),
+    )
+
+
+def _outcome_already_archived(path: Any, key: tuple[str, str, str]) -> bool:
+    import json
+    from pathlib import Path
+
+    p = Path(path)
+    if not p.exists():
+        return False
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    for line in reversed(lines[-800:]):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if outcome_archive_key(rec) == key:
+            return True
+    return False
+
+
 def append_outcome_record(path: Any, record: dict[str, Any]) -> None:
     """Single-writer outcome log append (§8E / P10)."""
     import json
     from pathlib import Path
 
+    key = outcome_archive_key(record)
+    if key is not None and _outcome_already_archived(path, key):
+        return
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as fh:
@@ -105,5 +143,6 @@ __all__ = [
     "genuine_closed",
     "is_polluted",
     "kpi_bucket",
+    "outcome_archive_key",
     "outcome_kind",
 ]

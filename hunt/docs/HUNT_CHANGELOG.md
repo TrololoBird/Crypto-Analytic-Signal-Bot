@@ -1,5 +1,12 @@
 # Hunt Changelog (session notes)
 
+## 2026-06-15 — Legacy purge (post-CCXT)
+
+- Removed orphan modules: `domain/limit_entry.py`, `domain/setup_registry.py`, `config_defaults.py`, `runtime/settings.py`, `features/levels.py`
+- Removed compat facades: `scan/_engine_impl.py`, `detect/` package; scoring → `scan/scoring.py`
+- Removed empty `hunt/_legacy/`, `hunt/scripts/`; deleted superseded docs (`HUNT_ROADMAP`, `HUNT_REWRITE_MIGRATION`, `HUNT_PRODUCT_DEFINITION`, `HUNT_REFERENCE_*`) and root `docs/HUNT_*` prompts
+- Direct imports: `predump`/`prepump`/`early`/`_confirm_shared`/`predump_dump_hunt`/`routing`
+
 ## 2026-06-15 — Hunt redesign completion (P0–P12)
 
 - **Phase 0:** `--once` fast path (skip scan/cross-ex; CLI symbol cap); `watch_once_smoke`; baseline `data/baseline/hunt_baseline.json`
@@ -136,7 +143,7 @@
 - outcomes_report: таблица WR по entry phase × direction (первый прогон: post_dump_bounce short 0/3 -3.05%, post_dump_bounce long 2/0 +11.1%); lifecycle_stale/opposite_signal в LOSS_REASONS.
 - early_alert: tier-hierarchy cooldown — start на cooldown глушит prep/imminent той же пары (replay: 76→68 would-sends).
 - jsonl_replay: early_alert_simulation — would-send по tier'ам на recomputed lifecycle, общий cooldown-код с live.
-- ws_feed: `!markPrice@arr@1s` — live mark/index/funding → market.{funding_live,basis_bps_live} (один stream на весь universe; synthetic parse verified, live ждёт proxy WS).
+- ws_feed *(historical — removed 2026-06-15)*: raw `!markPrice@arr@1s` replaced by CCXT Pro `watchMarkPrices` in `market/streams.py` (see `docs/CCXT.md`).
 - verify_logic 30/30.
 
 ## 2026-06-11 — autonomous loop waves 2–14 (delivery gates + replay honesty + ops)

@@ -1,7 +1,7 @@
 """Deep analysis — BTC alignment, MTF, liquidity, order flow, POC scenarios."""
 from __future__ import annotations
 
-
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -458,9 +458,19 @@ class LiquidityScenarioPack:
 
 
 def _f(value: Any) -> float | None:
+    """Positive-only scalar (price, notional, POC levels)."""
     try:
         v = float(value)
         return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _f_signed(value: Any) -> float | None:
+    """Signed scalar (CVD, delta, depth imbalance) — zero is valid."""
+    try:
+        v = float(value)
+        return v if math.isfinite(v) else None
     except (TypeError, ValueError):
         return None
 
@@ -836,8 +846,8 @@ def _cvd_from_tf(row: dict[str, Any]) -> tuple[float | None, float | None]:
     tf = row.get("timeframes") or {}
     for key in ("1h", "15m", "5m"):
         snap = tf.get(key) or {}
-        cur = _f(snap.get("session_cvd") or snap.get("rolling_cvd_24h"))
-        prev = _f(snap.get("session_cvd_prev") or snap.get("cvd_prev"))
+        cur = _f_signed(snap.get("session_cvd") or snap.get("rolling_cvd_24h"))
+        prev = _f_signed(snap.get("session_cvd_prev") or snap.get("cvd_prev"))
         if cur is not None:
             return cur, prev
     return None, None
@@ -903,10 +913,10 @@ def _infer_aggressor(
 def synthesize_order_flow(row: dict[str, Any]) -> OrderFlowSynthesis:
     """Build CVD / absorption / aggressor summary from tick row + market block."""
     market = row.get("market") or {}
-    delta_30s = _f(market.get("agg_trade_delta_30s"))
-    delta_60s = _f(market.get("agg_trade_delta_60s"))
+    delta_30s = _f_signed(market.get("agg_trade_delta_30s"))
+    delta_60s = _f_signed(market.get("agg_trade_delta_60s"))
     taker_5m = _f(market.get("taker_5m"))
-    depth_imb = _f(market.get("depth_imbalance"))
+    depth_imb = _f_signed(market.get("depth_imbalance"))
 
     cur, prev = _cvd_from_tf(row)
     cvd_trend, cvd_note = _infer_cvd_trend(cur, prev)

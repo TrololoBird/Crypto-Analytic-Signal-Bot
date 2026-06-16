@@ -3,15 +3,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from hunt_core.scan._engine_impl import (
-    confirm_dump as _se_confirm_dump,
-    confirm_long as _se_confirm_long,
-    phase_dump as _se_phase_dump,
-    phase_long as _se_phase_long,
-    wall_depth_fuel_triggers,
-)
+from hunt_core.scan._confirm_shared import wall_depth_fuel_triggers
+from hunt_core.scan.predump import confirm_dump as _se_confirm_dump, phase_dump as _se_phase_dump
+from hunt_core.scan.prepump import confirm_long as _se_confirm_long, phase_long as _se_phase_long
 from hunt_core.data.collect import SnapshotTier
-from hunt_core.features.levels import (
+from hunt_core.levels.levels import (
     build_liquidity_context,
     structural_long_levels,
     structural_short_levels,
@@ -283,6 +279,7 @@ def dump_analysis(
         "tp2": levels["tp2"],
         "tp1_label": levels.get("tp1_label", ""),
         "tp2_label": levels.get("tp2_label", ""),
+        "level_mode": levels.get("level_mode", ""),
         "risk_reward": levels.get("risk_reward"),
         "sl_dist_pct": levels.get("sl_dist_pct"),
         "tp2_dist_pct": levels.get("tp2_dist_pct"),
@@ -583,6 +580,7 @@ def long_analysis(
         "tp2": levels["tp2"],
         "tp1_label": levels.get("tp1_label", ""),
         "tp2_label": levels.get("tp2_label", ""),
+        "level_mode": levels.get("level_mode", ""),
         "risk_reward": levels.get("risk_reward"),
         "sl_dist_pct": levels.get("sl_dist_pct"),
         "tp2_dist_pct": levels.get("tp2_dist_pct"),

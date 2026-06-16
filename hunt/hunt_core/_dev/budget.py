@@ -10,7 +10,7 @@ from pathlib import Path
 CORE_ROOT = Path(__file__).resolve().parents[1]
 ENTRY = CORE_ROOT / "__main__.py"
 # Hot-path only — _dev/ is dev gate (see HUNT_ARCHITECTURE.md).
-LOC_BUDGET = 44_100  # wave 3C scan split (+routing, _dump_core facade)
+LOC_BUDGET = 48_000  # WS-first hot path + frame_cache + carry (~47.2k, 2026-06-16)
 LOC_SKIP_DIRS = frozenset({"_dev"})
 
 FORBIDDEN_IMPORTS: frozenset[str] = frozenset(

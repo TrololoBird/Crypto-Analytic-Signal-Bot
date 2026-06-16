@@ -10,7 +10,13 @@ from typing import Any
 
 LOG = logging.getLogger("hunt_core.runtime.symbol_probe")
 
-from hunt_core.data.collect import safe_fetch
+from hunt_core.data.collect import (
+    SnapshotTier,
+    TickBatchCache,
+    probe_kline_limits,
+    refresh_tick_batch_cache,
+    safe_fetch,
+)
 from hunt_core.runtime.tick_assembly import snapshot_symbol
 from hunt_core.domain.config import load_settings
 from hunt_core.features.prepare import _prepare_frame, min_required_bars
@@ -34,6 +40,7 @@ from hunt_core.data.universe import add_to_watchlist, register_signal_notify
 _STAGGER_MS = 150
 _PROBE_TIMEOUT_S = 240.0
 _PINNED_PROBE_TIMEOUT_S = 360.0
+_FAST_PROBE_TIMEOUT_S = 45.0
 
 
 def normalize_symbol(raw: str) -> str:
@@ -274,19 +281,30 @@ async def probe_symbol_signal(
     stagger_ms: int = _STAGGER_MS,
     auto_watchlist: bool = True,
     probe_kind: str = "signal",
+    client: HuntCcxtClient | None = None,
+    tier: SnapshotTier | None = None,
+    batch_cache: TickBatchCache | None = None,
+    ticker_by_sym: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Full hunt analysis for one symbol using an isolated REST client.
 
     ``probe_kind="catalog"`` — shadow scan for /signals: no watchlist, no tracker
     backtest, lighter enrichments. ``probe_kind="signal"`` — /signal point query.
+    ``probe_kind="delivery"`` — fast dev probe (tier=fast, shared batch cache).
     """
     sym = normalize_symbol(symbol)
     if not sym:
         return {"symbol": symbol, "error": "empty_symbol"}
 
     catalog_probe = probe_kind == "catalog"
+    delivery_probe = probe_kind == "delivery"
     if catalog_probe:
         auto_watchlist = False
+
+    snap_tier: SnapshotTier = tier or ("fast" if delivery_probe else "full")
+    lite_probe = delivery_probe or snap_tier == "fast"
+    if lite_probe and stagger_ms > 0 and delivery_probe:
+        stagger_ms = 0
 
     settings = load_settings()
     minimums = min_required_bars(
@@ -294,33 +312,59 @@ async def probe_symbol_signal(
         min_bars_1h=settings.filters.min_bars_1h,
         min_bars_4h=settings.filters.min_bars_4h,
     )
-    client = HuntCcxtClient.from_settings(settings)
+    owned_client = client is None
+    if client is None:
+        client = HuntCcxtClient.from_settings(settings)
     await client.load_markets()
+    probe_timeout = (
+        _FAST_PROBE_TIMEOUT_S
+        if lite_probe
+        else (_PINNED_PROBE_TIMEOUT_S if sym in PINNED_SYMBOLS else _PROBE_TIMEOUT_S)
+    )
+    cache = batch_cache
+    if lite_probe and cache is None:
+        cache = TickBatchCache()
     try:
-        premium_all = await safe_fetch(
-            client.fetch_premium_index_all(), context="premium_index_all"
-        ) or {}
-        await asyncio.sleep(stagger_ms / 1000.0)
-        funding_info_all = await safe_fetch(
-            client.fetch_funding_info_all(), context="funding_info_all"
-        ) or {}
-        await asyncio.sleep(stagger_ms / 1000.0)
-        exchange_list = await safe_fetch(
-            client.fetch_exchange_symbols(), context="exchange_symbols"
-        ) or []
-        exchange_by_sym = {r.symbol: r for r in exchange_list}
-        await asyncio.sleep(stagger_ms / 1000.0)
-        ticker_raw = await safe_fetch(client.fetch_ticker_24h(), context="ticker_24h") or []
-        ticker_by_sym = {str(t.get("symbol")): t for t in ticker_raw if t.get("symbol")}
+        if cache is not None:
+            await refresh_tick_batch_cache(
+                cache,
+                client,
+                safe_fetch=safe_fetch,
+                prepare_frame=_prepare_frame,
+                need_btc=sym != "BTCUSDT",
+                tier=snap_tier,
+            )
+            premium_all = cache.premium_all
+            funding_info_all = cache.funding_info_all
+            exchange_by_sym = cache.exchange_by_sym
+            btc_work_1h = cache.btc_work_1h
+        else:
+            premium_all = await safe_fetch(
+                client.fetch_premium_index_all(), context="premium_index_all"
+            ) or {}
+            await asyncio.sleep(stagger_ms / 1000.0)
+            funding_info_all = await safe_fetch(
+                client.fetch_funding_info_all(), context="funding_info_all"
+            ) or {}
+            await asyncio.sleep(stagger_ms / 1000.0)
+            exchange_list = await safe_fetch(
+                client.fetch_exchange_symbols(), context="exchange_symbols"
+            ) or []
+            exchange_by_sym = {r.symbol: r for r in exchange_list}
+            await asyncio.sleep(stagger_ms / 1000.0)
+            btc_work_1h = None
+            btc_df = await safe_fetch(
+                client.fetch_klines_cached("BTCUSDT", "1h", limit=500),
+                context="btc_klines_1h",
+            )
+            if btc_df is not None and not btc_df.is_empty():
+                btc_work_1h = _prepare_frame(btc_df)
 
-        btc_work_1h = None
-        btc_df = await safe_fetch(
-            client.fetch_klines_cached("BTCUSDT", "1h", limit=500),
-            context="btc_klines_1h",
-        )
-        if btc_df is not None and not btc_df.is_empty():
-            btc_work_1h = _prepare_frame(btc_df)
+        if ticker_by_sym is None:
+            ticker_raw = await safe_fetch(client.fetch_ticker_24h(), context="ticker_24h") or []
+            ticker_by_sym = {str(t.get("symbol")): t for t in ticker_raw if t.get("symbol")}
 
+        kline_override = probe_kline_limits(minimums, sym) if delivery_probe else None
         row = await asyncio.wait_for(
             snapshot_symbol(
                 client,
@@ -336,9 +380,11 @@ async def probe_symbol_signal(
                 ticker_by_sym=ticker_by_sym,
                 ws_feed=None,
                 spot_companion=None,
-                stagger_klines_ms=stagger_ms,
+                stagger_klines_ms=0 if lite_probe else stagger_ms,
+                tier=snap_tier,
+                kline_limits_override=kline_override,
             ),
-            timeout=_PROBE_TIMEOUT_S,
+            timeout=probe_timeout,
         )
         if btc_work_1h is not None:
             row["btc_context"] = btc_market_context(btc_work_1h)
@@ -364,38 +410,46 @@ async def probe_symbol_signal(
                     )
             except Exception as _mtf_exc:
                 LOG.warning("mtf_confluence_failed | sym=%s error=%s", sym, _mtf_exc)
-            # Cross-exchange (Binance-listed symbol vs Bybit/OKX/Bitget)
-            try:
-                from hunt_core.market.cross import attach_cross_fields
-
-                cx = await asyncio.wait_for(
-                    client.fetch_cross_exchange_snapshot(sym),
-                    timeout=30.0,
-                )
-                if isinstance(cx, dict):
-                    attach_cross_fields(row, cx)
-            except Exception as _cx_exc:
-                LOG.warning("cross_exchange_failed | sym=%s error=%s", sym, _cx_exc)
-            if sym in PINNED_SYMBOLS:
+            if not lite_probe:
+                # Cross-exchange (Binance-listed symbol vs Bybit/OKX/Bitget)
                 try:
-                    from hunt_core.market.cross import attach_cross_microstructure
+                    from hunt_core.market.cross import attach_cross_fields
 
-                    await attach_cross_microstructure(client, row)
-                    cx_micro = row.get("cross_microstructure") or {}
-                    cross_walls = cx_micro.get("book_walls")
-                    if isinstance(cross_walls, dict) and cross_walls.get("bid_levels"):
-                        row["book_walls"] = cross_walls
-                except Exception as _cm_exc:
-                    LOG.warning("cross_microstructure_failed | sym=%s error=%s", sym, _cm_exc)
-        audit_source = "signals_cmd" if catalog_probe else "signal_cmd"
+                    cx = await asyncio.wait_for(
+                        client.fetch_cross_exchange_snapshot(sym),
+                        timeout=30.0,
+                    )
+                    if isinstance(cx, dict):
+                        attach_cross_fields(row, cx)
+                except Exception as _cx_exc:
+                    LOG.warning("cross_exchange_failed | sym=%s error=%s", sym, _cx_exc)
+                if sym in PINNED_SYMBOLS:
+                    try:
+                        from hunt_core.market.cross import attach_cross_microstructure
+
+                        await attach_cross_microstructure(client, row)
+                        cx_micro = row.get("cross_microstructure") or {}
+                        cross_walls = cx_micro.get("book_walls")
+                        if isinstance(cross_walls, dict) and cross_walls.get("bid_levels"):
+                            row["book_walls"] = cross_walls
+                    except Exception as _cm_exc:
+                        LOG.warning("cross_microstructure_failed | sym=%s error=%s", sym, _cm_exc)
+        audit_source = (
+            "delivery_probe"
+            if delivery_probe
+            else ("signals_cmd" if catalog_probe else "signal_cmd")
+        )
         audit = audit_probe_row(row, source=audit_source)
-        if not catalog_probe:
+        if not catalog_probe and not lite_probe:
             bt = await _tracker_levels_backtest(client, sym)
             if bt:
                 audit["tracker_backtest"] = bt
-        append_audit_log(audit)
+        if not delivery_probe:
+            append_audit_log(audit)
         row["_signal_audit"] = audit
-        if catalog_probe:
+        if delivery_probe:
+            row["_probe_kind"] = "delivery"
+        elif catalog_probe:
             row["_probe_kind"] = "catalog"
         if auto_watchlist and not row.get("error"):
             dump = row.get("dump") or {}
@@ -425,7 +479,8 @@ async def probe_symbol_signal(
             row["_watchlist_added"] = added
         return row
     finally:
-        await client.close()
+        if owned_client:
+            await client.close()
 
 
 async def probe_symbol_catalog(

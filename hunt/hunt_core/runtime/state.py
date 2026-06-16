@@ -1,10 +1,11 @@
 """Per-session mutable state, symbol memory, and watch-loop runtime handles (P11)."""
 from __future__ import annotations
 
+from hunt_core import clock
 import contextvars
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -28,6 +29,16 @@ STOP = False
 def request_stop() -> None:
     global STOP
     STOP = True
+
+
+def should_stop() -> bool:
+    """Live read of the stop flag.
+
+    Loops must call this rather than importing ``STOP`` by value: a
+    ``from ... import STOP`` binds the boolean at import time and never sees
+    ``request_stop()`` flip it, which silently breaks SIGINT/SIGTERM shutdown.
+    """
+    return STOP
 
 
 # --- Per-symbol session memory (REST impulse + rolling peaks) ---
@@ -86,7 +97,7 @@ def load_session(symbol: str, *, root: Path = SESSION_DIR) -> SymbolSession | No
 
 def save_session(sess: SymbolSession, *, root: Path = SESSION_DIR) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    sess.updated_at = datetime.now(UTC).isoformat()
+    sess.updated_at = clock.now_utc().isoformat()
     _session_path(sess.symbol, root).write_text(
         json.dumps(sess.to_dict(), indent=2),
         encoding="utf-8",
@@ -117,7 +128,7 @@ def merge_hunt_extremes(
     now: datetime | None = None,
 ) -> tuple[float, float, dict[str, Any]]:
     """Blend REST impulse window with rolling session peaks (48h TTL)."""
-    ts = now or datetime.now(UTC)
+    ts = now or clock.now_utc()
     sym = symbol.upper()
     sess = load_session(sym) or SymbolSession(symbol=sym)
 
@@ -185,6 +196,10 @@ class SymbolStateStore:
     rsi_exhaustion_latched: dict[str, bool] = field(default_factory=dict)
     dump_guard: dict[str, Any] = field(default_factory=dict)
     sticky: dict[str, Any] = field(default_factory=dict)
+    # Short confirm latch: avoid dump_confirmed ↔ forming flicker between ticks.
+    confirm_sticky: dict[str, Any] = field(default_factory=dict)
+    # Dedupe static delivery-block telemetry (e.g. not_anomaly every tick).
+    blocked_telemetry_log: dict[str, str] = field(default_factory=dict)
     phase_matrix_mtime: float = -1.0
     phase_matrix_disabled: dict[tuple[str, str], Any] = field(default_factory=dict)
     regime: dict[str, Any] = field(default_factory=dict)
@@ -195,6 +210,8 @@ class SymbolStateStore:
         self.rsi_exhaustion_latched.clear()
         self.dump_guard.clear()
         self.sticky.clear()
+        self.confirm_sticky.clear()
+        self.blocked_telemetry_log.clear()
         self.phase_matrix_mtime = -1.0
         self.phase_matrix_disabled.clear()
         self.regime.clear()
@@ -205,6 +222,11 @@ class SymbolStateStore:
         self.rsi_exhaustion_latched.pop(sym, None)
         self.dump_guard.pop(sym, None)
         self.sticky.pop(sym, None)
+        self.confirm_sticky.pop(sym, None)
+        prefix = f"{sym}:"
+        for key in list(self.blocked_telemetry_log):
+            if key.startswith(prefix):
+                self.blocked_telemetry_log.pop(key, None)
         self.regime.pop(sym, None)
         self.delivery_fsm.pop(sym, None)
 

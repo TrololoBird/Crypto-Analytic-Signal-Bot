@@ -47,7 +47,7 @@ forming_min_score = 45
 sl_max_pct_normal = 8.0
 sl_max_pct_hot = 11.0
 sl_max_pct_parabolic = 14.0
-# Range thresholds for mode switch (see hunt_watch/level_calibration.py).
+# Range thresholds for mode switch (see hunt_core/levels/levels.py).
 hot_range_pct = 60.0
 parabolic_range_pct = 120.0
 parabolic_leg_gain_pct = 80.0
@@ -82,6 +82,17 @@ reclaim_buffer = 1.001
 breakeven_buffer_pct = 0.15
 breakeven_buffer_min_pct = 1.0
 breakeven_risk_fraction = 0.25
+# Defer trailing until MFE proves the move (BEAT 2026-06-16: 1.8% MFE → -0.6% stop).
+min_trail_mfe_pct = 3.5
+dump_active_min_trail_mfe_pct = 2.5
+early_breakeven_mfe_pct = 2.0
+early_breakeven_buffer_pct = 0.12
+dump_active_early_be_mfe_pct = 3.0
+dump_initiating_early_be_mfe_pct = 3.5
+exhaustion_early_be_mfe_pct = 4.0
+accumulation_early_be_mfe_pct = 4.5
+distribution_early_be_mfe_pct = 4.0
+min_trail_age_minutes = 2.0
 tp1_partial_fix_pct_normal = 50.0
 tp1_partial_fix_pct_hot = 80.0
 

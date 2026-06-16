@@ -13,7 +13,7 @@ from hunt_core.scan.prepump import (
     enrich_long_setup,
     phase_long,
 )
-from hunt_core.scan._engine_impl import evaluate_early_alert
+from hunt_core.scan.early import evaluate_early_alert
 from hunt_core.scan.routing import (
     DeliveryMode,
     SetupCandidate,

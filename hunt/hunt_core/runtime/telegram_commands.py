@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
+import time
 from typing import Any
 
 import aiohttp
@@ -44,6 +46,7 @@ class HuntTelegramCommands:
         self._offset: int | None = None
         self._session: aiohttp.ClientSession | None = None
         self._probe_lock = asyncio.Lock()
+        self._dispatch_tasks: set[asyncio.Task[None]] = set()
 
     async def _session_get(self) -> aiohttp.ClientSession:
         # Telegram API must bypass Binance SOCKS proxy (trust_env breaks getUpdates).
@@ -52,6 +55,12 @@ class HuntTelegramCommands:
         return self._session
 
     async def close(self) -> None:
+        if self._dispatch_tasks:
+            pending = list(self._dispatch_tasks)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            self._dispatch_tasks.clear()
         if self._session is not None and not self._session.closed:
             await self._session.close()
 
@@ -179,6 +188,8 @@ class HuntTelegramCommands:
             await self._send(chat_id, "⏳ Другой /signal уже выполняется — подожди.")
             return
         async with self._probe_lock:
+            sym_label = sym.replace("USDT", "-USDT")
+            await self._send(chat_id, f"⏳ <b>/signal {sym_label}</b> — сканирую…")
             broadcaster = TelegramBroadcaster(self._token, str(chat_id))
             try:
                 await deliver_signal_probe(broadcaster, sym)
@@ -262,15 +273,64 @@ class HuntTelegramCommands:
 
     async def _ensure_polling_mode(self) -> None:
         """getUpdates fails while a webhook is active — clear it once at startup."""
+        drop_pending = os.environ.get("HUNT_TG_DROP_PENDING", "1") not in {
+            "0",
+            "false",
+            "False",
+        }
         url = _API.format(token=self._token, method="deleteWebhook")
         session = await self._session_get()
         try:
-            async with session.get(url, params={"drop_pending_updates": "false"}) as resp:
+            async with session.get(
+                url,
+                params={"drop_pending_updates": str(drop_pending).lower()},
+            ) as resp:
                 data = await resp.json(content_type=None)
             if isinstance(data, dict) and data.get("ok"):
-                LOG.info("hunt_tg_webhook_cleared")
+                LOG.info("hunt_tg_webhook_cleared", drop_pending=drop_pending)
         except defensive_exc_types(Exception):
             LOG.debug("hunt_tg_webhook_clear_failed", exc_info=True)
+
+    def _update_message_date(self, update: dict[str, Any]) -> float | None:
+        for key in ("message", "channel_post", "edited_message", "edited_channel_post"):
+            message = update.get(key)
+            if isinstance(message, dict):
+                try:
+                    return float(message.get("date") or 0) or None
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def _schedule_dispatch(self, chat_id: int, user_id: int | None, text: str) -> None:
+        """Run heavy probe handlers off the long-poll loop (keep getUpdates alive)."""
+        task = asyncio.create_task(
+            self._dispatch_incoming(chat_id, user_id, text),
+            name=f"hunt_tg_dispatch:{text[:24]}",
+        )
+        self._dispatch_tasks.add(task)
+        task.add_done_callback(self._dispatch_tasks.discard)
+
+    async def _dispatch_incoming(
+        self,
+        chat_id: int,
+        user_id: int | None,
+        text: str,
+    ) -> None:
+        try:
+            if text.startswith("/"):
+                LOG.info("hunt_tg_cmd", chat_id=chat_id, user_id=user_id, text=text[:80])
+                await self._handle_command(chat_id, text)
+                return
+            sym = parse_symbol_text(text)
+            if sym and _SYMBOL_RE.match(sym):
+                LOG.info("hunt_tg_symbol_text", chat_id=chat_id, symbol=sym)
+                await self._handle_signal(chat_id, [sym.replace("USDT", "")])
+        except asyncio.CancelledError:
+            raise
+        except defensive_exc_types(Exception):
+            LOG.exception("hunt_tg_dispatch_failed", chat_id=chat_id, text=text[:80])
+        except DEFENSIVE_EXC:
+            LOG.exception("hunt_tg_dispatch_failed", chat_id=chat_id, text=text[:80])
 
     async def _poll_once(self) -> None:
         params: dict[str, Any] = {
@@ -304,14 +364,11 @@ class HuntTelegramCommands:
             if not self._authorized(chat_id, user_id):
                 LOG.warning("hunt_tg_cmd_denied", chat_id=chat_id, user_id=user_id)
                 continue
-            if text.startswith("/"):
-                LOG.info("hunt_tg_cmd", chat_id=chat_id, user_id=user_id, text=text[:80])
-                await self._handle_command(chat_id, text)
+            msg_date = self._update_message_date(update)
+            if msg_date is not None and time.time() - msg_date > 900.0:
+                LOG.info("hunt_tg_skip_stale", chat_id=chat_id, text=text[:60])
                 continue
-            sym = parse_symbol_text(text)
-            if sym and _SYMBOL_RE.match(sym):
-                LOG.info("hunt_tg_symbol_text", chat_id=chat_id, symbol=sym)
-                await self._handle_signal(chat_id, [sym.replace("USDT", "")])
+            self._schedule_dispatch(chat_id, user_id, text)
 
     async def run_forever(self) -> None:
         logging.getLogger("aiohttp").setLevel(logging.WARNING)

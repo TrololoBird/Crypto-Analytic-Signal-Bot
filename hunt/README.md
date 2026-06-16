@@ -38,7 +38,7 @@ hunt/
 
 | | Main bot (`bot/`) | Hunt |
 |---|-------------------|------|
-| Trigger | WS kline close | REST poll + WS enrich |
+| Trigger | WS kline close | CCXT REST poll + Pro WS enrich |
 | Delivery | contract → confluence 3/5 | Hunt confirm → TG |
 | Universe | shortlist | pinned + scanner watchlist |
 
@@ -47,8 +47,10 @@ hunt/
 ```bash
 cd hunt && PYTHONPATH=.
 python -m compileall -q hunt_core
+python -m hunt_core._dev.check_ccxt
 python -m hunt_core._dev.budget
 python -m hunt_core._dev.check_scenarios
+python -m hunt_core._dev.ccxt_plane_smoke BTCUSDT ETHUSDT --ws-seconds 3
 python -m hunt_core._dev.smoke_signals --baseline data/baseline/hunt_baseline.json BTCUSDT
 ```
 
@@ -61,5 +63,6 @@ python -m hunt_core._dev.check_logic
 ## Docs
 
 - [HUNT_ARCHITECTURE.md](docs/HUNT_ARCHITECTURE.md) — canonical architecture
+- [CCXT.md](docs/CCXT.md) — market plane (100% CCXT, CI-enforced)
 - [DEPLOY.md](docs/DEPLOY.md) — install, run, ops
 - [LIBRARY_STACK.md](docs/LIBRARY_STACK.md) — polars + ccxt deps

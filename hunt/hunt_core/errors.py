@@ -55,6 +55,24 @@ _DATA_ERROR_NAMES = {
 
 def classify_runtime_error(exc: BaseException) -> str:
     """Return a coarse runtime error class for live-path telemetry."""
+    try:
+        import ccxt
+
+        if isinstance(exc, ccxt.DDoSProtection):
+            return "ip_ban" if "418" in str(exc) else "rate_limit"
+        if isinstance(exc, (ccxt.RateLimitExceeded,)):
+            return "rate_limit"
+        if isinstance(exc, ccxt.ExchangeNotAvailable):
+            text = str(exc).lower()
+            if "418" in text or "ban" in text:
+                return "ip_ban"
+            if "429" in text or "rate limit" in text:
+                return "rate_limit"
+            return "network"
+        if isinstance(exc, ccxt.NetworkError):
+            return "network"
+    except Exception:
+        pass
     name = exc.__class__.__name__.lower()
 
     if isinstance(exc, asyncio.TimeoutError) or name in _NETWORK_ERROR_NAMES:

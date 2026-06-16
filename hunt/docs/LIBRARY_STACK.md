@@ -14,6 +14,7 @@ pip install -e "hunt/[calibrate]"    # polarbt, ml4t-engineer (offline only)
 
 ```bash
 python -c "from hunt_core.bootstrap import require_feature_stack; require_feature_stack()"
+cd hunt && PYTHONPATH=. python -m hunt_core._dev.check_ccxt
 ```
 
 ## Core dependencies
@@ -27,8 +28,8 @@ python -c "from hunt_core.bootstrap import require_feature_stack; require_featur
 | `polars-trading` | Sharpe / drawdown research columns |
 | `bottleneck` | Fast rolling in microstructure |
 | `numpy` | PSAR / Fisher numeric loops |
-| `ccxt` | Binance USD-M REST + Pro WS |
-| `aiohttp` + `aiohttp-socks` | Proxy + intel HTTP |
+| `ccxt` | Binance USD-M REST + Pro WS — **100% market plane** (see [CCXT.md](CCXT.md)) |
+| `aiohttp` + `aiohttp-socks` | Proxy list fetch, Telegram, intel HTTP — **not** Binance market data |
 | `aiogram` | Telegram `/signal`, `/signals` |
 | `pydantic` | Settings / schemas |
 | `structlog` | JSON session logs |
@@ -46,7 +47,7 @@ python -c "from hunt_core.bootstrap import require_feature_stack; require_featur
 | `polarbt` | Polars backtest for threshold sweeps |
 | `ml4t-engineer` | VPIN, dollar bars, triple-barrier labels |
 
-Wired in `hunt_research/calibrate_extras.py` only — not hot path.
+Wired in optional `[calibrate]` extras only — not hot path.
 
 ## Anti-patterns (do not add)
 

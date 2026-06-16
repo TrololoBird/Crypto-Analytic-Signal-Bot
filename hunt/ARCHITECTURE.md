@@ -1,7 +1,7 @@
 # Hunt Watch — Architecture & Strategy
 
-Подсистема **memecoin pump/dump hunt**: REST minute poll + live WS (liq/aggTrade) + spot lead-lag, Telegram on confirm.  
-Отделена в `hunt/`; использует data plane основного бота (`bot/market`, `bot/features`, `bot/engine`).
+Подсистема **memecoin pump/dump hunt**: REST minute poll + CCXT Pro WS (liq/trades/OHLCV/mark/book) + spot lead-lag, Telegram on confirm.  
+Отдельный пакет **`hunt_core`** в `hunt/` — **standalone**, market plane **100% CCXT** ([`docs/CCXT.md`](docs/CCXT.md)). Не импортирует `bot.*` / `engine.*`.
 
 ---
 
@@ -33,24 +33,24 @@
 ```mermaid
 flowchart TB
     subgraph discovery [Discovery — каждые 900s]
-        T[Binance 24h ticker ALL USD-M]
-        S[hunt_watch.screener rank_hunt_candidates]
+        T[CCXT fetchTickers ALL USD-M]
+        S[hunt_core.data.scanner rank_hunt_candidates]
         W[hunt_watchlist.json]
         T --> S --> W
     end
 
     subgraph universe [Universe merge — каждый tick]
-        P[pinned from config.toml]
+        P[pinned from config]
         D[DEFAULT_SYMBOLS]
-        W --> M[resolve_watch_universe]
+        W --> M[hunt_core.data.universe resolve_watch_universe]
         P --> M
         D --> M
         M --> U[active symbols + watch_mode per symbol]
     end
 
     subgraph tick [Minute tick — каждые 60s per symbol]
-        U --> R[REST klines 1m/5m/15m/1h/4h/1d]
-        R --> F[prepare_symbol + indicators]
+        U --> R[CCXT REST klines + fapiData + depth]
+        R --> F[hunt_core.features.prepare_symbol]
         F --> L[assess_hunt_lifecycle FSM]
         L --> A[_dump_analysis / _long_analysis]
         A --> C[_confirm_dump / _confirm_long]
@@ -66,10 +66,10 @@ flowchart TB
 
 ### Шаги по порядку
 
-1. **Scanner** (`scanner_runner.run_scan`, каждые 900s из watch loop)
-   - Все 24h tickers → `score_hunt_row` → top-N в `hunt/data/hunt_watchlist.json`
+1. **Scanner** (`hunt_core.data.scanner.run_scan`, каждые 900s из watch loop — shared `HuntCcxtClient`)
+   - CCXT `fetchTickers` → `rank_hunt_candidates` → top-N в `hunt/data/hunt_watchlist.json`
 
-2. **Universe** (`targets.resolve_watch_universe`)
+2. **Universe** (`hunt_core.data.universe.resolve_watch_universe`)
    - Merge: `config.universe.pinned_symbols` → `DEFAULT_SYMBOLS` → watchlist (score ≥ 45 или `suggest_minute_watch`)
    - Cap: `MAX_DYNAMIC_SYMBOLS + len(pinned)`
    - Mode: pinned table + scanner `watch_bias`; `effective_watch_mode` учитывает lifecycle
@@ -108,30 +108,25 @@ flowchart TB
 ## 3. Архитектура модулей
 
 ```
-hunt/hunt_watch/
-├── paths.py           # DATA paths (single source)
-├── screener.py        # 24h ticker scoring (radar)
-├── scanner_runner.py  # batch scan → watchlist JSON
-├── targets.py         # universe + watch_mode merge
-├── lifecycle.py       # HuntPhase FSM + gates
-├── levels.py          # structural entry/SL/TP (fib + swing)
-├── signal_tracker.py  # latch + follow-up events
-└── bootstrap.py       # sys.path for scripts
-
-hunt/scripts/watch.py   # orchestrator (~2700 LOC)
-  ├── imports engine.market, engine.features, engine.domain, engine.telegram
-  └── hunt-specific logic inline: _dump_analysis, _confirm_*, _format_telegram
+hunt/hunt_core/           # standalone package (python -m hunt_core)
+  ├── market/            # CCXT REST + Pro — see docs/CCXT.md (13 modules)
+  ├── data/scanner.py    # 24h ticker scan → watchlist JSON
+  ├── data/universe.py   # pinned + watchlist merge
+  ├── runtime/cycle/     # watch loop orchestrator
+  ├── runtime/tick_assembly.py
+  └── data/collect.py    # REST pack via HuntCcxtClient only
 ```
 
-### Зависимости (shared kernel only)
+### Market data (100% CCXT)
 
-| Hunt Watch | engine module | Зачем |
-|------------|---------------|-------|
-| watch.py | `engine.market.data` | REST klines, ticker, OI, L/S, funding |
-| watch.py | `engine.features.prepare` | Polars frames, indicators |
-| watch.py | `engine.telegram` | TelegramBroadcaster |
-| watch.py | `engine.domain.config` | load_settings, proxy |
-| hunt_watch | **never** `bot.*` | Hunt — отдельный продукт |
+| Component | Module | Зачем |
+|-----------|--------|-------|
+| REST + metrics | `hunt_core.market.client` | OHLCV, OI, funding, fapiData implicit |
+| Live WS | `hunt_core.market.streams` | Pro `watch*` multiplex |
+| Spot lead-lag | `hunt_core.market.spot` | CCXT spot companion |
+| Entry | `create_hunt_market_plane_from_settings()` | Factory bootstrap |
+
+**Never** `engine.market.*` or raw `fapi.binance.com` in hunt. CI: `python -m hunt_core._dev.check_ccxt`.
 
 ---
 
@@ -197,7 +192,7 @@ stateDiagram-v2
 | `dump_active` | wait | Mid-dump — monitor only |
 | `post_dump_bounce` | long | Отскок после **настоящего** дампа (не mega-leg) |
 
-Early alerts: `hunt_watch/early_alert.py` (PUMP/DUMP PREP/START до confirm).
+Early alerts: `hunt_core/scan/early.py` (PUMP/DUMP PREP/START до confirm).
 
 ### Поля HuntLifecycle
 
@@ -376,12 +371,8 @@ Scanner может добавить до 12 dynamic symbols; pinned modes **не
 
 ## 12. Independent verification
 
-`scripts/independent_batch.py` + `beat_check.py`:
-- Raw REST klines, собственный RSI
-- Scoring long vs short без hunt FSM
-- Snapshot: `hunt/data/snapshots/hunt_independent_batch.json`
-
-Использовать для **сверки** hunt TG vs sanity check (JCT invalid_short кейс).
+Repo root `scripts/hunt_probe_independent.py` — CCXT sync probe (raw REST removed).  
+Hunt runtime: `python -m hunt_core._dev.smoke_signals`, `ccxt_plane_smoke`.
 
 ---
 
@@ -392,7 +383,7 @@ Scanner может добавить до 12 dynamic symbols; pinned modes **не
 python scripts/clean_session_data.py --mode smoke --config config.toml
 
 # run watch
-python hunt/scripts/watch.py --interval 60
+python -m hunt_core watch --interval 60
 
 # logs
 tail -f hunt/data/dump_minute_watch.log
@@ -432,55 +423,52 @@ Hunt **не имеет** полноценного event-driven backtest как `
 
 ### Чего нет (gap)
 
-- **JSONL replay MVP** — `hunt/scripts/jsonl_replay.py` + `hunt_watch/jsonl_replay.py`: tail `dump_minute_watch*.jsonl` → `confirm_dump/long` + `evaluate_alert_gate` + `confirm_min` sweep
 - ~~**WS `@kline_5m` fast tick**~~ — реализовано: grace 2s + merge в REST `5m_closed`
 - **Полный signal-path backtest** — нет forward PnL label на replay rows (join tracker + 5m bars — next)
 
 ### Рекомендуемый offline pipeline
 
 ```bash
-.venv/bin/python hunt/scripts/outcomes_report.py
-.venv/bin/python hunt/scripts/reconcile_signals.py --backfill-legacy
-.venv/bin/python hunt/scripts/calibrate_all.py
-.venv/bin/python hunt/scripts/calibrate_levels.py
-.venv/bin/python hunt/scripts/reconcile_signals.py   # active reconcile
+cd hunt && PYTHONPATH=.
+python -m hunt_core._dev.check_logic
+python -m hunt_core._dev.smoke_signals --baseline data/baseline/hunt_baseline.json BTCUSDT
+python -m hunt_core._dev.ccxt_plane_smoke BTCUSDT --ws-seconds 3
 ```
+
+Tracker/outcome tooling lives in `hunt_core/track/` (no `hunt/scripts/` tree).
 
 ---
 
 ## 15. Binance public API (Hunt usage)
 
-Только **публичные** USD-M endpoints. Источник: `watch._fetch_rest_pack`, `HuntWsFeed`, `param_calibration` direct klines.
+Только **публичные** USD-M endpoints через **CCXT 4.x** (`hunt_core/market/`). Источник: `HuntCcxtClient`, `HuntCcxtStreams`, `HuntCcxtSpotCompanion`. См. [docs/CCXT.md](docs/CCXT.md).
 
-### Используется сейчас
+### Используется сейчас (CCXT surface)
 
-| Канал | Endpoints / streams | В hunt |
-|-------|---------------------|--------|
-| REST | `klines` 1m–1d | Primary frames (60s poll) |
-| REST | `ticker/24h`, `exchangeInfo` | Scanner, universe |
-| REST | `premiumIndex`, `fundingRate`, `fundingRate` history | Market layer |
-| REST | `/futures/data/openInterest`, OI hist 5m | OI flush/build, z-score |
-| REST | global/top/account L/S ratio + 5m series | Crowded longs/shorts |
-| REST | taker long/short ratio 5m/15m/1h | Sell/buy pressure |
-| REST | `basis`, `aggTrades`, `depth`, `bookTicker` | Microstructure |
-| REST | Spot companion (engine) | lead-lag vs perp |
-| WS | `wss://fstream.binance.com/market/stream` | Routed endpoint (legacy off 2026-04-23) |
-| WS | `!forceOrder@arr` | Liquidation cascades 5m |
-| WS | `!markPrice@arr@1s` | Live mark/index/funding + **`ap`** (basis gate) |
-| WS | `@aggTrade` per symbol (cap 24) | Taker delta via **`nq`** (RPI excluded) |
-| WS | `@kline_5m` per symbol | Fast confirm + 2s grace |
+| Канал | CCXT / Pro | В hunt |
+|-------|------------|--------|
+| REST | `fetchOHLCV` 1m–1d | Primary frames (60s poll) |
+| REST | `fetchTickers`, `loadMarkets` | Scanner, universe |
+| REST | `fetchFundingRates`, `fetchFundingRate*`, `fetchFundingIntervals` | Market layer |
+| REST | `fetchOpenInterest`, `fapiDataGetOpenInterestHist` | OI flush/build, z-score |
+| REST | `fapiDataGet*LongShort*` + series | Crowded longs/shorts |
+| REST | `fapiDataGetTakerlongshortRatio` | Sell/buy pressure |
+| REST | `fapiDataGetBasis`, `fetchAggTrades`, `fetchOrderBook` | Microstructure |
+| REST | spot `fetchTicker` + `fetchOHLCV` | lead-lag vs perp |
+| WS (Pro) | `watchOHLCVForSymbols`, `watchTradesForSymbols`, … | Live enrich |
+| WS (Pro) | `watchLiquidationsForSymbols` | Liquidation cascades 5m |
+| WS (Pro) | `watchMarkPrices` | Live mark/index/funding + basis (Binance primary) |
+| WS (Pro) | `watchFundingRates` | Secondaries only (`HUNT_CROSS_WS`); **not** Binance primary |
 
-### Не используется (кандидаты на улучшение)
+### Не используется через CCXT Pro сегодня (roadmap)
 
 | Возможность | Зачем hunt |
 |-------------|------------|
-| WS `@kline_1m` | Sub-5m confirm (сейчас только 5m WS) |
-| WS `@rpiDepth` | RPI volume excluded from `nq` — optional CVD supplement |
-| WS `@depth` diff | Order book imbalance live (сейчас REST snapshot) |
-| `indexPriceKlines` / `markPriceKlines` | Basis vs spot divergence |
+| `watchOpenInterest` (if added to CCXT) | OI delta без REST budget hit |
+| Sub-minute kline WS beyond 1m multiplex | Sub-5m confirm |
+| Deep order book diff stream | Live imbalance beyond `watchOrderBookForSymbols` |
+| `fetchIndexOHLCV` / `fetchMarkOHLCV` history | Basis vs spot divergence calibration |
 | `longShortRatio` 1d history | Regime calibration |
-| `topLongShortPositionRatio` vs `topLongShortAccountRatio` | Split whale vs retail crowding |
-| Continuous `openInterest` WS | OI delta без REST budget hit |
 
 Ограничение: `/futures/data/*` — **1000 req / 5 min / IP**; hunt batch OI на minute tick, не per-second.
 

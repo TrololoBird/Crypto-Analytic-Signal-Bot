@@ -20,7 +20,7 @@ from hunt_core.data.completeness import (
     audit_kline_integrity,
     repair_kline_map_gaps,
 )
-from hunt_core.detect.scoring import (
+from hunt_core.scan.scoring import (
     confirm_dump as _confirm_dump,
     confirm_long as _confirm_long,
     dump_analysis as _dump_analysis,
@@ -30,7 +30,8 @@ from hunt_core.detect.scoring import (
 )
 from hunt_core.analysis.pinned_deep import prepare_htf_frame
 from hunt_core.analysis.deep_signal import build_liquidity_scenarios
-from hunt_core.scan._engine_impl import enrich_dump_setup, enrich_long_setup
+from hunt_core.scan.predump import enrich_dump_setup
+from hunt_core.scan.prepump import enrich_long_setup
 from hunt_core.regime.leg_fsm import (
     apply_short_invalidation,
     assess_hunt_lifecycle,
@@ -73,7 +74,44 @@ from hunt_core.features.snapshot import (
     tf_snapshot_lite,
 )
 from hunt_core.gate.delivery import liquidity_skip_reason
+from hunt_core.runtime.state import current_symbol_state
 from hunt_core.data.universe import PINNED_SYMBOLS
+
+_CONFIRM_STICKY_MAX_TICKS = 6
+
+
+def _apply_dump_confirm_sticky(
+    symbol: str,
+    *,
+    confirmed: bool,
+    confirm_hard: list[str],
+    lifecycle: Any,
+) -> tuple[bool, list[str]]:
+    """Hold dump confirm across 1–2 transient demote ticks (orderflow / bar gap)."""
+    store = current_symbol_state()
+    sym = symbol.upper()
+    if getattr(lifecycle, "invalidate_short", False):
+        store.confirm_sticky.pop(sym, None)
+        return confirmed, confirm_hard
+    if confirmed:
+        store.confirm_sticky[sym] = {
+            "confirmed": True,
+            "hard": list(confirm_hard),
+            "ticks": 0,
+        }
+        return confirmed, confirm_hard
+    latched = store.confirm_sticky.get(sym)
+    if not isinstance(latched, dict) or not latched.get("confirmed"):
+        return confirmed, confirm_hard
+    ticks = int(latched.get("ticks") or 0) + 1
+    latched["ticks"] = ticks
+    store.confirm_sticky[sym] = latched
+    if ticks <= _CONFIRM_STICKY_MAX_TICKS:
+        return True, list(latched.get("hard") or confirm_hard)
+    store.confirm_sticky.pop(sym, None)
+    return confirmed, confirm_hard
+
+
 from hunt_core.data_readiness import assess_symbol_data_readiness
 from hunt_core.domain.market_regime import symbol_regime_features
 from hunt_core.domain.schemas import SymbolFrames, UniverseSymbol
@@ -90,6 +128,57 @@ kline_limits = kline_limits
 safe_fetch = safe_fetch
 squeeze_watch = squeeze_watch
 format_squeeze_telegram = format_squeeze_telegram
+
+
+def _patch_market_live(
+    market: dict[str, Any],
+    *,
+    prepared: Any,
+    pack: dict[str, Any],
+    book: dict[str, Any],
+    ws_snap: dict[str, Any] | None,
+    price: float,
+) -> None:
+    """Lightweight market refresh for hot carry — no full market_snapshot."""
+    if price > 0:
+        market["last_price"] = price
+    if getattr(prepared, "oi_current", None) is not None:
+        market["oi"] = prepared.oi_current
+    if getattr(prepared, "oi_change_pct", None) is not None:
+        market["oi_change_pct"] = prepared.oi_change_pct
+    if getattr(prepared, "taker_ratio", None) is not None:
+        market["taker_5m"] = prepared.taker_ratio
+    if book.get("bid_price"):
+        market["bid_price"] = book["bid_price"]
+        market["ask_price"] = book.get("ask_price")
+    if isinstance(pack.get("oi"), (int, float)):
+        market["oi"] = pack["oi"]
+    if ws_snap:
+        for key in (
+            "liquidation_score_5m",
+            "liquidation_long_notional_5m",
+            "liquidation_short_notional_5m",
+            "agg_trade_delta_60s",
+        ):
+            val = ws_snap.get(key)
+            if val is not None:
+                market[key] = val
+
+
+def _refresh_tf_stale_flags(tf: dict[str, Any]) -> None:
+    for _stf in REQUIRED_SIGNAL_KLINE_TFS:
+        closed_key = f"{_stf}_closed" if _stf != "1m" else "1m_closed"
+        block = tf.get(closed_key) or tf.get(_stf) or {}
+        close_ms = block.get("close_time_ms") if isinstance(block, dict) else None
+        if close_ms is None:
+            tf[f"stale_{_stf}"] = True
+        else:
+            from hunt_core.data.completeness import TF_MS
+
+            interval = TF_MS.get(_stf, 300_000)
+            age = int(datetime.now(UTC).timestamp() * 1000) - int(close_ms)
+            tf[f"stale_{_stf}"] = age > int(interval * 2.5)
+
 
 async def snapshot_symbol(
     client: HuntCcxtClient,
@@ -110,6 +199,9 @@ async def snapshot_symbol(
     pump_stats: dict[str, Any] | None = None,
     tier: SnapshotTier = "full",
     symbol_state: SymbolStateStore | None = None,
+    kline_limits_override: dict[str, int] | None = None,
+    kline_map_override: dict[str, Any] | None = None,
+    enrichment_pack_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     meta = exchange_by_sym.get(symbol)
     ticker = ticker_by_sym.get(symbol)
@@ -147,32 +239,39 @@ async def snapshot_symbol(
         seed_source="dump_minute_watch",
         strategy_fits=(),
     )
-    limits = kline_limits(minimums, symbol)
-    if stagger_klines_ms > 0 and tier == "full":
+    limits = kline_limits_override if kline_limits_override is not None else kline_limits(minimums, symbol)
+    hot_tier = tier == "hot"
+    if kline_map_override is not None:
+        kline_map = dict(kline_map_override)
+        fetch_errors: dict[str, str] = {}
+    elif stagger_klines_ms > 0 and tier == "full":
         _base_tfs = ("1m", "5m", "15m", "1h", "4h", "1d")
         tf_order = _base_tfs + (("1w",) if "1w" in limits else ())
         kline_map: dict[str, Any] = {}
         fetch_errors: dict[str, str] = {}
         for name in tf_order:
             res = await safe_fetch(
-                client.fetch_klines_cached(symbol, name, limit=limits[name]),
+                lambda name=name: client.fetch_klines_cached(symbol, name, limit=limits[name]),
                 context=f"klines.{name}",
+                client=client,
             )
             kline_map[name] = res
             if res is None:
                 fetch_errors[name] = "fetch_failed"
             await asyncio.sleep(stagger_klines_ms / 1000.0)
     else:
+        snap_tier: SnapshotTier = "fast" if hot_tier else tier
         kline_map, fetch_errors = await resolve_kline_map(
-            client, symbol, limits, tier=tier, safe_fetch=safe_fetch
+            client, symbol, limits, tier=snap_tier, safe_fetch=safe_fetch
         )
-    kline_map, fetch_errors = await repair_kline_map_gaps(
-        client,
-        symbol,
-        kline_map,
-        fetch_errors,
-        required_tfs=REQUIRED_SIGNAL_KLINE_TFS,
-    )
+    if not hot_tier:
+        kline_map, fetch_errors = await repair_kline_map_gaps(
+            client,
+            symbol,
+            kline_map,
+            fetch_errors,
+            required_tfs=REQUIRED_SIGNAL_KLINE_TFS,
+        )
     integrity = audit_kline_integrity(
         kline_map,
         symbol=symbol,
@@ -188,7 +287,12 @@ async def snapshot_symbol(
         )
     df_1m = kline_map["1m"]
     df_5m = kline_map["5m"]
-    pack = await _fetch_rest_pack(client, symbol, tier=tier, ws_feed=ws_feed)
+    if enrichment_pack_override is not None and enrichment_pack_override:
+        pack = dict(enrichment_pack_override)
+    else:
+        pack = await _fetch_rest_pack(
+            client, symbol, tier="fast" if hot_tier else tier, ws_feed=ws_feed
+        )
     # leverageBracket is signed USER_DATA — public-only hunt uses default liq tiers
     liq_skip = liquidity_skip_reason(
         quote_volume=market_row["quote_volume"],
@@ -219,30 +323,58 @@ async def snapshot_symbol(
         ask_qty=book.get("ask_qty"),
         book_bids=book_bids or None,
         book_asks=book_asks or None,
-        frame_source_flags=("frames_rest_full",),
+        frame_source_flags=("frames_hot_delta",) if hot_tier else ("frames_rest_full",),
     )
 
-    prepared = prepare_symbol(item, frames, minimums=minimums, settings=settings)
-    young_listing = False
     bars_4h = int(kline_map["4h"].height if kline_map.get("4h") is not None else 0)
     bars_1h = int(kline_map["1h"].height if kline_map.get("1h") is not None else 0)
-    if prepared is None:
-        young_listing = True
-        if should_use_young_lite_path(bars_4h=bars_4h, bars_1h=bars_1h):
-            # SOXL/SKHYNIX: native 4h prepare empty despite 50–160 raw bars — synth from 1h.
-            prepared = lite_prepared(kline_map, symbol=symbol)
-        else:
-            relaxed = {"5m": 144, "15m": 96, "1h": 24, "4h": 6}
-            prepared = prepare_symbol(item, frames, minimums=relaxed, settings=settings)
-            if prepared is None:
+    cached_prep = None
+    hot_delta = False
+    if hot_tier:
+        from hunt_core.data.frame_cache import get_frame_cache
+
+        cached_prep = get_frame_cache().get_prepared(symbol)
+        hot_delta = cached_prep is not None
+
+    carry_base: dict[str, Any] | None = None
+    hot_carry = False
+    if hot_tier and hot_delta:
+        carry_base = get_frame_cache().get_carry_row(symbol)
+        hot_carry = carry_base is not None
+
+    if hot_delta and cached_prep is not None:
+        prepared = cached_prep
+        young_listing = False
+    else:
+        prepared = prepare_symbol(item, frames, minimums=minimums, settings=settings)
+        young_listing = False
+        if prepared is None:
+            young_listing = True
+            if should_use_young_lite_path(bars_4h=bars_4h, bars_1h=bars_1h):
                 prepared = lite_prepared(kline_map, symbol=symbol)
             else:
-                patch_work_4h(prepared, kline_map, symbol=symbol)
-    else:
-        patch_work_4h(prepared, kline_map, symbol=symbol)
+                relaxed = {"5m": 144, "15m": 96, "1h": 24, "4h": 6}
+                prepared = prepare_symbol(item, frames, minimums=relaxed, settings=settings)
+                if prepared is None:
+                    prepared = lite_prepared(kline_map, symbol=symbol)
+                else:
+                    patch_work_4h(prepared, kline_map, symbol=symbol)
+        else:
+            patch_work_4h(prepared, kline_map, symbol=symbol)
 
     prep_groups = resolve_prepare_groups_for_symbol(symbol)
-    work_1m = _prepare_frame(df_1m, active_groups=prep_groups)
+    if hot_delta:
+        from hunt_core.features.prepare import _cached_prepare_frame
+
+        work_1m = _cached_prepare_frame(
+            df_1m, symbol=symbol, interval="1m", active_groups=prep_groups
+        )
+        if df_5m is not None and not df_5m.is_empty():
+            prepared.work_5m = _cached_prepare_frame(
+                df_5m, symbol=symbol, interval="5m", active_groups=prep_groups
+            )
+    else:
+        work_1m = _prepare_frame(df_1m, active_groups=prep_groups)
     delta_raw = None
     if prepared.work_15m is not None and not prepared.work_15m.is_empty():
         delta_raw = _col(prepared.work_15m, "delta_ratio", None)
@@ -259,8 +391,8 @@ async def snapshot_symbol(
         funding_info=funding_info,
         delta=delta,
     )
-    if not young_listing:
-        readiness = assess_symbol_data_readiness(prepared, settings, universe_item=item)
+    if not young_listing and not hot_tier:
+        readiness = assess_symbol_data_readiness(prepared, settings, universe_item=item, snapshot_tier=tier)
         if not readiness.ready:
             reason = readiness.reason or "data.not_ready"
             return {
@@ -283,7 +415,8 @@ async def snapshot_symbol(
         if beta is not None:
             prepared.btc_beta_1h = beta
 
-    enrich_work_research_frames(prepared)
+    if not hot_tier:
+        enrich_work_research_frames(prepared)
 
     impulse = impulse_context(prepared.work_4h, prepared.work_1h, symbol)
     ih4, il4 = impulse["impulse_high_4h"], impulse["impulse_low_4h"]
@@ -291,75 +424,117 @@ async def snapshot_symbol(
     fib_4h = leg_fib_levels(ih4, il4, direction="down")
     session = session_stats(work_1m)
 
-    if kline_map.get("1d") is not None:
-        work_1d_snap = (
-            prepare_htf_frame(kline_map["1d"], symbol)
-            if symbol in PINNED_SYMBOLS
-            else _prepare_frame(kline_map["1d"], active_groups=prep_groups)
-        )
-        if work_1d_snap is not None and not work_1d_snap.is_empty():
-            probe = tf_snapshot_for_symbol(work_1d_snap, symbol)
-            tf_1d = (
-                probe
-                if probe.get("status") != "empty" and probe.get("rsi14") is not None
-                else tf_snapshot_lite(kline_map["1d"])
+    if hot_carry and carry_base is not None:
+        tf = dict(carry_base.get("timeframes") or {})
+        tf["1m"] = tf_snapshot(work_1m)
+        tf["1m_closed"] = tf_snapshot(work_1m, closed=True)
+        if prepared.work_5m is not None and not prepared.work_5m.is_empty():
+            tf["5m"] = tf_snapshot(prepared.work_5m)
+            tf["5m_closed"] = tf_snapshot(
+                prepared.work_5m, closed=True, candle_patterns=True
             )
-        else:
-            tf_1d = tf_snapshot_lite(kline_map["1d"])
+        merge_ws_kline_closed(tf, symbol, ws_feed, tf_key="1m_closed")
+        merge_ws_kline_closed(tf, symbol, ws_feed, tf_key="5m_closed")
+        merge_ws_kline_closed(tf, symbol, ws_feed, tf_key="15m_closed")
+        tf["stale_15m"] = _snapshot_mod._stale_15m_flag(tf)
+        _refresh_tf_stale_flags(tf)
     else:
-        tf_1d = {"status": "empty"}
-
-    tf = {
-        "1m": tf_snapshot(work_1m),
-        "1m_closed": tf_snapshot(work_1m, closed=True),
-        "3m": {"status": "empty"},
-        "3m_closed": {"status": "empty"},
-        "5m": tf_snapshot(prepared.work_5m),
-        "5m_closed": tf_snapshot(prepared.work_5m, closed=True, candle_patterns=True),
-        "15m": attach_pp_flags(tf_snapshot_for_symbol(prepared.work_15m, symbol), prepared.work_15m),
-        "15m_closed": attach_pp_flags(tf_snapshot_for_symbol(prepared.work_15m, symbol, closed=True, candle_patterns=True), prepared.work_15m, closed=True),
-        "1h": attach_pp_flags(tf_snapshot_for_symbol(prepared.work_1h, symbol, rsi_trendline=True, hidden_stoch_div=True, chart_patterns=True), prepared.work_1h),
-        "1h_closed": attach_pp_flags(tf_snapshot_for_symbol(prepared.work_1h, symbol, closed=True, rsi_trendline=True, hidden_stoch_div=True, chart_patterns=True), prepared.work_1h, closed=True),
-        "4h": tf_snapshot_for_symbol(prepared.work_4h, symbol, hidden_stoch_div=True, chart_patterns=True),
-        "4h_closed": tf_snapshot_for_symbol(prepared.work_4h, symbol, closed=True, hidden_stoch_div=True, chart_patterns=True),
-        "1d": tf_1d,
-    }
-    if "1w" in limits and kline_map.get("1w") is not None:
-        work_1w = (
-            prepare_htf_frame(kline_map["1w"], symbol)
-            if symbol in PINNED_SYMBOLS
-            else _prepare_frame(kline_map["1w"], active_groups=prep_groups)
-        )
-        tf["1w"] = (
-            tf_snapshot_for_symbol(work_1w, symbol)
-            if work_1w is not None and not work_1w.is_empty()
-            else tf_snapshot_lite(kline_map["1w"])
-        )
-    merge_ws_kline_closed(tf, symbol, ws_feed, tf_key="1m_closed")
-    merge_ws_kline_closed(tf, symbol, ws_feed, tf_key="5m_closed")
-    merge_ws_kline_closed(tf, symbol, ws_feed, tf_key="15m_closed")
-    tf["stale_15m"] = _snapshot_mod._stale_15m_flag(tf)
-    for _stf in REQUIRED_SIGNAL_KLINE_TFS:
-        closed_key = f"{_stf}_closed" if _stf != "1m" else "1m_closed"
-        block = tf.get(closed_key) or tf.get(_stf) or {}
-        close_ms = block.get("close_time_ms") if isinstance(block, dict) else None
-        if close_ms is None:
-            tf[f"stale_{_stf}"] = True
+        if kline_map.get("1d") is not None:
+            work_1d_snap = (
+                prepare_htf_frame(kline_map["1d"], symbol)
+                if symbol in PINNED_SYMBOLS
+                else _prepare_frame(kline_map["1d"], active_groups=prep_groups)
+            )
+            if work_1d_snap is not None and not work_1d_snap.is_empty():
+                probe = tf_snapshot_for_symbol(work_1d_snap, symbol)
+                tf_1d = (
+                    probe
+                    if probe.get("status") != "empty" and probe.get("rsi14") is not None
+                    else tf_snapshot_lite(kline_map["1d"])
+                )
+            else:
+                tf_1d = tf_snapshot_lite(kline_map["1d"])
         else:
-            from hunt_core.data.completeness import TF_MS
+            tf_1d = {"status": "empty"}
 
-            interval = TF_MS.get(_stf, 300_000)
-            age = int(datetime.now(UTC).timestamp() * 1000) - int(close_ms)
-            tf[f"stale_{_stf}"] = age > int(interval * 2.5)
-    if prepared.work_15m is not None and not prepared.work_15m.is_empty():
-        _regime_feats = symbol_regime_features(prepared.work_15m)
-        for _tf_key in ("15m", "15m_closed"):
-            _block = tf.get(_tf_key)
-            if isinstance(_block, dict) and _block.get("status") != "empty":
-                if _regime_feats.get("return_entropy_50") is not None:
-                    _block["return_entropy_50"] = _regime_feats["return_entropy_50"]
-                if _regime_feats.get("volume_regime_break"):
-                    _block["volume_regime_break"] = True
+        tf = {
+            "1m": tf_snapshot(work_1m),
+            "1m_closed": tf_snapshot(work_1m, closed=True),
+            "3m": {"status": "empty"},
+            "3m_closed": {"status": "empty"},
+            "5m": tf_snapshot(prepared.work_5m),
+            "5m_closed": tf_snapshot(
+                prepared.work_5m, closed=True, candle_patterns=True
+            ),
+            "15m": attach_pp_flags(
+                tf_snapshot_for_symbol(prepared.work_15m, symbol), prepared.work_15m
+            ),
+            "15m_closed": attach_pp_flags(
+                tf_snapshot_for_symbol(
+                    prepared.work_15m, symbol, closed=True, candle_patterns=True
+                ),
+                prepared.work_15m,
+                closed=True,
+            ),
+            "1h": attach_pp_flags(
+                tf_snapshot_for_symbol(
+                    prepared.work_1h,
+                    symbol,
+                    rsi_trendline=True,
+                    hidden_stoch_div=True,
+                    chart_patterns=True,
+                ),
+                prepared.work_1h,
+            ),
+            "1h_closed": attach_pp_flags(
+                tf_snapshot_for_symbol(
+                    prepared.work_1h,
+                    symbol,
+                    closed=True,
+                    rsi_trendline=True,
+                    hidden_stoch_div=True,
+                    chart_patterns=True,
+                ),
+                prepared.work_1h,
+                closed=True,
+            ),
+            "4h": tf_snapshot_for_symbol(
+                prepared.work_4h, symbol, hidden_stoch_div=True, chart_patterns=True
+            ),
+            "4h_closed": tf_snapshot_for_symbol(
+                prepared.work_4h,
+                symbol,
+                closed=True,
+                hidden_stoch_div=True,
+                chart_patterns=True,
+            ),
+            "1d": tf_1d,
+        }
+        if "1w" in limits and kline_map.get("1w") is not None:
+            work_1w = (
+                prepare_htf_frame(kline_map["1w"], symbol)
+                if symbol in PINNED_SYMBOLS
+                else _prepare_frame(kline_map["1w"], active_groups=prep_groups)
+            )
+            tf["1w"] = (
+                tf_snapshot_for_symbol(work_1w, symbol)
+                if work_1w is not None and not work_1w.is_empty()
+                else tf_snapshot_lite(kline_map["1w"])
+            )
+        merge_ws_kline_closed(tf, symbol, ws_feed, tf_key="1m_closed")
+        merge_ws_kline_closed(tf, symbol, ws_feed, tf_key="5m_closed")
+        merge_ws_kline_closed(tf, symbol, ws_feed, tf_key="15m_closed")
+        tf["stale_15m"] = _snapshot_mod._stale_15m_flag(tf)
+        _refresh_tf_stale_flags(tf)
+        if prepared.work_15m is not None and not prepared.work_15m.is_empty():
+            _regime_feats = symbol_regime_features(prepared.work_15m)
+            for _tf_key in ("15m", "15m_closed"):
+                _block = tf.get(_tf_key)
+                if isinstance(_block, dict) and _block.get("status") != "empty":
+                    if _regime_feats.get("return_entropy_50") is not None:
+                        _block["return_entropy_50"] = _regime_feats["return_entropy_50"]
+                    if _regime_feats.get("volume_regime_break"):
+                        _block["volume_regime_break"] = True
     ws_snap = ws_feed.snapshot(symbol) if ws_feed is not None else None
     _overlay_ws_market(prepared, ws_snap)
     live_px, live_src = resolve_live_price(
@@ -372,27 +547,65 @@ async def snapshot_symbol(
     if live_px > 0:
         price = live_px
         market_row["last_price"] = live_px
-    spot_extra = (
-        spot_companion.enrichments_for(symbol) if spot_companion is not None else None
-    )
-    market = market_snapshot(
-        prepared,
-        pack=pack,
-        book=book,
-        premium_row=premium_row,
-        ticker=ticker,
-        ws_snap=ws_snap,
-        spot_extra=spot_extra,
-    )
-    await attach_cross_market_fields(
-        market,
-        client=client,
-        symbol=symbol,
-        ws_feed=ws_feed,
-    )
-    regime = regime_snapshot(prepared)
-    if prepared.work_15m is not None and not prepared.work_15m.is_empty():
-        regime.update(symbol_regime_features(prepared.work_15m))
+
+    carry_book_walls: Any = None
+    carry_cross: Any = None
+    carry_liq: Any = None
+    carry_data_quality: Any = None
+    if hot_carry and carry_base is not None:
+        market = dict(carry_base.get("market") or {})
+        regime = dict(carry_base.get("regime") or {})
+        _patch_market_live(
+            market,
+            prepared=prepared,
+            pack=pack,
+            book=book,
+            ws_snap=ws_snap,
+            price=price,
+        )
+        if hot_tier and ws_feed is not None and ws_feed.cross_ws_connected:
+            await attach_cross_market_fields(
+                market,
+                client=client,
+                symbol=symbol,
+                ws_feed=ws_feed,
+            )
+        carry_book_walls = carry_base.get("book_walls")
+        carry_cross = carry_base.get("cross_microstructure")
+        carry_liq = carry_base.get("liquidity_scenarios")
+        carry_data_quality = carry_base.get("data_quality")
+    else:
+        spot_extra = (
+            spot_companion.enrichments_for(symbol)
+            if spot_companion is not None
+            else None
+        )
+        market = market_snapshot(
+            prepared,
+            pack=pack,
+            book=book,
+            premium_row=premium_row,
+            ticker=ticker,
+            ws_snap=ws_snap,
+            spot_extra=spot_extra,
+        )
+        if hot_tier and ws_feed is not None and ws_feed.cross_ws_connected:
+            await attach_cross_market_fields(
+                market,
+                client=client,
+                symbol=symbol,
+                ws_feed=ws_feed,
+            )
+        elif not hot_tier:
+            await attach_cross_market_fields(
+                market,
+                client=client,
+                symbol=symbol,
+                ws_feed=ws_feed,
+            )
+        regime = regime_snapshot(prepared)
+        if prepared.work_15m is not None and not prepared.work_15m.is_empty():
+            regime.update(symbol_regime_features(prepared.work_15m))
     hunt_h, hunt_l, session_mem = merge_hunt_extremes(
         symbol,
         price=price,
@@ -406,6 +619,18 @@ async def snapshot_symbol(
     result: dict[str, Any] = {
         "ts": datetime.now(UTC).isoformat(),
         "snapshot_tier": tier,
+        "tick_path": (
+            "hot_carry"
+            if hot_carry
+            else (
+                "hot_delta"
+                if hot_delta
+                else ("hot_ws" if hot_tier else "rest_snapshot")
+            )
+        ),
+        "hot_tick_no_rest": hot_tier,
+        "hot_delta": hot_delta,
+        "hot_carry": hot_carry,
         "symbol": symbol,
         "watch_mode": watch_mode,
         "young_listing": young_listing,
@@ -427,7 +652,9 @@ async def snapshot_symbol(
         "session_memory": session_mem,
         "fib": fib,
         "kline_limits": limits,
-        "data_quality": data_quality_report(
+        "data_quality": carry_data_quality
+        if hot_carry and carry_data_quality is not None
+        else data_quality_report(
             prepared,
             frames=frames,
             df_1m=df_1m,
@@ -435,12 +662,16 @@ async def snapshot_symbol(
             book=book,
             tf=tf,
         ),
-        "book_walls": book_walls_from_depth(pack.get("book_depth")),
-        "cross_microstructure": None,
+        "book_walls": carry_book_walls
+        if hot_carry and carry_book_walls is not None
+        else book_walls_from_depth(pack.get("book_depth")),
+        "cross_microstructure": carry_cross if hot_carry else None,
         "_prepared": prepared,
     }
+    if hot_carry and carry_liq is not None:
+        result["liquidity_scenarios"] = carry_liq
 
-    if symbol in PINNED_SYMBOLS:
+    if symbol in PINNED_SYMBOLS and not hot_tier:
         try:
             import polars as pl
             from hunt_core.features.prepare_columns import align_series_to_klines
@@ -487,10 +718,11 @@ async def snapshot_symbol(
                 result["book_walls"] = cx_walls
         except Exception as exc:
             LOG.warning("cross_microstructure_snapshot_failed | symbol=%s error=%s", symbol, exc)
-    try:
-        result["liquidity_scenarios"] = build_liquidity_scenarios(result).to_dict()
-    except Exception as exc:
-        LOG.warning("liquidity_scenarios_failed | symbol=%s error=%s", symbol, exc)
+    if not hot_tier and not hot_carry:
+        try:
+            result["liquidity_scenarios"] = build_liquidity_scenarios(result).to_dict()
+        except Exception as exc:
+            LOG.warning("liquidity_scenarios_failed | symbol=%s error=%s", symbol, exc)
 
     apply_cross_exchange_flat(result)
 
@@ -583,6 +815,16 @@ async def snapshot_symbol(
         lifecycle,
         dump=dump,
     )
+    if not lifecycle.invalidate_short:
+        sticky_conf, sticky_hard = _apply_dump_confirm_sticky(
+            symbol,
+            confirmed=confirmed,
+            confirm_hard=list(confirm_hard),
+            lifecycle=lifecycle,
+        )
+        if sticky_conf and not confirmed:
+            lifecycle_note = None
+        confirmed, confirm_hard = sticky_conf, sticky_hard
     dump["confirm_hard"] = confirm_hard
     dump["phase"] = _phase(dump, confirmed, symbol=symbol, lifecycle_note=lifecycle_note)
     dump["confirmed"] = confirmed
@@ -648,6 +890,107 @@ async def snapshot_symbol(
 
     result["factor_panel"] = build_factor_panel(result)
 
+    if not result.get("error") and tier in ("full", "fast", "hot"):
+        from hunt_core.data.frame_cache import get_frame_cache
+
+        cache = get_frame_cache()
+        cache.seed_klines(symbol, kline_map)
+        cache.seed_enrichment(symbol, pack)
+        if prepared is not None and (tier in ("full", "fast") or hot_delta):
+            cache.seed_prepared(symbol, prepared)
+        if tier in ("full", "fast") and not hot_carry:
+            cache.seed_carry_row(symbol, result)
+
     return result
 
+
+async def hot_tick_symbol(
+    client: HuntCcxtClient,
+    settings: Any,
+    minimums: dict[str, int],
+    symbol: str,
+    *,
+    watch_mode: WatchMode,
+    prev_oi: float | None,
+    premium_all: dict[str, dict[str, float]],
+    funding_info_all: dict[str, dict[str, float | int]],
+    btc_work_1h: Any | None,
+    exchange_by_sym: dict[str, Any],
+    ticker_by_sym: dict[str, dict[str, Any]],
+    ws_feed: HuntCcxtStreams | None = None,
+    spot_companion: HuntCcxtSpotCompanion | None = None,
+    pump_stats: dict[str, Any] | None = None,
+    symbol_state: SymbolStateStore | None = None,
+) -> dict[str, Any]:
+    """WS-first tick: cached klines + TTL enrichment — no REST klines on hot path."""
+    from hunt_core.data.frame_cache import get_frame_cache
+
+    cache = get_frame_cache()
+    if cache.has_delta_ready(symbol):
+        kline_map = cache.kline_map(symbol)
+        enrich = cache.enrichment_pack(symbol) or {}
+        return await snapshot_symbol(
+            client,
+            settings,
+            minimums,
+            symbol,
+            watch_mode=watch_mode,
+            prev_oi=prev_oi,
+            premium_all=premium_all,
+            funding_info_all=funding_info_all,
+            btc_work_1h=btc_work_1h,
+            exchange_by_sym=exchange_by_sym,
+            ticker_by_sym=ticker_by_sym,
+            ws_feed=ws_feed,
+            spot_companion=spot_companion,
+            pump_stats=pump_stats,
+            tier="hot",
+            symbol_state=symbol_state,
+            kline_map_override=kline_map,
+            enrichment_pack_override=enrich,
+        )
+    if not cache.is_ready(symbol):
+        row = await snapshot_symbol(
+            client,
+            settings,
+            minimums,
+            symbol,
+            watch_mode=watch_mode,
+            prev_oi=prev_oi,
+            premium_all=premium_all,
+            funding_info_all=funding_info_all,
+            btc_work_1h=btc_work_1h,
+            exchange_by_sym=exchange_by_sym,
+            ticker_by_sym=ticker_by_sym,
+            ws_feed=ws_feed,
+            spot_companion=spot_companion,
+            pump_stats=pump_stats,
+            tier="fast",
+            symbol_state=symbol_state,
+            stagger_klines_ms=0,
+        )
+        row["tick_path"] = "hot_bootstrap"
+        return row
+    kline_map = cache.kline_map(symbol)
+    enrich = cache.enrichment_pack(symbol) or {}
+    return await snapshot_symbol(
+        client,
+        settings,
+        minimums,
+        symbol,
+        watch_mode=watch_mode,
+        prev_oi=prev_oi,
+        premium_all=premium_all,
+        funding_info_all=funding_info_all,
+        btc_work_1h=btc_work_1h,
+        exchange_by_sym=exchange_by_sym,
+        ticker_by_sym=ticker_by_sym,
+        ws_feed=ws_feed,
+        spot_companion=spot_companion,
+        pump_stats=pump_stats,
+        tier="hot",
+        symbol_state=symbol_state,
+        kline_map_override=kline_map,
+        enrichment_pack_override=enrich,
+    )
 

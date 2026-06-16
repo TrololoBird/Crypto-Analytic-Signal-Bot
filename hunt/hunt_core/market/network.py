@@ -365,7 +365,6 @@ def is_proxy_transport_error(exc: BaseException) -> bool:
 
 LOG = logging.getLogger("hunt_core.market.network")
 
-_FAPI_EXCHANGE_INFO = "https://fapi.binance.com/fapi/v1/exchangeInfo"
 _LOCAL_CANDIDATES = (
     "socks5://127.0.0.1:7890",
     "socks5://127.0.0.1:7891",
@@ -381,39 +380,54 @@ _MIN_SYMBOLS = 100
 _MAX_WORKING = 12
 
 
-async def _probe_exchange_info(proxy_url: str | None) -> bool:
-    session = create_aiohttp_session(
-        proxy_url=proxy_url,
-        trust_env=False,
-        timeout=_PROBE_TIMEOUT,
-        connector_limit=4,
-    )
-    req_proxy = aiohttp_request_proxy(session, proxy_url)
+async def filter_working_proxies(urls: list[str]) -> list[str]:
+    """Re-probe configured proxies at hunt startup — CCXT ``load_markets`` (canonical)."""
+    return await filter_working_proxies_ccxt(urls)
+
+
+async def _probe_ccxt_markets(proxy_url: str | None) -> bool:
+    """Probe via CCXT — same transport as hunt market plane."""
+    from hunt_core.market.factory import close_exchange_async, create_async_binance_future
+
+    ex = create_async_binance_future(proxy_url=proxy_url, trust_env=False)
     try:
-        async with session.get(_FAPI_EXCHANGE_INFO, proxy=req_proxy) as resp:
-            if resp.status != 200:
-                return False
-            payload = await resp.json(content_type=None)
-        symbols = payload.get("symbols") if isinstance(payload, dict) else None
-        ok = isinstance(symbols, list) and len(symbols) > _MIN_SYMBOLS
+        await ex.load_markets()
+        ok = len(ex.markets) > _MIN_SYMBOLS
         if ok:
             LOG.info(
-                "hunt proxy ok | url=%s symbols=%d",
+                "hunt proxy ccxt ok | url=%s markets=%d",
                 mask_proxy_url(proxy_url or "direct"),
-                len(symbols),
+                len(ex.markets),
             )
         return ok
-    except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
-        raise
     except Exception as exc:
         LOG.debug(
-            "hunt proxy fail | url=%s err=%s",
+            "hunt proxy ccxt fail | url=%s err=%s",
             mask_proxy_url(proxy_url or "direct"),
             type(exc).__name__,
         )
         return False
     finally:
-        await close_aiohttp_session(session)
+        await close_exchange_async(ex, label="probe_ccxt_markets")
+
+
+async def filter_working_proxies_ccxt(urls: list[str]) -> list[str]:
+    """Probe proxies with CCXT ``load_markets`` — matches hunt REST transport."""
+    if not urls:
+        return []
+    sem = asyncio.Semaphore(min(4, len(urls)))
+
+    async def _one(url: str) -> str | None:
+        async with sem:
+            return url if await _probe_ccxt_markets(url) else None
+
+    results = await asyncio.gather(*[_one(u) for u in urls])
+    return [u for u in results if u]
+
+
+async def probe_ccxt_direct() -> bool:
+    """True when CCXT can load Binance USD-M markets without proxy."""
+    return await _probe_ccxt_markets(None)
 
 
 async def auto_discover_proxies(*, include_public: bool = False) -> list[str]:
@@ -421,17 +435,17 @@ async def auto_discover_proxies(*, include_public: bool = False) -> list[str]:
 
     working: list[str] = []
 
-    if await _probe_exchange_info(None):
+    if await _probe_ccxt_markets(None):
         LOG.info("hunt direct binance access works")
 
     env_proxy = resolve_proxy_url(config_url=None, trust_env=True)
-    if env_proxy and await _probe_exchange_info(env_proxy) and env_proxy not in working:
+    if env_proxy and await _probe_ccxt_markets(env_proxy) and env_proxy not in working:
         working.append(env_proxy)
 
     for candidate in _LOCAL_CANDIDATES:
         if candidate in working:
             continue
-        if await _probe_exchange_info(candidate):
+        if await _probe_ccxt_markets(candidate):
             working.append(candidate)
         if len(working) >= _MAX_WORKING:
             return working
@@ -444,7 +458,7 @@ async def auto_discover_proxies(*, include_public: bool = False) -> list[str]:
 
     async def _one(url: str) -> str | None:
         async with sem:
-            if await _probe_exchange_info(url):
+            if await _probe_ccxt_markets(url):
                 return url
         return None
 
@@ -538,5 +552,8 @@ def _render_network_block(urls: list[str], *, direct_ok: bool) -> str:
 __all__ = [
     "BanDetectionPolicy",
     "ProxyPool",
+    "filter_working_proxies",
+    "filter_working_proxies_ccxt",
     "is_proxy_transport_error",
+    "probe_ccxt_direct",
 ]

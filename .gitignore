@@ -68,6 +68,8 @@ reports/
 data/
 !hunt/data/baseline/
 !hunt/data/baseline/**
+!hunt/hunt_core/data/
+!hunt/hunt_core/data/*.py
 # Persistent forensic archive survives bot.db wipes (under data/forensics/)
 telemetry/
 *.db

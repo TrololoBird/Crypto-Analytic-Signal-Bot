@@ -42,7 +42,7 @@ See **`.cursor/rules/agent-sole-executor.mdc`** (always on). Summary:
 - Strategy logic in `bot/strategies/` only (no `setups/detectors/` duplicate tree)
 - Orchestration in `bot/runtime/`
 - Shared kernel: `engine/` (market data plane, features, domain, transports) — never imports `bot.*`/`hunt`
-- Hunter project: `hunt/` (package `hunt_watch`) — imports only `engine.*`, never `bot.*`
+- Hunter project: `hunt/` (package **`hunt_core`**) — **standalone**, market plane **100% CCXT** ([`hunt/docs/CCXT.md`](hunt/docs/CCXT.md)); never imports `bot.*` or `engine.*`
 - Delivery: `bot/delivery/`
 - Persistence: `bot/persistence/` | Engine: `bot/engine/`
 - Prefer Polars expressions; Wilder ATR/RSI; BB std match validation target (TradingView = ddof=0); no `shift(-N)` on live path

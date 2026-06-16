@@ -6,7 +6,7 @@ Standalone **crypto-hunter** package (`hunt/`). Public Binance USDⓈ-M only. No
 
 - Python **3.14.5** (repo `.venv`)
 - `config.toml` + `.env` with `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (optional for `--no-telegram` smoke)
-- Network: Binance REST/WS reachable (proxy via `[bot.network]` if geo-blocked)
+- Network: Binance REST/WS via CCXT (proxy via `hunt_core.market.network` + optional `[bot.network]` in shared config)
 
 ## Install
 
@@ -40,9 +40,11 @@ python scripts/clean_session_data.py --mode smoke --config config.toml
 
 | Gate | Command | Pass |
 |------|---------|------|
+| CCXT canon | `python -m hunt_core._dev.check_ccxt` | 0 violations |
 | Logic | `python -m hunt_core._dev.check_logic` + `check_scenarios` | exit 0 |
 | LOC budget | `python -m hunt_core._dev.budget` | ≤44k hot LOC, no engine/bot imports |
 | Compile | `python -m compileall -q hunt/hunt_core` | exit 0 |
+| Live plane | `python -m hunt_core._dev.ccxt_plane_smoke BTCUSDT` | exit 0 |
 
 ## Architecture
 
@@ -50,7 +52,7 @@ See [HUNT_ARCHITECTURE.md](HUNT_ARCHITECTURE.md).
 
 **Entry:** `python -m hunt_core watch` → `hunt_core.runtime._impl` → `cycle.run_loop`
 
-**Market plane:** unified `ccxt.binance` + `defaultType: future` for REST **and** Pro WS.
+**Market plane:** unified `ccxt.binance` + `defaultType: future` for REST **and** Pro WS — **100% CCXT** (no raw FAPI HTTP).
 See [CCXT.md](CCXT.md).
 
 ## Multi-exchange intel (default on)

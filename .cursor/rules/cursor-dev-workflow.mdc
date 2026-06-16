@@ -46,7 +46,9 @@ Delegate via Task tool; descriptions drive auto-routing.
 
 ## Project skills (`.cursor/skills/`)
 
-`live-binance-verify`, `validate-delivery-path`, `zero-hit-strategy-triage`, `refactor-module`, `supervised-live-session`, `calibration-wave`, `graphify-navigate`
+`live-binance-verify`, `validate-delivery-path`, `zero-hit-strategy-triage`, `refactor-module`, `supervised-live-session`, `calibration-wave`, `graphify-navigate`, `ccxt-python`, `hunt-ccxt`
+
+Hunter market plane: always load `ccxt-python` + `hunt-ccxt` before editing `hunt/hunt_core/market/*`.
 
 ## Hooks (`.cursor/hooks.json`)
 

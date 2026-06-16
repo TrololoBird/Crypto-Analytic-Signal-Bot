@@ -13,19 +13,24 @@ from hunt_core.data.collect import (
     _kline_integrity_reject,
     _overlay_ws_market,
     kline_limits,
-    safe_fetch,
 )
-from hunt_core.data.completeness import REQUIRED_SIGNAL_KLINE_TFS, series_z_strict
+from hunt_core.data.completeness import (
+    REQUIRED_SIGNAL_KLINE_TFS,
+    DataIncompleteError,
+    series_z_strict,
+)
 from hunt_core.features.candle_patterns import candle_pattern_snapshot
 from hunt_core.features.chart_patterns import chart_pattern_snapshot
+from hunt_core.data_readiness import kline_fetch_limit
 from hunt_core.features.pivots import _pivot_rows, rsi_trendline_break, with_spec_columns
 from hunt_core.features.polars_ta_bridge import rsi_series as _rsi_series
+from hunt_core.features.prepare_columns import patch_work_4h, resolve_prepare_groups_for_symbol
+from hunt_core.features.prepare_frame import _prepare_frame
 from hunt_core.features.research_plugins import enrich_research_columns, research_snapshot_fields
 from hunt_core.analysis.pinned_deep import enrich_pinned_tf_snapshot
 from hunt_core.analysis.trend_engine import legacy_trend_label, trend_from_snapshot
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.features.structure import detect_pp
-from hunt_core.errors import DEFENSIVE_EXC
 from hunt_core.market.client import depth_imbalance_from_book, microprice_bias_from_book
 
 LOG = logging.getLogger("hunt_core.features.snapshot")
@@ -154,16 +159,6 @@ def session_stats(work_1m: Any, *, bars: int = 1440) -> dict[str, Any]:
         "pos_in_range": round((last - lo) / (hi - lo), 3) if hi > lo else 0.5,
         "bars_1m_used": n,
     }
-async def safe_fetch(coro: Any, *, context: str = "") -> Any:
-    try:
-        return await coro
-    except DEFENSIVE_EXC as exc:
-        LOG.warning(
-            "safe_fetch_failed | context=%s error=%s",
-            context or type(coro).__name__,
-            exc,
-        )
-        return None
 
 
 def _series_z(values: Any) -> float | None:
@@ -1029,6 +1024,17 @@ def tf_snapshot(
         "donchian_low20": round(_col(df, "donchian_low20", idx=idx), 6)
         if "donchian_low20" in df.columns
         else None,
+        "session_cvd": round(_col(df, "session_cvd", idx=idx), 3)
+        if "session_cvd" in df.columns
+        else None,
+        "rolling_cvd_24h": round(_col(df, "rolling_cvd_24h", idx=idx), 3)
+        if "rolling_cvd_24h" in df.columns
+        else None,
+        "session_cvd_prev": (
+            round(_col(df, "session_cvd", idx=(idx if idx >= 0 else df.height + idx) - 1), 3)
+            if "session_cvd" in df.columns and (idx if idx >= 0 else df.height + idx) >= 1
+            else None
+        ),
         "trend": legacy_trend_label(
             trend_from_snapshot(
                 {

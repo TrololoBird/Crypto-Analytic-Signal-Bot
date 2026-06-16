@@ -7,7 +7,7 @@ alwaysApply: false
 
 Import from v9 packages only. Root legacy shims and duplicate trees are removed.
 
-**Three top-level units** (phase-arch split): `engine/` = shared kernel, `bot/` = main bot, `hunt/` = hunter project. Dependency direction: `engine ← bot`, `engine ← hunt`; `engine` never imports `bot.*`/`hunt`; `bot` and `hunt` never import each other.
+**Three top-level units** (phase-arch split): `engine/` = shared kernel (main bot), `bot/` = main bot, `hunt/` = **standalone** hunter (`hunt_core`). Dependency: `engine ← bot` only; `hunt` does **not** import `engine.*` or `bot.*`; `engine` never imports `bot.*`/`hunt`.
 
 | Package | Role | Import example |
 |---|---|---|
@@ -22,7 +22,7 @@ Import from v9 packages only. Root legacy shims and duplicate trees are removed.
 | `bot/strategies/` | 38 setup detectors (single tree) | `from bot.strategies import ...` |
 | `bot/setups/` | Shared SMC, `spec_runtime`, utils — **not** duplicate detectors | `from bot.setups.spec_runtime import SpecDetectorSetup` |
 | `bot/delivery/` | Contract pipeline, confluence, orchestrator | `from bot.delivery import deliver` |
-| `hunt/hunt_watch/` | Hunter package (lifecycle, levels, ignition, tracker) | `from hunt_watch.levels import ...` (sys.path via `hunt_watch.bootstrap`) |
+| `hunt/hunt_core/` | Hunter package — CCXT market plane, watch loop, Telegram | `from hunt_core.market.factory import create_hunt_market_plane` (see `hunt/docs/CCXT.md`) |
 
 ## Phase order (complete for structure)
 

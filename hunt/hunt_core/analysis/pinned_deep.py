@@ -640,7 +640,7 @@ def build_pinned_verdict(row: dict[str, Any]) -> PinnedVerdict:
         panel = build_pinned_indicator_panel(sym, tf) if sym and tf else None
 
     mtf = build_mtf_confluence(
-        sym, tf, price, market=row.get("market"), indicator_panel=panel, row=row
+        sym, tf, price, market=row.get("market"), row=row
     )
     row["mtf"] = mtf
 

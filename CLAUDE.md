@@ -68,7 +68,7 @@ WS kline close → EventBus → SymbolAnalyzer → SignalEngine → DeliveryOrch
 | Config | `engine/domain/config.py` + `config.toml` | Shared kernel; `BotSettings` |
 | Secrets | `engine/secrets.py` | Canonical: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | Bot-side domain policies | `bot/policy/` (`mtf`, `catalog_guards`, `labels`, `delivery_policy`) | Import persistence/regime — NOT kernel material |
-| Hunter project | `hunt/` (package `hunt_watch`, scripts `hunt/scripts/`) | Independent product; imports ONLY `engine.*` |
+| Hunter project | `hunt/` (package `hunt_core`) | Standalone; **100% CCXT** market plane — see `hunt/docs/CCXT.md`; never imports `bot.*` or `engine.*` |
 | CLI | `bot/cli.py` | Subcommands below |
 | Dashboard | `bot/dashboard/app.py` (FastAPI, optional) | Not hot path |
 | Diagnostics | `bot/diagnostics/facade.py` | Re-export hub |
@@ -107,7 +107,7 @@ Next review: after 50+ new executed outcomes with fix-sl-A.
 
 ## Top-level layout (phase-arch, 2026-06-10)
 
-`engine/` = shared kernel (market, features, domain, errors/coercion/secrets/telegram/contract/telemetry/data_readiness) · `bot/` = main bot · `hunt/` = hunter. Dependency direction only downward: `engine ← bot`, `engine ← hunt`. `engine` must never import `bot.*`/`hunt`; `bot` and `hunt` never import each other.
+`engine/` = shared kernel (market, features, domain, errors/coercion/secrets/telegram/contract/telemetry/data_readiness) · `bot/` = main bot · `hunt/` = standalone hunter (`hunt_core`). Dependency: `engine ← bot` only; `hunt` is independent (CCXT-only market plane); `engine` must never import `bot.*`/`hunt`; `bot` must never import `hunt`.
 
 ## Strategy catalog
 

@@ -54,7 +54,6 @@ exclude = [".git", ".venv", "_archive", "build", "dist"]
 ignore = ["E402", "E741", "F811", "F821"]
 
 [tool.ruff.lint.per-file-ignores]
-"scripts/*.py" = ["E402", "EXE001", "PLC0415", "ASYNC230", "PLW0603", "FBT001", "G004", "E741", "ARG001", "F841", "E501"]
 "hunt_core/runtime/_impl.py" = ["E402"]
 "hunt_core/domain/schemas.py" = ["E402"]
 "hunt_core/market/streams.py" = ["E741"]

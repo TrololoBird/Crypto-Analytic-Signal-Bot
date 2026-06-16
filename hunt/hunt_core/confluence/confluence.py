@@ -48,10 +48,25 @@ def evaluate_must_pass(row: dict[str, Any], *, direction: str) -> tuple[bool, li
         missing.append("min_fuel")
     lc = row.get("lifecycle") or {}
     bias = str(lc.get("recommended_bias") or "wait")
+    phase = str(lc.get("phase") or "")
+    fall_pct = float(lc.get("fall_from_high_pct") or 0)
     if direction == "short" and bias == "long":
-        missing.append("htf_bias_veto")
+        dump_continuation = phase in {"dump_active", "distribution"} and fall_pct >= 15.0
+        distribution_fade = phase in {"exhaustion_at_high", "distribution"} and bool(
+            setup.get("confirmed")
+        )
+        if not (dump_continuation or distribution_fade):
+            missing.append("htf_bias_veto")
     if direction == "long" and bias == "short":
-        missing.append("htf_bias_veto")
+        long_leg = phase in {
+            "post_dump_bounce",
+            "accumulation",
+            "recovery",
+            "breakout_arming",
+            "impulse_initiating",
+        }
+        if not (long_leg and bool(setup.get("confirmed"))):
+            missing.append("htf_bias_veto")
     return len(missing) == 0, missing
 
 

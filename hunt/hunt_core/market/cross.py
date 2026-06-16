@@ -10,6 +10,7 @@ from typing import Any
 
 import polars as pl
 
+from hunt_core.market.ccxt_guard import ccxt_method_available
 from hunt_core.features.volume_profile import volume_profile_levels
 from hunt_core.market.client import aggregate_cross_exchange_walls, depth_snapshot_from_book
 
@@ -234,7 +235,14 @@ async def fetch_exchange_order_book(
         ex = await client._get_secondary(exchange)  # noqa: SLF001
         if ex is None:
             return None
-        ob = await ex.fetch_order_book(ccxt_sym, limit=min(100, max(5, int(limit))))
+        if not ccxt_method_available(ex, "fetchOrderBook"):
+            return None
+        ob = await client.rest_gate.invoke_secondary(
+            exchange,
+            ex,
+            lambda: ex.fetch_order_book(ccxt_sym, limit=min(100, max(5, int(limit)))),
+            context=f"order_book:{ccxt_sym}",
+        )
         bids = [(float(row[0]), float(row[1])) for row in (ob.get("bids") or []) if row]
         asks = [(float(row[0]), float(row[1])) for row in (ob.get("asks") or []) if row]
         if not bids or not asks:
@@ -310,9 +318,14 @@ async def fetch_cross_exchange_taker_flow(
         if ex is None:
             return name, None
         try:
-            if not getattr(ex, "has", {}).get("fetchLongShortRatio"):
+            if not ccxt_method_available(ex, "fetchLongShortRatio"):
                 return name, None
-            payload = await ex.fetch_long_short_ratio(ccxt_sym, period=period, limit=1)
+            payload = await client.rest_gate.invoke_secondary(
+                name,
+                ex,
+                lambda: ex.fetch_long_short_ratio(ccxt_sym, period=period, limit=1),
+                context=f"long_short:{ccxt_sym}",
+            )
             if isinstance(payload, list) and payload:
                 item = payload[-1]
                 ratio = item.get("longShortRatio") or item.get("ratio")
@@ -365,7 +378,14 @@ async def fetch_cross_exchange_volume_profile(
             sec = await client._get_secondary(exchange)  # noqa: SLF001
             if sec is None:
                 return exchange, None, 0.0
-            raw = await sec.fetch_ohlcv(ccxt_sym, timeframe=interval, limit=limit)
+            if not ccxt_method_available(sec, "fetchOHLCV"):
+                return exchange, None, 0.0
+            raw = await client.rest_gate.invoke_secondary(
+                exchange,
+                sec,
+                lambda: sec.fetch_ohlcv(ccxt_sym, timeframe=interval, limit=limit),
+                context=f"ohlcv:{ccxt_sym}:{interval}",
+            )
             if not raw:
                 return exchange, None, 0.0
             df = pl.DataFrame(

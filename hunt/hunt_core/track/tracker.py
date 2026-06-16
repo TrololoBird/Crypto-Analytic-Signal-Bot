@@ -90,6 +90,16 @@ _INVALIDATING_CLOSE_REASONS = frozenset(
 )
 
 FOLLOWUP_COOLDOWN_MINUTES = 5
+# Re-entry block after stop_hit — ESPORTS re-shipped 97s after SL (prior 45m TG cooldown expired).
+POST_SL_REENTRY_COOLDOWN_MINUTES = 90
+SYMBOL_LOSS_STREAK_MIN = 2
+SYMBOL_LOSS_STREAK_WINDOW_HOURS = 24.0
+SYMBOL_LOSS_STREAK_COOLDOWN_HOURS = 6.0
+SYMBOL_DAILY_TG_MAX = 2
+SYMBOL_REPEAT_LOSER_LOOKBACK = 10
+SYMBOL_REPEAT_LOSER_NET_PCT = -8.0
+SYMBOL_REPEAT_LOSER_MIN_SAMPLES = 5
+SYMBOL_REPEAT_LOSER_COOLDOWN_HOURS = 24.0
 # No cosmetic phase_change TG right after entry (WLD: 2 flips in 60s post-confirm).
 PHASE_CHANGE_GRACE_MIN = 20.0
 RECLAIM_BUFFER = 1.001  # fallback; prefer tracker_thresholds().reclaim_buffer
@@ -220,6 +230,272 @@ def _is_signal_active(signal: dict[str, Any]) -> bool:
     return signal.get("status") == "active"
 
 
+def signal_confirm_announced(
+    state: dict[str, Any],
+    *,
+    symbol: str,
+    direction: str,
+) -> bool:
+    """True when confirm TG already shipped for an open tracked signal."""
+    k = _key(symbol, direction)
+    active = (state.get("signals") or {}).get(k)
+    if not isinstance(active, dict) or not _is_signal_active(active):
+        return False
+    return bool(active.get("telegram_sent")) or bool(active.get("entry_message_id"))
+
+
+def recent_stop_hit_cooldown(
+    state: dict[str, Any],
+    *,
+    symbol: str,
+    direction: str,
+    now: datetime,
+    minutes: int = POST_SL_REENTRY_COOLDOWN_MINUTES,
+) -> bool:
+    """True when a stop_hit closed within *minutes* — block fresh confirm TG."""
+    sym = symbol.upper()
+    direc = direction.lower()
+    cutoff = now - timedelta(minutes=minutes)
+    for rec in reversed(state.get("closed_history") or []):
+        if not isinstance(rec, dict):
+            continue
+        if str(rec.get("symbol") or "").upper() != sym:
+            continue
+        if str(rec.get("direction") or "").lower() != direc:
+            continue
+        if str(rec.get("close_reason") or "") != "stop_hit":
+            continue
+        pnl = rec.get("pnl_pct")
+        if pnl is not None:
+            try:
+                if float(pnl) >= 0:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        raw = rec.get("closed_at")
+        if not raw:
+            continue
+        try:
+            closed = datetime.fromisoformat(str(raw))
+            if closed.tzinfo is None:
+                closed = closed.replace(tzinfo=UTC)
+        except (TypeError, ValueError):
+            continue
+        if closed >= cutoff:
+            return True
+    return False
+
+
+def symbol_loss_streak_cooldown(
+    state: dict[str, Any],
+    *,
+    symbol: str,
+    direction: str,
+    now: datetime,
+    min_losses: int = SYMBOL_LOSS_STREAK_MIN,
+    window_hours: float = SYMBOL_LOSS_STREAK_WINDOW_HOURS,
+    cooldown_hours: float = SYMBOL_LOSS_STREAK_COOLDOWN_HOURS,
+) -> bool:
+    """Block re-entry after *min_losses* losing stop_hit within *window_hours*.
+
+    SIRENUSDT session: 3 confirms → 3 SL (−4% each). One SL uses post_sl cooldown;
+    repeat offenders need a longer symbol-level ban.
+    """
+    sym = symbol.upper()
+    direc = direction.lower()
+    window_cutoff = now - timedelta(hours=window_hours)
+    cooldown_cutoff = now - timedelta(hours=cooldown_hours)
+    losses_in_window = 0
+    last_loss_at: datetime | None = None
+    for rec in reversed(state.get("closed_history") or []):
+        if not isinstance(rec, dict):
+            continue
+        if str(rec.get("symbol") or "").upper() != sym:
+            continue
+        if str(rec.get("direction") or "").lower() != direc:
+            continue
+        if str(rec.get("close_reason") or "") != "stop_hit":
+            continue
+        pnl = rec.get("pnl_pct")
+        if pnl is not None:
+            try:
+                if float(pnl) >= 0:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        raw = rec.get("closed_at")
+        if not raw:
+            continue
+        try:
+            closed = datetime.fromisoformat(str(raw))
+            if closed.tzinfo is None:
+                closed = closed.replace(tzinfo=UTC)
+        except (TypeError, ValueError):
+            continue
+        if closed < window_cutoff:
+            break
+        losses_in_window += 1
+        if last_loss_at is None:
+            last_loss_at = closed
+    if losses_in_window < min_losses or last_loss_at is None:
+        return False
+    return last_loss_at >= cooldown_cutoff
+
+
+def _telegram_outcome_records(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Merge in-memory closed_history with archived signal_history.jsonl."""
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+
+    def _add(rec: dict[str, Any]) -> None:
+        if not rec.get("telegram_sent"):
+            return
+        key = (
+            str(rec.get("symbol") or "").upper(),
+            str(rec.get("direction") or "").lower(),
+            str(rec.get("opened_at") or ""),
+            str(rec.get("closed_at") or ""),
+        )
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(rec)
+
+    for rec in state.get("closed_history") or []:
+        if isinstance(rec, dict):
+            _add(rec)
+    try:
+        from hunt_core.paths import SIGNAL_HISTORY
+
+        if SIGNAL_HISTORY.exists():
+            import json
+
+            for line in SIGNAL_HISTORY.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rec, dict):
+                    _add(rec)
+    except OSError:
+        pass
+    out.sort(key=lambda r: str(r.get("closed_at") or r.get("opened_at") or ""))
+    return out
+
+
+def symbol_daily_tg_cap_reached(
+    state: dict[str, Any],
+    *,
+    symbol: str,
+    direction: str,
+    now: datetime,
+    max_per_day: int = SYMBOL_DAILY_TG_MAX,
+) -> bool:
+    """Limit TG confirm spam per symbol (PLAYUSDT 57× lesson)."""
+    sym = symbol.upper()
+    direc = direction.lower()
+    cutoff = now - timedelta(hours=24.0)
+    count = 0
+    for rec in reversed(_telegram_outcome_records(state)):
+        if str(rec.get("symbol") or "").upper() != sym:
+            continue
+        if str(rec.get("direction") or "").lower() != direc:
+            continue
+        raw = rec.get("opened_at") or rec.get("closed_at")
+        if not raw:
+            continue
+        try:
+            opened = datetime.fromisoformat(str(raw))
+            if opened.tzinfo is None:
+                opened = opened.replace(tzinfo=UTC)
+        except (TypeError, ValueError):
+            continue
+        if opened < cutoff:
+            break
+        count += 1
+    return count >= max_per_day
+
+
+def symbol_repeat_loser_blocked(
+    state: dict[str, Any],
+    *,
+    symbol: str,
+    now: datetime,
+    lookback: int = SYMBOL_REPEAT_LOSER_LOOKBACK,
+    net_floor: float = SYMBOL_REPEAT_LOSER_NET_PCT,
+    min_samples: int = SYMBOL_REPEAT_LOSER_MIN_SAMPLES,
+    cooldown_hours: float = SYMBOL_REPEAT_LOSER_COOLDOWN_HOURS,
+) -> bool:
+    """Block symbols with chronic TG losses (PLAYUSDT −22% / 57 trades)."""
+    sym = symbol.upper()
+    tg_closed = [r for r in _telegram_outcome_records(state) if str(r.get("symbol") or "").upper() == sym]
+    recent = tg_closed[-lookback:]
+    if len(tg_closed) >= 15:
+        total_net = sum(float(r.get("pnl_pct") or 0) for r in tg_closed)
+        if total_net < -15.0:
+            return True
+    if len(recent) < min_samples:
+        return False
+    net = sum(float(r.get("pnl_pct") or 0) for r in recent)
+    if net >= net_floor:
+        return False
+    raw = recent[-1].get("closed_at")
+    if not raw:
+        return True
+    try:
+        closed = datetime.fromisoformat(str(raw))
+        if closed.tzinfo is None:
+            closed = closed.replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        return True
+    return (now - closed) < timedelta(hours=cooldown_hours)
+
+
+def _apply_early_breakeven_lock(
+    active: dict[str, Any],
+    *,
+    direction: str,
+    symbol: str,
+) -> bool:
+    """Lock SL near breakeven once MFE ≥ 2% — EPIC 10% MFE → SL lesson."""
+    if active.get("trailing_active") or active.get("sl_at_breakeven"):
+        return False
+    mfe = _mfe_pct(active, direction=direction)
+    tr = tracker_thresholds(symbol)
+    entry_phase = str(active.get("entry_lifecycle_phase") or "")
+    threshold = float(tr.get("early_breakeven_mfe_pct", 2.0))
+    if entry_phase == "dump_active":
+        threshold = float(tr.get("dump_active_early_be_mfe_pct", 3.0))
+    elif entry_phase == "dump_initiating":
+        threshold = float(tr.get("dump_initiating_early_be_mfe_pct", 3.5))
+    elif entry_phase == "exhaustion_at_high":
+        threshold = float(tr.get("exhaustion_early_be_mfe_pct", 4.0))
+    elif entry_phase in {"accumulation", "recovery"}:
+        threshold = float(tr.get("accumulation_early_be_mfe_pct", 4.5))
+    elif entry_phase == "distribution":
+        threshold = float(tr.get("distribution_early_be_mfe_pct", 4.0))
+    if mfe < threshold:
+        return False
+    entry = _worst_entry(active, direction=direction)
+    if entry <= 0:
+        return False
+    buf_pct = float(tr.get("early_breakeven_buffer_pct", 0.12))
+    cur = float(active.get("stop_loss") or 0)
+    if direction == "short":
+        new_stop = round(entry * (1.0 - buf_pct / 100.0), 6)
+        if new_stop >= entry or (cur > 0 and new_stop >= cur):
+            return False
+    else:
+        new_stop = round(entry * (1.0 + buf_pct / 100.0), 6)
+        if new_stop <= entry or (cur > 0 and new_stop <= cur):
+            return False
+    active["stop_loss"] = new_stop
+    active["sl_at_breakeven"] = True
+    return True
+
+
 def _transition(
     signal: dict[str, Any],
     from_phase: SignalPhase | None,
@@ -273,12 +549,40 @@ def _initial_signal_phase(setup: dict[str, Any]) -> SignalPhase:
     return SignalPhase.REGISTERED
 
 
+def _backfill_signal_geometry(sig: dict[str, Any]) -> None:
+    """Repair missing risk_reward / original_stop on legacy tracker rows."""
+    if not isinstance(sig, dict) or sig.get("status") == "closed":
+        return
+    if not sig.get("original_stop_loss") and sig.get("stop_loss"):
+        sig["original_stop_loss"] = sig.get("stop_loss")
+    if sig.get("risk_reward"):
+        return
+    direction = str(sig.get("direction") or "short").lower()
+    try:
+        el = float(sig.get("entry_lo") or 0)
+        eh = float(sig.get("entry_hi") or 0)
+    except (TypeError, ValueError):
+        return
+    sl = float(sig.get("stop_loss") or 0)
+    tp1 = float(sig.get("tp1") or 0)
+    if sl <= 0 or tp1 <= 0 or eh <= 0:
+        return
+    worst = eh if direction == "short" else el
+    risk = abs(worst - sl)
+    reward = abs(worst - tp1)
+    if risk > 0:
+        sig["risk_reward"] = round(reward / risk, 3)
+
+
 def load_tracker_state(path: Path = STATE_PATH) -> dict[str, Any]:
     if not path.exists():
         return {"signals": {}, "followup_sent": {}}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(raw, dict) and "signals" in raw:
+            for sig in (raw.get("signals") or {}).values():
+                if isinstance(sig, dict):
+                    _backfill_signal_geometry(sig)
             return raw
     except (OSError, json.JSONDecodeError):
         pass
@@ -288,6 +592,55 @@ def load_tracker_state(path: Path = STATE_PATH) -> dict[str, Any]:
 def save_tracker_state(state: dict[str, Any], path: Path = STATE_PATH) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+
+
+def iter_active_tracker_symbols(state: dict[str, Any]) -> list[tuple[str, str]]:
+    """Return (symbol, direction) for each active tracked signal."""
+    out: list[tuple[str, str]] = []
+    for key, sig in (state.get("signals") or {}).items():
+        if not isinstance(sig, dict) or not _is_signal_active(sig):
+            continue
+        sym = str(sig.get("symbol") or key.partition(":")[0]).upper()
+        direction = str(sig.get("direction") or key.rsplit(":", 1)[-1]).lower()
+        if sym and direction in ("short", "long"):
+            out.append((sym, direction))
+    return out
+
+
+def reconcile_active_from_ticker(
+    state: dict[str, Any],
+    *,
+    ticker_by_sym: dict[str, Any],
+    now: datetime,
+    only_symbols: set[str] | None = None,
+) -> list[HuntFollowUp]:
+    """Apply REST last price to latched SL/TP when a symbol missed the tick batch."""
+    events: list[HuntFollowUp] = []
+    for sym, direction in iter_active_tracker_symbols(state):
+        if only_symbols is not None and sym not in only_symbols:
+            continue
+        t = ticker_by_sym.get(sym) or {}
+        px = float(t.get("last_price") or t.get("lastPrice") or 0)
+        if px <= 0:
+            continue
+        k = _key(sym, direction)
+        active = (state.get("signals") or {}).get(k)
+        if not isinstance(active, dict) or not _is_signal_active(active):
+            continue
+        hi = max(float(active.get("extreme_hi") or px), px)
+        lo = min(float(active.get("extreme_lo") or px), px)
+        events.extend(
+            reconcile_signal(
+                state,
+                symbol=sym,
+                direction=direction,
+                hi=hi,
+                lo=lo,
+                last_price=px,
+                ts=now,
+            )
+        )
+    return events
 
 
 def _followup_allowed(state: dict[str, Any], message_key: str, *, now: datetime) -> bool:
@@ -373,8 +726,12 @@ def register_signal_open(
         "entry_lo": ez[0] if len(ez) > 0 else price,
         "entry_hi": ez[1] if len(ez) > 1 else price,
         "stop_loss": setup.get("stop_loss"),
+        "original_stop_loss": setup.get("stop_loss"),
         "tp1": setup.get("tp1"),
         "tp2": setup.get("tp2"),
+        "risk_reward": setup.get("risk_reward"),
+        "level_mode": setup.get("level_mode"),
+        "entry_zone": list(ez) if isinstance(ez, (list, tuple)) else [price, price],
         "lifecycle_phase": (lifecycle or {}).get("phase") or setup.get("lifecycle_phase"),
         # immutable entry bucket — never updated by followups
         "entry_lifecycle_phase": (
@@ -469,6 +826,7 @@ def _update_trailing_stop(
     direction: str,
     row: dict[str, Any] | None,
     symbol: str,
+    ts: datetime | None = None,
 ) -> tuple[bool, float]:
     """Trail SL behind peak MFE; squeeze_on + MFE>0 tightens room by 30% (Phase 5B).
 
@@ -478,12 +836,26 @@ def _update_trailing_stop(
     mfe = _mfe_pct(active, direction=direction)
     if mfe <= 0:
         return False, cur_stop
+    tr = tracker_thresholds(symbol)
+    entry_phase = str(active.get("entry_lifecycle_phase") or "")
+    min_trail_mfe = float(tr.get("min_trail_mfe_pct", 3.5))
+    if entry_phase == "dump_active":
+        min_trail_mfe = max(
+            min_trail_mfe,
+            float(tr.get("dump_active_min_trail_mfe_pct", 2.5)),
+        )
+    if mfe < min_trail_mfe:
+        return False, cur_stop
+    if ts is not None and entry_phase == "dump_active":
+        min_age = float(tr.get("min_trail_age_minutes", 2.0))
+        age_min = _signal_age_min(active, ts)
+        if age_min < min_age and mfe < min_trail_mfe + 2.0:
+            return False, cur_stop
     initial_r = _initial_risk_distance(active, direction=direction)
     if initial_r <= 0:
         return False, cur_stop
     if active.get("original_stop_loss") is None:
         active["original_stop_loss"] = active.get("stop_loss")
-    tr = tracker_thresholds(symbol)
     trail_frac = float(tr.get("breakeven_risk_fraction", 0.25))
     trail_dist = initial_r * trail_frac
     if _squeeze_on_1h(row):
@@ -690,9 +1062,16 @@ def close_signal(
             sig["tp1_progress_pct"] = round(min(mfe / tp1_dist * entry_edge, 100.0), 1)
     # Archive to closed_history so repeat signals on the same key don't lose prior outcomes
     history: list = state.setdefault("closed_history", [])
+    from hunt_core.track.outcomes import outcome_archive_key
+
     record = dict(sig)
     record.setdefault("symbol", symbol)
     record.setdefault("direction", direction)
+    leg_key = outcome_archive_key(record)
+    if leg_key is not None:
+        for rec in reversed(history):
+            if outcome_archive_key(rec) == leg_key:
+                return
     history.append(record)
     if archive:
         try:
@@ -1099,8 +1478,38 @@ def evaluate_levels(
             )
         return events
 
+    be_locked = _apply_early_breakeven_lock(active, direction=direction, symbol=symbol)
+    if be_locked:
+        stop = float(active.get("stop_loss") or 0)
+        mfe = _mfe_pct(active, direction=direction)
+        phase = str(active.get("entry_lifecycle_phase") or "")
+        msg_key = f"{k}:early_be:{stop:.6f}"
+        if _followup_allowed(state, msg_key, now=ts):
+            events.append(
+                HuntFollowUp(
+                    event="early_breakeven",
+                    symbol=symbol,
+                    direction=direction,
+                    message_key=msg_key,
+                    detail=(
+                        f"Early BE · MFE {mfe:.1f}% · SL → {_fmt(stop)} "
+                        f"({phase or '—'})"
+                    ),
+                    price=price,
+                    payload={
+                        **_latched_levels_payload(active),
+                        "announced": announced,
+                        "sl_at_breakeven": True,
+                        "entry_lifecycle_phase": phase,
+                        "mfe_pct": round(mfe, 2),
+                        **_followup_trade_metrics(
+                            active, direction=direction, price=price, ts=ts
+                        ),
+                    },
+                )
+            )
     trail_updated, prev_stop = _update_trailing_stop(
-        active, direction=direction, row=row, symbol=symbol
+        active, direction=direction, row=row, symbol=symbol, ts=ts
     )
 
     tp1 = float(active.get("tp1") or 0)

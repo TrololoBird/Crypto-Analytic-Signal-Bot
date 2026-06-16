@@ -1,1 +1,1 @@
-from hunt_core.confluence.confluence import *  # noqa: F403
+"""MTF confluence — import submodules directly."""

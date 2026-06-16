@@ -19,7 +19,6 @@ import structlog
 
 from hunt_core.analysis.adx_thresholds import ADX_RANGE_MAX, ADX_TREND_MIN
 from hunt_core.analysis.trend_engine import bias_from_ema_row
-from hunt_core.errors import DEFENSIVE_EXC
 from hunt_core.features.pivots import _swing_points
 
 from ..domain.schemas import PreparedSymbol, SymbolFrames, UniverseSymbol
@@ -496,17 +495,15 @@ def _cached_prepare_frame(
     symbol: str = "",
     interval: str = "",
     cache: _FrameCache | None = None,
-    ws_manager: Any | None = None,
     fallback_book: tuple[float | None, float | None, float | None, float | None] | None = None,
     active_groups: frozenset[str] | None = None,
 ) -> pl.DataFrame:
     """_prepare_frame with LRU cache keyed on (symbol, interval, close_time)."""
+    enrich_book = fallback_book if interval in {"15m", "5m"} else None
     if frame.is_empty() or "close_time" not in frame.columns or "close" not in frame.columns:
-        result = _enrich_with_ws_data(
+        result = _enrich_with_book_data(
             _prepare_frame(frame, active_groups=active_groups),
-            symbol,
-            ws_manager if interval == "15m" else None,
-            fallback_book=fallback_book if interval == "15m" else None,
+            fallback_book=enrich_book,
         )
         for warning in _sanity_check_prepared_frame(result, symbol, interval):
             LOG.warning(
@@ -542,7 +539,7 @@ def _cached_prepare_frame(
         first_close_time_ns,
         close_time_ns,
         tail_signature,
-        _ws_enrichment_signature(symbol, ws_manager if interval == "15m" else None),
+        _book_enrichment_signature(enrich_book),
         groups_key,
     )
     target_cache = cache or _FRAME_CACHE
@@ -550,11 +547,9 @@ def _cached_prepare_frame(
     if cached is not None:
         return cached
 
-    result = _enrich_with_ws_data(
+    result = _enrich_with_book_data(
         _prepare_frame(frame, active_groups=active_groups),
-        symbol,
-        ws_manager if interval == "15m" else None,
-        fallback_book=fallback_book if interval == "15m" else None,
+        fallback_book=enrich_book,
     )
     for warning in _sanity_check_prepared_frame(result, symbol, interval):
         LOG.warning(
@@ -567,165 +562,37 @@ def _cached_prepare_frame(
     return result
 
 
-def _ws_enrichment_signature(
-    symbol: str,
-    ws_manager: Any | None,
+def _book_enrichment_signature(
+    fallback_book: tuple[float | None, float | None, float | None, float | None] | None,
 ) -> tuple[object, ...] | None:
-    if ws_manager is None or not symbol:
+    if fallback_book is None:
         return None
-
-    book = getattr(ws_manager, "_book", {}).get(symbol)
-    qty = getattr(ws_manager, "_book_qty", {}).get(symbol)
-    snapshot = None
-    getter = getattr(ws_manager, "get_agg_trade_snapshot", None)
-    if callable(getter):
-        try:
-            snapshot = getter(symbol)
-        except DEFENSIVE_EXC:
-            snapshot = None
 
     def _rounded(value: object) -> float | None:
         numeric = _as_optional_float(value)
         return None if numeric is None else round(numeric, 8)
 
-    signature: list[object] = []
-    if isinstance(book, tuple):
-        signature.extend(_rounded(item) for item in book[:2])
-    else:
-        signature.extend((None, None))
-    if isinstance(qty, tuple):
-        signature.extend(_rounded(item) for item in qty[:2])
-    else:
-        signature.extend((None, None))
-    if snapshot is not None:
-        signature.extend(
-            (
-                int(getattr(snapshot, "trade_count", 0) or 0),
-                _rounded(getattr(snapshot, "buy_qty", None)),
-                _rounded(getattr(snapshot, "sell_qty", None)),
-                _rounded(getattr(snapshot, "delta_ratio", None)),
-            )
-        )
-    else:
-        signature.extend((0, None, None, None))
-    rollups_fn = getattr(ws_manager, "get_liquidation_rollups", None) if ws_manager else None
-    if callable(rollups_fn):
-        try:
-            rollups = rollups_fn(symbol, window_seconds=900)
-        except DEFENSIVE_EXC:
-            rollups = None
-        if isinstance(rollups, dict):
-            signature.extend(
-                (
-                    _rounded(rollups.get("liquidation_long_notional")),
-                    _rounded(rollups.get("liquidation_short_notional")),
-                    _rounded(rollups.get("liquidation_score")),
-                )
-            )
-        else:
-            signature.extend((None, None, None))
-    else:
-        signature.extend((None, None, None))
-    return tuple(signature)
+    return tuple(_rounded(v) for v in fallback_book)
 
 
-def _enrich_with_ws_data(
+def _enrich_with_book_data(
     work: pl.DataFrame,
-    symbol: str,
-    ws_manager: Any | None,
+    *,
     fallback_book: tuple[float | None, float | None, float | None, float | None] | None = None,
 ) -> pl.DataFrame:
-    """Merge current WebSocket bookTicker and aggTrade context into work_15m."""
-    if work.is_empty() or (ws_manager is None and fallback_book is None):
+    """Merge CCXT book columns from tick assembly ``fallback_book``."""
+    if work.is_empty() or fallback_book is None:
         return work
 
-    book = getattr(ws_manager, "_book", {}).get(symbol, (None, None)) if ws_manager else None
-    qty = getattr(ws_manager, "_book_qty", {}).get(symbol, (None, None)) if ws_manager else None
-    if (not isinstance(book, tuple) or book == (None, None)) and fallback_book is not None:
-        book = fallback_book[:2]
-    if (not isinstance(qty, tuple) or qty == (None, None)) and fallback_book is not None:
-        qty = fallback_book[2:4]
-    bid_price, ask_price = book if isinstance(book, tuple) else (None, None)
-    bid_qty, ask_qty = qty if isinstance(qty, tuple) else (None, None)
-    if fallback_book is not None:
-        fb_bid, fb_ask, fb_bid_qty, fb_ask_qty = fallback_book
-        if bid_price is None:
-            bid_price = fb_bid
-        if ask_price is None:
-            ask_price = fb_ask
-        if bid_qty is None:
-            bid_qty = fb_bid_qty
-        if ask_qty is None:
-            ask_qty = fb_ask_qty
+    fb_bid, fb_ask, fb_bid_qty, fb_ask_qty = fallback_book
     work = work.with_columns(
         [
-            pl.lit(_as_optional_float(bid_price)).cast(pl.Float64).alias("bid_price"),
-            pl.lit(_as_optional_float(ask_price)).cast(pl.Float64).alias("ask_price"),
-            pl.lit(_as_optional_float(bid_qty)).cast(pl.Float64).alias("bid_qty"),
-            pl.lit(_as_optional_float(ask_qty)).cast(pl.Float64).alias("ask_qty"),
+            pl.lit(_as_optional_float(fb_bid)).cast(pl.Float64).alias("bid_price"),
+            pl.lit(_as_optional_float(fb_ask)).cast(pl.Float64).alias("ask_price"),
+            pl.lit(_as_optional_float(fb_bid_qty)).cast(pl.Float64).alias("bid_qty"),
+            pl.lit(_as_optional_float(fb_ask_qty)).cast(pl.Float64).alias("ask_qty"),
         ]
     )
-
-    snapshot = None
-    getter = getattr(ws_manager, "get_agg_trade_snapshot", None) if ws_manager else None
-    if callable(getter):
-        try:
-            snapshot = getter(symbol)
-        except DEFENSIVE_EXC:
-            snapshot = None
-    if snapshot is not None:
-        buy_qty = _as_optional_float(getattr(snapshot, "buy_qty", None)) or 0.0
-        sell_qty = _as_optional_float(getattr(snapshot, "sell_qty", None)) or 0.0
-        total = buy_qty + sell_qty
-        if total > 0.0:
-            buy_share = buy_qty / total
-            signed_flow = _as_optional_float(getattr(snapshot, "delta_ratio", None))
-            if signed_flow is None:
-                signed_flow = (buy_share - 0.5) * 2.0
-            row_index = "__ws_row_nr"
-            base_delta_expr = (
-                pl.col("delta_ratio") if "delta_ratio" in work.columns else pl.lit(0.5)
-            )
-            work = work.with_row_index(row_index)
-            work = work.with_columns(
-                [
-                    pl.when(pl.col(row_index) == (work.height - 1))
-                    .then(pl.lit(buy_share))
-                    .otherwise(base_delta_expr)
-                    .cast(pl.Float64)
-                    .alias("delta_ratio"),
-                    pl.lit(buy_share).cast(pl.Float64).alias("live_delta_ratio"),
-                    pl.lit(signed_flow).cast(pl.Float64).alias("signed_order_flow"),
-                ]
-            ).drop(row_index)
-
-    if ws_manager is not None:
-        rollups_fn = getattr(ws_manager, "get_liquidation_rollups", None)
-        if callable(rollups_fn):
-            try:
-                rollups = rollups_fn(symbol, window_seconds=900)
-            except DEFENSIVE_EXC:
-                rollups = None
-            if isinstance(rollups, dict):
-                liq_columns: list[pl.Expr] = []
-                long_notional = _as_optional_float(rollups.get("liquidation_long_notional"))
-                short_notional = _as_optional_float(rollups.get("liquidation_short_notional"))
-                liq_score = _as_optional_float(rollups.get("liquidation_score"))
-                if long_notional is not None:
-                    liq_columns.append(
-                        pl.lit(long_notional).cast(pl.Float64).alias("liquidation_long_notional")
-                    )
-                if short_notional is not None:
-                    liq_columns.append(
-                        pl.lit(short_notional).cast(pl.Float64).alias("liquidation_short_notional")
-                    )
-                if liq_score is not None:
-                    liq_columns.append(
-                        pl.lit(liq_score).cast(pl.Float64).alias("liquidation_score")
-                    )
-                if liq_columns:
-                    work = work.with_columns(liq_columns)
-
     work = add_microstructure_features(work)
     work = add_session_cvd(work)
     work = add_rolling_cvd_24h(work)
@@ -748,7 +615,6 @@ def prepare_symbol(
     *,
     minimums: dict[str, int] | None = None,
     settings: Any | None = None,
-    ws_manager: Any | None = None,
 ) -> PreparedSymbol | None:
     """Prepare a symbol for signal detection by computing all indicators.
 
@@ -800,17 +666,9 @@ def prepare_symbol(
         _to_polars(frames.df_15m),
         symbol=sym,
         interval="15m",
-        ws_manager=ws_manager,
         fallback_book=fallback_book,
         active_groups=active_groups,
     )
-    if ws_manager is None and (frames.bid_qty is not None or frames.ask_qty is not None):
-        work_15m = _enrich_with_ws_data(
-            work_15m,
-            sym,
-            None,
-            fallback_book=fallback_book,
-        )
     work_5m = None
     if frames.df_5m is not None and not frames.df_5m.is_empty():
         work_5m = _cached_prepare_frame(
@@ -822,16 +680,9 @@ def prepare_symbol(
         # P1.11: overlay fresh 5m WS book/aggTrade/liquidation context onto the
         # confirm frame; falls back to REST frame untouched when WS is absent.
         if work_5m is not None and (
-            ws_manager is not None
-            or frames.bid_qty is not None
-            or frames.ask_qty is not None
+            frames.bid_qty is not None or frames.ask_qty is not None
         ):
-            work_5m = _enrich_with_ws_data(
-                work_5m,
-                sym,
-                ws_manager,
-                fallback_book=fallback_book,
-            )
+            work_5m = _enrich_with_book_data(work_5m, fallback_book=fallback_book)
     work_4h = None
     if frames.df_4h is not None and not frames.df_4h.is_empty():
         work_4h = _cached_prepare_frame(

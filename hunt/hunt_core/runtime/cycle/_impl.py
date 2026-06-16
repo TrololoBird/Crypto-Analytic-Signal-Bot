@@ -72,12 +72,17 @@ from hunt_core.scan.routing import resolve_delivery_mode
 from hunt_core.track.events import append_signal_event, record_funnel_stage, record_lifecycle_funnel
 from hunt_core.track.tracker import (
     evaluate_followups,
+    iter_active_tracker_symbols,
     latch_row_setups,
     load_tracker_state,
     mark_close_notified,
     mark_followups_sent,
+    reconcile_active_from_ticker,
     reconcile_signal,
     register_signal_open,
+    symbol_daily_tg_cap_reached,
+    symbol_loss_streak_cooldown,
+    symbol_repeat_loser_blocked,
 )
 from hunt_core.data.universe import PINNED_SYMBOLS, effective_watch_mode, resolve_watch_universe, MAX_PRESCAN_MERGE
 from hunt_core.data.universe import save_pinned_cache
@@ -104,7 +109,7 @@ from hunt_core.market.factory import create_hunt_market_plane_from_settings
 from hunt_core.market.capacity import HuntLoadPlanner
 
 from hunt_core.data.collect import safe_fetch
-from hunt_core.runtime.tick_assembly import snapshot_symbol
+from hunt_core.runtime.tick_assembly import hot_tick_symbol, snapshot_symbol
 from hunt_core.data.scanner import (
     PrescanDebounceQueue,
     PrescanEngine,
@@ -170,6 +175,44 @@ HUNT_SNIPER_TOP_LS_MAX = SNIPER_CONFIG.top_ls_max
 HUNT_SNIPER_REQUIRE_TOP_LS = SNIPER_CONFIG.require_top_ls
 HUNT_SNIPER_CHASE_TOL = SNIPER_CONFIG.chase_tol
 HUNT_SNAPSHOT_PARALLEL = max(1, int(os.getenv("HUNT_SNAPSHOT_PARALLEL", "6")))
+_HOT_TICK_TIMEOUT_S = float(os.getenv("HUNT_HOT_TICK_TIMEOUT_S", "60") or 60)
+_TICK_LOCK = asyncio.Lock()
+
+
+def _evaluate_delivery_row(
+    row: dict[str, Any],
+    *,
+    hot_path: bool,
+    direction: str,
+    setup: dict[str, Any],
+    lifecycle: dict[str, Any] | None,
+    symbol: str,
+    refresh_live_price: bool = False,
+    ws_feed: HuntCcxtStreams | None = None,
+) -> tuple[Any, Any]:
+    use_fast = hot_path or row.get("tick_path") in {
+        "hot_ws",
+        "hot_bootstrap",
+        "hot_delta",
+        "hot_carry",
+    }
+    if use_fast:
+        from hunt_core.deliver.dispatch import evaluate_delivery_fast
+
+        fn = evaluate_delivery_fast
+    else:
+        from hunt_core.deliver.dispatch import evaluate_delivery
+
+        fn = evaluate_delivery
+    return fn(
+        row,
+        direction=direction,
+        setup=setup,
+        lifecycle=lifecycle,
+        symbol=symbol,
+        refresh_live_price=refresh_live_price,
+        ws_feed=ws_feed,
+    )
 
 
 def _overlay_ws_tickers(
@@ -218,18 +261,149 @@ def _advisory_tg_enabled() -> bool:
     return os.environ.get("HUNT_ADVISORY_TG", "0").strip().lower() in {"1", "true", "yes"}
 
 
+_STATIC_BLOCK_TELEMETRY_CODES = frozenset({
+    "not_anomaly",
+    "scanner_continuation_wait",
+    "must_pass:htf_bias_veto",
+})
+_BLOCK_TELEMETRY_REPEAT_MINUTES = 60
+
+
+def _should_emit_blocked_telemetry(
+    symbol: str,
+    direction: str,
+    block_code: str,
+    now: datetime,
+) -> bool:
+    """Log static gate blocks at most once per hour (XMR not_anomaly noise)."""
+    code = str(block_code or "")
+    if code not in _STATIC_BLOCK_TELEMETRY_CODES and not code.startswith(
+        ("family_vote_low:", "contract_")
+    ):
+        return True
+    from hunt_core.runtime.state import current_symbol_state
+
+    key = f"{symbol.upper()}:{direction.lower()}:{code}"
+    store = current_symbol_state()
+    raw = store.blocked_telemetry_log.get(key)
+    if raw:
+        try:
+            if now - datetime.fromisoformat(str(raw)) < timedelta(
+                minutes=_BLOCK_TELEMETRY_REPEAT_MINUTES
+            ):
+                return False
+        except ValueError:
+            pass
+    store.blocked_telemetry_log[key] = now.isoformat()
+    return True
+
+
+def _maybe_emit_scanner_continuation_wait(
+    *,
+    symbol: str,
+    direction: str,
+    setup: dict[str, Any],
+    lifecycle_raw: Any,
+    now: datetime,
+) -> None:
+    """Telemetry when mid-dump has fuel but scanner withheld closed-bar confirm."""
+    if direction != "short" or bool(setup.get("confirmed")):
+        return
+    lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
+    fall = float(lc.get("fall_from_high_pct") or 0)
+    fuel = float(setup.get("dump_fuel") or setup.get("dump_score") or 0)
+    cal = effective_hunt_params(symbol)
+    if (
+        str(lc.get("phase") or "") != "dump_active"
+        or fall < 40.0
+        or fuel < cal.confirm_min_score
+        or not _should_emit_blocked_telemetry(
+            symbol, direction, "scanner_continuation_wait", now
+        )
+    ):
+        return
+    LOG.info(
+        "watch_scanner_continuation_wait",
+        symbol=symbol,
+        fall_pct=round(fall, 1),
+        fuel=round(fuel, 1),
+        phase=setup.get("phase"),
+    )
+    append_signal_event(
+        "blocked",
+        symbol=symbol,
+        direction=direction,
+        detail="scanner_continuation_wait",
+        payload={
+            "block_code": "scanner_continuation_wait",
+            "fall_pct": fall,
+            "fuel": fuel,
+            "phase": setup.get("phase"),
+            "lifecycle_phase": lc.get("phase"),
+        },
+    )
+
+
+def _confirm_delivery_suppressed(
+    tracker_state: dict[str, Any],
+    state: dict[str, str],
+    *,
+    symbol: str,
+    direction: str,
+    now: datetime,
+) -> bool:
+    """Skip confirm re-evaluation after TG shipped (avoids confirmed→blocked flicker)."""
+    from hunt_core.track.tracker import (
+        recent_stop_hit_cooldown,
+        signal_confirm_announced,
+    )
+
+    if signal_confirm_announced(
+        tracker_state, symbol=symbol, direction=direction
+    ):
+        return True
+    if recent_stop_hit_cooldown(
+        tracker_state, symbol=symbol, direction=direction, now=now
+    ):
+        return True
+    return not unified_cooldown_ok(
+        state,
+        symbol=symbol,
+        direction=direction,
+        stage="confirm",
+        now=now,
+    )
+
+
 def _confirm_blocked_bias_wait(
     *,
     direction: str,
     lifecycle: Any | None,
+    setup: dict[str, Any] | None = None,
+    symbol: str = "",
 ) -> bool:
-    """Block confirm TG when dump_active short has bias=wait (VELVET lesson)."""
+    """Block confirm TG when dump_active short has bias=wait — unless continuation confirmed."""
     if direction != "short" or not isinstance(lifecycle, dict):
         return False
-    return (
-        str(lifecycle.get("phase") or "") == "dump_active"
-        and str(lifecycle.get("recommended_bias") or "") == "wait"
-    )
+    if str(lifecycle.get("phase") or "") != "dump_active":
+        return False
+    if str(lifecycle.get("recommended_bias") or "") != "wait":
+        return False
+    if isinstance(setup, dict):
+        from hunt_core.gate.delivery import _dump_continuation_short_ok
+        from hunt_core.params.store import effective_hunt_params
+
+        cal = effective_hunt_params(symbol)
+        fuel = float(setup.get("dump_fuel") or setup.get("dump_score") or 0)
+        if _dump_continuation_short_ok(
+            setup,
+            phase="dump_active",
+            lc=lifecycle,
+            fuel=fuel,
+            cal_min_fuel=cal.confirm_min_score,
+        ):
+            return False
+    return True
 
 
 def _phase_long(long_setup: dict[str, Any], confirmed: bool, *, symbol: str = "") -> str:
@@ -706,7 +880,7 @@ def _reason_human(setup: dict[str, Any], *, direction: str, lc_phase: str) -> st
 
 
 # Orphan signals (symbol no longer in watchlist) are re-checked via REST klines.
-ORPHAN_RECONCILE_MINUTES = 5
+ORPHAN_RECONCILE_MINUTES = 2
 INWATCH_KLINE_RECONCILE_SECONDS = 45
 
 
@@ -897,6 +1071,14 @@ def _record_followup_side_effects(
                 detail=str(fu.detail or ""),
                 payload=fu.payload or {},
             )
+        if fu.event == "early_breakeven":
+            append_signal_event(
+                "followup",
+                symbol=fu.symbol,
+                direction=str(fu.direction or ""),
+                detail=f"early_breakeven:{fu.detail or ''}",
+                payload=fu.payload or {},
+            )
         if pump_store is None:
             continue
         if fu.event == "fix_profit_tp1":
@@ -963,6 +1145,7 @@ async def run_tick(
     feature_lake: FeatureLakeWriter | None = None,
     tier_by_symbol: dict[str, SnapshotTier] | None = None,
     snapshot_parallel: int | None = None,
+    hot_path: bool = False,
 ) -> list[dict[str, Any]]:
     state = _load_state()
     tracker_state = load_tracker_state()
@@ -1036,32 +1219,62 @@ async def run_tick(
                 lifecycle_bias=last_bias.get(sym),
             )
             try:
-                row = await asyncio.wait_for(
-                    snapshot_symbol(
-                        client,
-                        settings,
-                        minimums,
-                        sym,
-                        watch_mode=mode,
-                        prev_oi=prev_oi.get(sym),
-                        premium_all=premium_all,
-                        funding_info_all=funding_info_all,
-                        btc_work_1h=btc_work_1h,
-                        exchange_by_sym=exchange_by_sym,
-                        ticker_by_sym=ticker_by_sym,
-                        ws_feed=ws_feed,
-                        spot_companion=spot_companion,
-                        pump_stats=(
-                            pump_stats_by_sym.get(sym) if pump_stats_by_sym else None
+                snap_timeout = _HOT_TICK_TIMEOUT_S if hot_path else SYMBOL_TICK_TIMEOUT_S
+                if hot_path:
+                    row = await asyncio.wait_for(
+                        hot_tick_symbol(
+                            client,
+                            settings,
+                            minimums,
+                            sym,
+                            watch_mode=mode,
+                            prev_oi=prev_oi.get(sym),
+                            premium_all=premium_all,
+                            funding_info_all=funding_info_all,
+                            btc_work_1h=btc_work_1h,
+                            exchange_by_sym=exchange_by_sym,
+                            ticker_by_sym=ticker_by_sym,
+                            ws_feed=ws_feed,
+                            spot_companion=spot_companion,
+                            pump_stats=(
+                                pump_stats_by_sym.get(sym) if pump_stats_by_sym else None
+                            ),
+                            symbol_state=symbol_state,
                         ),
-                        tier=sym_tier,
-                        symbol_state=symbol_state,
-                    ),
-                    timeout=SYMBOL_TICK_TIMEOUT_S,
-                )
+                        timeout=snap_timeout,
+                    )
+                else:
+                    row = await asyncio.wait_for(
+                        snapshot_symbol(
+                            client,
+                            settings,
+                            minimums,
+                            sym,
+                            watch_mode=mode,
+                            prev_oi=prev_oi.get(sym),
+                            premium_all=premium_all,
+                            funding_info_all=funding_info_all,
+                            btc_work_1h=btc_work_1h,
+                            exchange_by_sym=exchange_by_sym,
+                            ticker_by_sym=ticker_by_sym,
+                            ws_feed=ws_feed,
+                            spot_companion=spot_companion,
+                            pump_stats=(
+                                pump_stats_by_sym.get(sym) if pump_stats_by_sym else None
+                            ),
+                            tier=sym_tier,
+                            symbol_state=symbol_state,
+                        ),
+                        timeout=snap_timeout,
+                    )
                 return sym, row
             except TimeoutError:
-                LOG.warning("watch_symbol_timeout", symbol=sym, timeout_s=SYMBOL_TICK_TIMEOUT_S)
+                LOG.warning(
+                    "watch_symbol_timeout",
+                    symbol=sym,
+                    timeout_s=snap_timeout,
+                    hot_path=hot_path,
+                )
                 return sym, {
                     "ts": now.isoformat(),
                     "symbol": sym,
@@ -1080,7 +1293,7 @@ async def run_tick(
         snap_pairs = await asyncio.gather(*[_bounded_snapshot(s) for s in ordered])
         row_by_sym = dict(snap_pairs)
         snap_elapsed = round(time.monotonic() - tick_started, 2)
-        if len(ordered) > 1:
+        if len(ordered) > 1 or hot_path:
             full_n = sum(1 for s in ordered if _tier_for(s) == "full")
             LOG.info(
                 "watch_snapshot_batch",
@@ -1088,14 +1301,17 @@ async def run_tick(
                 parallel=parallel,
                 elapsed_s=snap_elapsed,
                 tier=tier,
+                hot_path=hot_path,
                 full_symbols=full_n,
                 fast_symbols=len(ordered) - full_n,
                 used_weight_1m=client.used_weight_1m(),  # Binance IP budget; cap 2400/min
             )
 
+        advisory_sent_tick: set[str] = set()
+        tg_confirm_sent_this_tick = False
+
         for symbol in ordered:
             try:
-                advisory_sent_tick: set[str] = set()
                 row = row_by_sym.get(symbol)
                 if row is None:
                     continue
@@ -1174,7 +1390,40 @@ async def run_tick(
                     row["pump_history"] = pump_stats_by_sym[symbol]
                 dump = row.get("dump") or {}
                 long_setup = row.get("long") or {}
+                from hunt_core.data.frame_cache import get_frame_cache
+
                 lifecycle_raw = row.get("lifecycle") or (dump.get("lifecycle") if dump else None)
+                get_frame_cache().mark_priority(
+                    symbol,
+                    max(
+                        float(dump.get("dump_fuel") or 0),
+                        float(long_setup.get("long_fuel") or 0),
+                    ),
+                )
+                if not hot_path:
+                    prev_path = get_frame_cache().get_last_tick_path(symbol)
+                    if prev_path in {
+                        "hot_ws",
+                        "hot_delta",
+                        "hot_bootstrap",
+                        "hot_carry",
+                    } and dump.get(
+                        "confirmed"
+                    ):
+                        from hunt_core.deliver.dispatch import shadow_full_lane_recheck
+
+                        shadow_full_lane_recheck(
+                            row,
+                            direction="short",
+                            setup=dump,
+                            lifecycle=lifecycle_raw if isinstance(lifecycle_raw, dict) else None,
+                            symbol=symbol,
+                            broadcaster=broadcaster,
+                            send_telegram=send_telegram,
+                        )
+                get_frame_cache().set_last_tick_path(
+                    symbol, str(row.get("tick_path") or "")
+                )
                 if lifecycle_raw and isinstance(lifecycle_raw, dict):
                     last_bias[symbol] = str(lifecycle_raw.get("recommended_bias") or "")
                     lc_phase = str(lifecycle_raw.get("phase") or "")
@@ -1418,10 +1667,9 @@ async def run_tick(
                             payload={"fuel": round(nfuel, 1), "min_fuel": min_fuel},
                         )
                     if nsetup and bool(nsetup.get("confirmed")):
-                        from hunt_core.deliver.dispatch import evaluate_delivery
-
-                        gate, delivery_tier = evaluate_delivery(
+                        gate, delivery_tier = _evaluate_delivery_row(
                             row,
+                            hot_path=hot_path,
                             direction=ndir,
                             setup=nsetup,
                             lifecycle=lc_dict,
@@ -1624,6 +1872,13 @@ async def run_tick(
                     for direction, setup in (("short", dump), ("long", long_setup)):
                         if not setup:
                             continue
+                        _maybe_emit_scanner_continuation_wait(
+                            symbol=symbol,
+                            direction=direction,
+                            setup=setup,
+                            lifecycle_raw=lifecycle_raw,
+                            now=now,
+                        )
                         if HUNT_SNIPER_MODE:
                             # H-A: only short fade in lifecycle `dump_active` ships live.
                             # Long stays shadow (tracked, never announced).
@@ -1632,16 +1887,45 @@ async def run_tick(
                             _lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
                             _lc_phase = str(_lc.get("phase") or "")
                             if _lc_phase not in HUNT_SNIPER_LIVE_PHASES:
-                                continue
+                                from hunt_core.gate.delivery import _dump_continuation_short_ok
+
+                                _phase_fuel = float(
+                                    setup.get("dump_fuel") or setup.get("dump_score") or 0
+                                )
+                                _phase_cal = effective_hunt_params(symbol)
+                                _cont_ok = _lc_phase == "dump_active" and _dump_continuation_short_ok(
+                                    setup,
+                                    phase=_lc_phase,
+                                    lc=_lc,
+                                    fuel=_phase_fuel,
+                                    cal_min_fuel=_phase_cal.confirm_min_score,
+                                )
+                                if not _cont_ok:
+                                    continue
                             # Respect the lifecycle's own entry permission. INXUSDT shipped a
                             # short in a transient window while the lifecycle said bias=wait /
                             # short_entry_ok=False (dump already ~15% underway) = late chase.
                             if _lc.get("short_entry_ok") is not True:
-                                LOG.warning(
-                                    "sniper_block_short_entry_not_ok", symbol=symbol,
-                                    phase=_lc_phase, bias=_lc.get("recommended_bias"),
+                                from hunt_core.gate.delivery import _dump_continuation_short_ok
+
+                                _sniper_fuel = float(
+                                    setup.get("dump_fuel") or setup.get("dump_score") or 0
                                 )
-                                continue
+                                _sniper_cal = effective_hunt_params(symbol)
+                                if not _dump_continuation_short_ok(
+                                    setup,
+                                    phase=_lc_phase,
+                                    lc=_lc,
+                                    fuel=_sniper_fuel,
+                                    cal_min_fuel=_sniper_cal.confirm_min_score,
+                                ):
+                                    LOG.warning(
+                                        "sniper_block_short_entry_not_ok",
+                                        symbol=symbol,
+                                        phase=_lc_phase,
+                                        bias=_lc.get("recommended_bias"),
+                                    )
+                                    continue
                             # No-chase freshness: the entry zone is the acceptable fill band;
                             # if price already extended below it the move happened (INX: price
                             # 0.00827 under entry_zone[0]=0.008464). Missing/invalid geometry
@@ -1708,11 +1992,53 @@ async def run_tick(
                                 now=now,
                             ):
                                 advisory_sent_tick.add(f"{symbol}:{direction}")
+                        if confirmed_setup and _confirm_delivery_suppressed(
+                            tracker_state,
+                            state,
+                            symbol=symbol,
+                            direction=direction,
+                            now=now,
+                        ):
+                            continue
+                        if confirmed_setup and symbol_loss_streak_cooldown(
+                            tracker_state,
+                            symbol=symbol,
+                            direction=direction,
+                            now=now,
+                        ):
+                            LOG.info(
+                                "watch_telegram_skipped_loss_streak",
+                                symbol=symbol,
+                                direction=direction,
+                            )
+                            continue
+                        if confirmed_setup and symbol_daily_tg_cap_reached(
+                            tracker_state,
+                            symbol=symbol,
+                            direction=direction,
+                            now=now,
+                        ):
+                            LOG.info(
+                                "watch_telegram_skipped_daily_cap",
+                                symbol=symbol,
+                                direction=direction,
+                            )
+                            continue
+                        if confirmed_setup and symbol_repeat_loser_blocked(
+                            tracker_state,
+                            symbol=symbol,
+                            now=now,
+                        ):
+                            LOG.info(
+                                "watch_telegram_skipped_repeat_loser",
+                                symbol=symbol,
+                                direction=direction,
+                            )
+                            continue
                         if confirmed_setup:
-                            from hunt_core.deliver.dispatch import evaluate_delivery
-
-                            confirm_gate, confirm_tier = evaluate_delivery(
+                            confirm_gate, confirm_tier = _evaluate_delivery_row(
                                 row,
+                                hot_path=hot_path,
                                 direction=direction,
                                 setup=setup,
                                 lifecycle=lifecycle_raw
@@ -1724,30 +2050,38 @@ async def run_tick(
                             )
                             if not confirm_gate.ok or confirm_tier is None:
                                 lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
-                                LOG.info(
-                                    "watch_alert_blocked",
-                                    symbol=symbol,
-                                    direction=direction,
-                                    score=setup.get("dump_score") or setup.get("long_score"),
-                                    hunt_phase=lc.get("phase"),
-                                    block_code=confirm_gate.code,
-                                    reason=confirm_gate.message,
-                                )
-                                append_signal_event(
-                                    "blocked",
-                                    symbol=symbol,
-                                    direction=direction,
-                                    detail=confirm_gate.message,
-                                    payload={
-                                        "block_code": confirm_gate.code,
-                                        "score": setup.get("dump_score")
+                                block_code = str(confirm_gate.code or "")
+                                if _should_emit_blocked_telemetry(
+                                    symbol,
+                                    direction,
+                                    block_code,
+                                    now,
+                                ):
+                                    LOG.info(
+                                        "watch_alert_blocked",
+                                        symbol=symbol,
+                                        direction=direction,
+                                        score=setup.get("dump_score")
                                         or setup.get("long_score"),
-                                        "fuel": setup.get("dump_fuel")
-                                        or setup.get("long_fuel"),
-                                        "phase": setup.get("phase"),
-                                        "lifecycle_phase": lc.get("phase"),
-                                    },
-                                )
+                                        hunt_phase=lc.get("phase"),
+                                        block_code=confirm_gate.code,
+                                        reason=confirm_gate.message,
+                                    )
+                                    append_signal_event(
+                                        "blocked",
+                                        symbol=symbol,
+                                        direction=direction,
+                                        detail=confirm_gate.message,
+                                        payload={
+                                            "block_code": confirm_gate.code,
+                                            "score": setup.get("dump_score")
+                                            or setup.get("long_score"),
+                                            "fuel": setup.get("dump_fuel")
+                                            or setup.get("long_fuel"),
+                                            "phase": setup.get("phase"),
+                                            "lifecycle_phase": lc.get("phase"),
+                                        },
+                                    )
                                 process_setup_candidate(
                                     setup_candidates_state,
                                     symbol=symbol,
@@ -1821,6 +2155,20 @@ async def run_tick(
                             continue
                         if not _cooldown_ok(symbol, direction, state, now=now):
                             continue
+                        from hunt_core.track.tracker import recent_stop_hit_cooldown
+
+                        if recent_stop_hit_cooldown(
+                            tracker_state,
+                            symbol=symbol,
+                            direction=direction,
+                            now=now,
+                        ):
+                            LOG.info(
+                                "watch_telegram_skipped_post_sl_cooldown",
+                                symbol=symbol,
+                                direction=direction,
+                            )
+                            continue
                         if not unified_cooldown_ok(
                             state,
                             symbol=symbol,
@@ -1835,7 +2183,10 @@ async def run_tick(
                             )
                             continue
                         if _confirm_blocked_bias_wait(
-                            direction=direction, lifecycle=lifecycle_raw
+                            direction=direction,
+                            lifecycle=lifecycle_raw,
+                            setup=setup,
+                            symbol=symbol,
                         ):
                             LOG.info(
                                 "watch_telegram_skipped_bias_wait",
@@ -1863,13 +2214,19 @@ async def run_tick(
                                 tp1=setup.get("tp1"),
                             )
                             continue
+                        if tg_confirm_sent_this_tick:
+                            LOG.info(
+                                "watch_telegram_skipped_tick_cap",
+                                symbol=symbol,
+                                direction=direction,
+                            )
+                            continue
                         if confirmed_setup:
                             gate, delivery_tier = confirm_gate, confirm_tier
                         else:
-                            from hunt_core.deliver.dispatch import evaluate_delivery
-
-                            gate, delivery_tier = evaluate_delivery(
+                            gate, delivery_tier = _evaluate_delivery_row(
                                 row,
+                                hot_path=hot_path,
                                 direction=direction,
                                 setup=setup,
                                 lifecycle=lifecycle_raw
@@ -1898,6 +2255,7 @@ async def run_tick(
                         result = await broadcaster.send_html(msg)
                         key = f"{symbol}:{direction}"
                         if result.status == "sent":
+                            tg_confirm_sent_this_tick = True
                             state[key] = now.isoformat()
                             mark_unified_sent(
                                 state,
@@ -1962,6 +2320,20 @@ async def run_tick(
                                     "phase": setup.get("phase"),
                                 },
                             )
+                            append_signal_event(
+                                "delivered",
+                                symbol=symbol,
+                                direction=direction,
+                                detail=str(delivery_tier),
+                                payload={
+                                    "message_id": result.message_id,
+                                    "delivery_tier": delivery_tier,
+                                    "score": setup.get("dump_score")
+                                    or setup.get("long_score"),
+                                    "fuel": setup.get("dump_fuel")
+                                    or setup.get("long_fuel"),
+                                },
+                            )
                         else:
                             LOG.warning(
                                 "watch_telegram_failed",
@@ -1973,11 +2345,34 @@ async def run_tick(
             except Exception:
                 LOG.exception("watch_symbol_process_failed", symbol=symbol)
 
+        # Ticker safety net: symbols rotated out of this tick's batch still get
+        # SL/TP extremes from the already-fetched 24h ticker (MEGA @ SL while
+        # last_checked froze — universe rotation gap).
+        seen = set(symbols)
+        active_syms = {sym for sym, _ in iter_active_tracker_symbols(tracker_state)}
+        missing_active = active_syms - seen
+        ticker_events: list[Any] = []
+        if missing_active and ticker_by_sym:
+            ticker_now = clock.now_utc()
+            ticker_events = reconcile_active_from_ticker(
+                tracker_state,
+                ticker_by_sym=ticker_by_sym,
+                now=ticker_now,
+                only_symbols=missing_active,
+            )
+            if ticker_events:
+                LOG.info(
+                    "watch_ticker_reconcile",
+                    symbols=sorted(missing_active),
+                    events=len(ticker_events),
+                )
+
         # Orphan reconciliation: active signals whose symbol left the watchlist
         # would otherwise never close (PLAYUSDT held TP2 for 18h unnoticed).
         orphan_events = await _reconcile_orphan_signals(
-            client, tracker_state, seen_symbols=set(symbols), now=clock.now_utc()
+            client, tracker_state, seen_symbols=seen, now=clock.now_utc()
         )
+        orphan_events = ticker_events + orphan_events
         if orphan_events:
             orphan_now = clock.now_utc()
             orphan_sent: set[str] = set()
@@ -2006,6 +2401,9 @@ async def run_tick(
                 )
         if send_telegram and broadcaster is not None:
             await get_advisory_digest().maybe_flush(broadcaster)
+        from hunt_core.runtime.tick_state import last_tick_store
+
+        last_tick_store().put_many(rows)
         return rows
     finally:
         _save_state(state)
@@ -2013,6 +2411,22 @@ async def run_tick(
         save_prep_shadow_state(prep_shadow_state)
         save_setup_candidates_state(setup_candidates_state)
         flush_lake()
+
+
+async def run_hot_kline_tick(
+    symbols: tuple[str, ...],
+    ctx: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Hot 1m-close tick — serialized with cold tick via ``_TICK_LOCK``."""
+    async with _TICK_LOCK:
+        return await run_tick(
+            symbols,
+            **{
+                **{k: v for k, v in ctx.items() if k not in ("active", "tier", "hot_path")},
+                "tier": "hot",
+                "hot_path": True,
+            },
+        )
 
 
 def _build_digest_candidates(
@@ -2061,6 +2475,22 @@ async def run_loop(
     send_telegram: bool,
 ) -> None:
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _prev_loop_handler = asyncio.get_running_loop().get_exception_handler()
+
+    def _hunt_loop_exc_handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        exc = context.get("exception")
+        if exc is not None:
+            from hunt_core.market.streams import HuntCcxtStreams
+
+            if HuntCcxtStreams._ws_transport_fatal(exc):
+                LOG.debug("asyncio_orphan_ws | %s", exc)
+                return
+        if _prev_loop_handler is not None:
+            _prev_loop_handler(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    asyncio.get_running_loop().set_exception_handler(_hunt_loop_exc_handler)
     if migrate_calibration_split():
         LOG.info("hunt_calibration_migrated", path="hunt/data/hunt_calibration.json")
     try:
@@ -2111,11 +2541,19 @@ async def run_loop(
     spot_companion = plane.spot
     ws_feed.set_symbols(list(cli_symbols))
     await ws_feed.start()
+    from hunt_core.runtime.hot_loop import HotKlineLoop
+
+    hot_kline_loop = HotKlineLoop(run_hot_tick=run_hot_kline_tick)
+    if not once:
+        hot_kline_loop.start(ws_feed, once=False)
     # Persistent across ticks: kline/OI caches live in client; oi_flush/oi_build need prev tick.
     prev_oi: dict[str, float | None] = {}
     last_bias: dict[str, str] = {}
     last_lifecycle_phase: dict[str, str] = {}
     symbol_state = new_session_state()
+    from hunt_core.data.frame_cache import reset_frame_cache
+
+    reset_frame_cache()
     feature_lake = FeatureLakeWriter()
     ignition_state = load_ignition_state()
     prescan_debounce = PrescanDebounceQueue(
@@ -2192,10 +2630,6 @@ async def run_loop(
         tick_ctx: dict[str, Any] | None = None
         while not should_stop():
             started = time.monotonic()
-            if not once:
-                faulthandler.dump_traceback_later(
-                    _wd_timeout_s, repeat=False, file=_wd_file, exit=True
-                )
             try:
                 if not once and time.monotonic() - last_regime >= REGIME_REFRESH_S:
                     try:
@@ -2418,6 +2852,19 @@ async def run_loop(
                         mode_map.setdefault(
                             s, "short" if d.direction == "pump" else "long"
                         )
+                    # Keep open tracker positions in every tick batch — otherwise
+                    # SL/TP followups stall until orphan kline reconcile.
+                    tracker_pin = load_tracker_state()
+                    pinned_n = 0
+                    for sym, direction in iter_active_tracker_symbols(tracker_pin):
+                        if sym not in merged:
+                            merged.append(sym)
+                            pinned_n += 1
+                        mode_map.setdefault(
+                            sym, "short" if direction == "short" else "long"
+                        )
+                    if pinned_n:
+                        LOG.info("watch_tracker_pin", symbols=pinned_n)
                 active = tuple(dict.fromkeys(merged))
                 load_plan = load_planner.plan_tick(
                     active,
@@ -2500,8 +2947,18 @@ async def run_loop(
                     "prescan_outlier_by_sym": prescan_outlier_by_sym,
                     "symbol_state": symbol_state,
                     "feature_lake": feature_lake,
+                    "hot_path": False,
                 }
-                rows = await run_tick(active, **{k: v for k, v in tick_ctx.items() if k != "active"})
+                hot_kline_loop.set_tick_ctx(tick_ctx)
+                if not once:
+                    faulthandler.cancel_dump_traceback_later()
+                    faulthandler.dump_traceback_later(
+                        _wd_timeout_s, repeat=False, file=_wd_file, exit=True
+                    )
+                async with _TICK_LOCK:
+                    rows = await run_tick(
+                        active, **{k: v for k, v in tick_ctx.items() if k != "active"}
+                    )
                 ban_telemetry = client.rest_gate.guard.telemetry
                 if ban_telemetry.last_at_mono and (
                     time.monotonic() - ban_telemetry.last_at_mono < interval_s + 5
@@ -2526,6 +2983,8 @@ async def run_loop(
                         LOG.info("hunt_digest_scheduled_sent", candidates=len(digest_candidates))
                 save_pump_history(pump_store)
                 buffer_tick_rows(rows)
+                if not once:
+                    faulthandler.cancel_dump_traceback_later()
                 if (
                     OUT_PATH.exists()
                     and OUT_PATH.stat().st_size >= TICK_ROTATE_MIN_BYTES
@@ -2543,36 +3002,17 @@ async def run_loop(
                     break
             except Exception:
                 LOG.exception("dump_watch_tick_error")
+                faulthandler.cancel_dump_traceback_later()
                 if once:
                     raise
             if once:
                 break
             deadline = started + max(1.0, float(interval_s))
             while time.monotonic() < deadline and not should_stop():
-                pending = ws_feed.pop_kline_close_triggers()
-                if pending and tick_ctx is not None:
-                    ctx = tick_ctx
-                    fast_syms = tuple(s for s in ctx["active"] if s in pending)
-                    if fast_syms:
-                        LOG.info("watch_kline_1m_trigger", symbols=list(fast_syms))
-                        try:
-                            fast_rows = await run_tick(
-                                fast_syms,
-                                **{
-                                    **{k: v for k, v in ctx.items() if k not in ("active", "tier")},
-                                    "tier": "fast",
-                                },
-                            )
-                            for row in fast_rows:
-                                row["tick_trigger"] = "kline_1m"
-                            buffer_tick_rows(fast_rows)
-                            ws_feed.consume_kline_close_triggers(set(fast_syms))
-                        except Exception:
-                            LOG.exception("watch_kline_fast_tick_failed")
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
-                await asyncio.sleep(min(3.0, remaining))
+                await asyncio.sleep(min(1.0, remaining))
     finally:
         faulthandler.cancel_dump_traceback_later()
         try:
@@ -2592,6 +3032,7 @@ async def run_loop(
                 pass
         if tg_cmds is not None:
             await tg_cmds.close()
+        await hot_kline_loop.stop()
         await ws_feed.stop()
         await spot_companion.close()
         await client.close()

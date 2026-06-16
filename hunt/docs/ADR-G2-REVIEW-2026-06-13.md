@@ -28,4 +28,4 @@ G2 chose H-B Wide Hunter despite data favoring short fade dump_active only.
 ## References
 
 - [HUNT_TRUTH_AUDIT.md](HUNT_TRUTH_AUDIT.md)
-- [HUNT_PRODUCT_DEFINITION.md](HUNT_PRODUCT_DEFINITION.md)
+- [HUNT_ARCHITECTURE.md](HUNT_ARCHITECTURE.md)

@@ -196,6 +196,19 @@ SL_MAX_ATR = 2.5
 # Entry zone width cap: min(ENTRY_ZONE_MAX_ATR x ATR, ENTRY_ZONE_MAX_PCT of price).
 ENTRY_ZONE_MAX_ATR = 1.5
 ENTRY_ZONE_MAX_PCT = 3.0
+# Latency band: the entry zone is anchored at scan/confirm time but the gate
+# evaluates it one tick later, after price has drifted (fast dump legs move
+# 0.3-0.8% per tick). A flat 0.2% lower edge goes stale within one tick and
+# trips a false late_chase. Extend the trailing edge by the asset's own
+# velocity (max of a flat % and an ATR fraction) so a confirmed entry still
+# fills in-zone; still bounded by the width cap above (kept "an entry").
+ENTRY_ZONE_LATENCY_PCT = 0.5
+ENTRY_ZONE_LATENCY_ATR = 0.5
+# Leading-edge bounce allowance: the entry anchors near *live* price, not the
+# impulse high. price+2xATR floated the whole band above a falling price (so a
+# dump that keeps falling never re-enters its own zone = permanent late_chase).
+# Cap the short-into-bounce / long-into-dip headroom at a small ATR fraction.
+ENTRY_ZONE_BOUNCE_ATR = 0.5
 # Nominal risk sanity: SL further than this from the worst edge is untradable.
 SL_MAX_PCT = 8.0
 # Minimum R:R from the worst edge for a setup to be viable.
@@ -928,71 +941,135 @@ def structural_short_levels(
 
     # Entry anchors to current price; zone width hard-capped — a wide zone means
     # "somewhere around here", which is not an entry.
-    entry_hi = round(max(price, min(ih * 0.995, price + atr * 2.0)), 6)
+    entry_hi = round(max(price, min(ih * 0.995, price + atr * ENTRY_ZONE_BOUNCE_ATR)), 6)
     entry_lo = round(min(price * 0.998, local_support * 1.002, entry_hi * 0.996), 6)
+    # Re-anchor the trailing (lower) edge to the asset's velocity so the band
+    # still contains live price after confirm->deliver latency (else false
+    # late_chase). Width cap below keeps it bounded.
+    latency_band = max(price * ENTRY_ZONE_LATENCY_PCT / 100.0, atr * ENTRY_ZONE_LATENCY_ATR)
+    entry_lo = round(min(entry_lo, price - latency_band), 6)
     width_cap = min(atr * ENTRY_ZONE_MAX_ATR, price * ENTRY_ZONE_MAX_PCT / 100.0)
     if entry_hi - entry_lo > width_cap:
         entry_lo = round(entry_hi - width_cap, 6)
     worst = entry_hi  # short fills at the top of the zone in the worst case
 
-    # --- TPs first: the SL ceiling depends on the TP2 distance ---
-    tp1 = _f(fib_tp.get("ret_382"))
-    tp2 = _f(fib_tp.get("ret_50"))
-    if tp1 <= 0 or tp1 >= entry_lo:
-        leg = ih - il_tp
-        tp1 = round(ih - leg * 0.382, 6) if leg > 0 else round(entry_lo - atr * 2, 6)
-    if tp2 <= 0 or tp2 >= tp1:
-        leg = ih - il_tp
-        tp2 = round(ih - leg * 0.5, 6) if leg > 0 else round(il_tp * 1.01, 6)
-    if tp1 >= entry_lo:
-        tp1 = round((entry_lo + il_tp) / 2.0, 6)
-    if tp2 >= tp1:
-        tp2 = round(il_tp * 1.015, 6)
+    # Dump bottom: hunt_low ≈ live price → fib leg TPs collapse above entry (BEATUSDT -71%).
+    # Use fixed % continuation targets instead of fib/liquidity ladder noise.
+    # il_tp within ~8% of live price counts as "at the bottom" (SIREN bounce +7% still qualifies).
+    at_leg_bottom = il_tp <= 0 or il_tp >= price * 0.92
+    near_dump_bottom = (
+        lifecycle_phase == "dump_active"
+        and fall_from_high_pct >= 15.0
+        and price > 0
+        and (at_leg_bottom or fall_from_high_pct >= 40.0)
+    )
+    tp1_label = ""
+    tp2_label = ""
+    tp_mode = "fib"
+    tp1_target_tf = ""
+    tp2_target_tf = ""
 
-    tp1, tp1_label = _apply_fast_flush_tp1_buffer(
-        tp1, entry_lo=entry_lo, atr=atr, lifecycle_phase=lifecycle_phase
-    )
-    tp1, tp1_label, tp2, tp2_label, tp_mode, tp1_target_tf, tp2_target_tf = apply_liquidity_tp_ladder_short(
-        worst_entry=worst,
-        entry_lo=entry_lo,
-        atr=atr,
-        fib_tp1=tp1,
-        fib_tp2=tp2,
-        fib_tp1_label=tp1_label,
-        impulse_low=il_tp,
-        local_support=local_support,
-        liquidity=liquidity,
-        lifecycle_phase=lifecycle_phase,
-        source_tf=source_tf,
-        poc_direction=poc_direction,
-    )
-    _validate_tp_target_tf(
-        veto,
-        source_tf=source_tf,
-        tp1_target_tf=tp1_target_tf,
-        tp2_target_tf=tp2_target_tf,
-    )
+    if near_dump_bottom:
+        tp1 = round(price * 0.965, 6)
+        tp2 = round(price * 0.93, 6)
+        tp1_label = "3.5% cont"
+        tp2_label = "7% cont"
+        tp_mode = "continuation_pct"
+        tp1_target_tf = tp2_target_tf = "pct"
+    else:
+        # --- TPs first: the SL ceiling depends on the TP2 distance ---
+        tp1 = _f(fib_tp.get("ret_382"))
+        tp2 = _f(fib_tp.get("ret_50"))
+        if tp1 <= 0 or tp1 >= entry_lo:
+            leg = ih - il_tp
+            tp1 = round(ih - leg * 0.382, 6) if leg > 0 else round(entry_lo - atr * 2, 6)
+        if tp2 <= 0 or tp2 >= tp1:
+            leg = ih - il_tp
+            tp2 = round(ih - leg * 0.5, 6) if leg > 0 else round(il_tp * 1.01, 6)
+        if tp1 >= entry_lo:
+            tp1 = round((entry_lo + il_tp) / 2.0, 6)
+        if tp2 >= tp1:
+            tp2 = round(il_tp * 1.015, 6)
+
+        tp1, tp1_label = _apply_fast_flush_tp1_buffer(
+            tp1, entry_lo=entry_lo, atr=atr, lifecycle_phase=lifecycle_phase
+        )
+        tp1, tp1_label, tp2, tp2_label, tp_mode, tp1_target_tf, tp2_target_tf = apply_liquidity_tp_ladder_short(
+            worst_entry=worst,
+            entry_lo=entry_lo,
+            atr=atr,
+            fib_tp1=tp1,
+            fib_tp2=tp2,
+            fib_tp1_label=tp1_label,
+            impulse_low=il_tp,
+            local_support=local_support,
+            liquidity=liquidity,
+            lifecycle_phase=lifecycle_phase,
+            source_tf=source_tf,
+            poc_direction=poc_direction,
+        )
+        _validate_tp_target_tf(
+            veto,
+            source_tf=source_tf,
+            tp1_target_tf=tp1_target_tf,
+            tp2_target_tf=tp2_target_tf,
+        )
+        # Enforce minimum TP2 depth — ladder may replace with shallow POC/VAL.
+        if lifecycle_phase == "dump_active" and fall_from_high_pct >= 15.0:
+            tp2_depth_floor = price * 0.93
+            if tp2 > tp2_depth_floor:
+                tp2 = round(tp2_depth_floor, 6)
+                if il_tp > 0 and il_tp < price * 0.97:
+                    tp2 = round(min(tp2_depth_floor, il_tp * 1.01), 6)
+                tp2_label = "7% cont"
+
+    # Post-pump 1h ATR is stale-inflated at dump bottom — use 15m + tighter SL cap.
+    cont_sl_pct = 0.0
+    if tp_mode == "continuation_pct":
+        sl_atr = atr
+        sl_tp2_cap = max(sl_tp2_cap, 0.85)
+        cont_sl_pct = 4.5 if fall_from_high_pct >= 50.0 else 5.5
+        sl_max_pct = max(sl_max_pct, cont_sl_pct + 2.0)
 
     # --- SL: local pivot anchor + TP2-proportional ceiling, measured from worst edge ---
-    pivot = local_resistance if 0 < local_resistance < ih else ih
+    if tp_mode == "continuation_pct":
+        # Stale local_res from the pump leg can sit far above live price — ignore unless near.
+        near_res = local_resistance if 0 < local_resistance <= price * 1.05 else price
+        bounce_hi = max(price, near_res, entry_hi)
+        pivot = min(bounce_hi, worst * 1.012)
+    else:
+        pivot = local_resistance if 0 < local_resistance < ih else ih
     stop = max(pivot * 1.015, entry_hi + atr * 1.1)
     stop = min(stop, entry_hi + atr * sl_max_atr)
     floor_stop = entry_hi + sl_atr * SL_MIN_ATR
-    abs_floor_stop = worst * (1.0 + _short_min_sl_dist_pct(symbol) / 100.0)
+    base_min_sl = _short_min_sl_dist_pct(symbol)
+    if lifecycle_phase in {"dump_active", "dump_initiating", "dump_imminent"} and fall_from_high_pct >= 10.0:
+        # Continuation entries in a proven dump: 2% floor (not 4%) — dump is established,
+        # tight SL above recent spike is tradeable; 4% blocked every valid continuation setup.
+        base_min_sl = max(base_min_sl, 2.0)
+    abs_floor_stop = worst * (1.0 + base_min_sl / 100.0)
+    if tp_mode == "continuation_pct":
+        abs_floor_stop = worst * (1.0 + cont_sl_pct / 100.0)
     floor_stop = max(floor_stop, abs_floor_stop)
     tp2_dist = worst - tp2
     cap_stop = worst + tp2_dist * sl_tp2_cap if tp2_dist > 0 else floor_stop
-    if floor_stop > cap_stop:
-        # The minimum breathing room already breaks the R:R mandate — zone too noisy.
-        veto.append("sl_floor_exceeds_tp2_cap")
-    effective_cap = max(cap_stop, floor_stop)
-    stop = round(min(max(stop, floor_stop), effective_cap), 6)
+    if tp_mode == "continuation_pct":
+        # Continuation shorts: cap SL to bounce band + TP2-proportional ceiling; no floor veto.
+        stop = round(min(max(pivot * 1.008, entry_hi + atr * 0.5), cap_stop, abs_floor_stop), 6)
+    else:
+        if floor_stop > cap_stop:
+            # The minimum breathing room already breaks the R:R mandate — zone too noisy.
+            veto.append("sl_floor_exceeds_tp2_cap")
+        effective_cap = max(cap_stop, floor_stop)
+        stop = round(min(max(stop, floor_stop), effective_cap), 6)
 
     risk = max(stop - worst, atr * 0.25)
     reward = max(worst - tp1, 0.0)
     rr = round(reward / risk, 2) if risk > 0 else 0.0
     target_rr = _phase_min_rr_short(lifecycle_phase)
-    if rr < target_rr and risk > 0:
+    if tp_mode == "continuation_pct":
+        target_rr = min(target_rr, 0.85)
+    if rr < target_rr and risk > 0 and tp_mode != "continuation_pct":
         tp1, rr = _snap_short_tp1_for_min_rr(
             worst=worst,
             entry_lo=entry_lo,
@@ -1070,8 +1147,12 @@ def structural_long_levels(
     il = min(impulse_low, local_support, price) if impulse_low > 0 else local_support
 
     support_zone = _f(fib.get("ret_382"), il)
-    entry_lo = round(max(min(price * 0.998, support_zone * 1.002), price - atr * 2.0), 6)
-    entry_hi = round(max(price, entry_lo * 1.006), 6)
+    entry_lo = round(max(min(price * 0.998, support_zone * 1.002), price - atr * ENTRY_ZONE_BOUNCE_ATR), 6)
+    # Re-anchor the trailing (upper) edge to velocity so the band still contains
+    # live price after confirm->deliver latency on a fast up-leg (symmetric to
+    # the short path). Width cap below keeps it bounded.
+    latency_band = max(price * ENTRY_ZONE_LATENCY_PCT / 100.0, atr * ENTRY_ZONE_LATENCY_ATR)
+    entry_hi = round(max(price, entry_lo * 1.006, price + latency_band), 6)
     width_cap = min(atr * ENTRY_ZONE_MAX_ATR, price * ENTRY_ZONE_MAX_PCT / 100.0)
     if entry_hi - entry_lo > width_cap:
         entry_lo = round(entry_hi - width_cap, 6)
@@ -1194,8 +1275,17 @@ def continuation_short_targets(
         }
 
     il = impulse_low if impulse_low > 0 else price * 0.85
-    tp1 = round(price - atr * 1.5, 6)
-    tp2 = round(max(il, price - atr * 3.0), 6)
+    # Deep dump_active continuation: % targets prevent ATR-too-small problem on micro-caps.
+    # For these tokens ATR15m << 1% → ATR×N targets 0.5-1% below entry = near-zero RR.
+    # Fixed 3.5%/7% gives realistic targets consistent with dump momentum (proven 15%+ fall).
+    if phase == "dump_active" and fall >= 15.0:
+        tp1 = round(price * 0.965, 6)
+        tp2 = round(price * 0.93, 6)
+        if il > 0 and il < price * 0.97:
+            tp2 = round(min(price * 0.93, il * 1.01), 6)
+    else:
+        tp1 = round(price - atr * 1.5, 6)
+        tp2 = round(max(il, price - atr * 3.0), 6)
     if tp1 >= price:
         tp1 = round(price - atr, 6)
     if tp2 >= tp1:
@@ -1210,3 +1300,138 @@ def continuation_short_targets(
         "leg_tp1": leg_tp1,
         "leg_tp2": leg_tp2,
     }
+
+
+def reanchor_setup_levels(
+    setup: dict[str, Any],
+    row: dict[str, Any],
+    *,
+    direction: str,
+    live_price: float | None = None,
+    symbol: str = "",
+) -> bool:
+    """Rebuild entry zone / SL / TP at delivery-time price (fixes stale late_chase)."""
+    price = float(live_price if live_price is not None else (row.get("price") or 0))
+    if price <= 0:
+        return False
+    tf = row.get("timeframes") if isinstance(row.get("timeframes"), dict) else {}
+    r15 = tf.get("15m_closed") or tf.get("15m") or {}
+    r1h = tf.get("1h_closed") or tf.get("1h") or {}
+    atr15 = float(r15.get("atr14") or 0)
+    if atr15 <= 0:
+        return False
+    atr1h_raw = float(r1h.get("atr14") or 0)
+    atr1h = atr1h_raw if atr1h_raw > 0 else None
+    residual_vol = r15.get("residual_vol")
+    if residual_vol is not None and atr15 > 0:
+        try:
+            rv = float(residual_vol)
+            if rv > 0:
+                atr15 = max(atr15, rv)
+        except (TypeError, ValueError):
+            pass
+    lc = row.get("lifecycle") if isinstance(row.get("lifecycle"), dict) else {}
+    lifecycle_phase = str(lc.get("phase") or setup.get("lifecycle_phase") or "")
+    fall_from_high_pct = float(
+        lc.get("fall_from_high_pct") or setup.get("fall_from_high_pct") or 0
+    )
+    impulse_high = float(row.get("impulse_high") or 0)
+    impulse_low = float(row.get("impulse_low") or 0)
+    if impulse_high <= 0:
+        return False
+    fib_raw = row.get("fib") if isinstance(row.get("fib"), dict) else {}
+    fib = fib_raw.get("hunt") if isinstance(fib_raw.get("hunt"), dict) else fib_raw
+    if not isinstance(fib, dict):
+        fib = {}
+    regime = row.get("regime") if isinstance(row.get("regime"), dict) else {}
+    session = row.get("session") if isinstance(row.get("session"), dict) else {}
+    range_pct_24h = float(session.get("range_pct_24h") or 0)
+    leg_gain_pct = 0.0
+    if impulse_low > 0 and impulse_high > impulse_low:
+        leg_gain_pct = round((impulse_high - impulse_low) / impulse_low * 100.0, 1)
+    book_walls = row.get("book_walls") if isinstance(row.get("book_walls"), dict) else None
+    cross_micro = (
+        row.get("cross_microstructure")
+        if isinstance(row.get("cross_microstructure"), dict)
+        else None
+    )
+    sym = symbol or str(row.get("symbol") or "")
+    liq_ctx = build_liquidity_context(
+        price=price,
+        regime=regime,
+        book_walls=book_walls,
+        cross_micro=cross_micro,
+        tf_15m=r15 if isinstance(r15, dict) else {},
+        tf_1d=tf.get("1d_closed") or tf.get("1d"),
+    )
+    if direction == "short":
+        local_support = float(lc.get("local_support") or 0)
+        local_resistance = float(lc.get("local_resistance") or 0)
+        if local_support <= 0:
+            local_support = float(setup.get("support_break_level") or impulse_low)
+        if local_resistance <= 0:
+            local_resistance = impulse_high
+        levels = structural_short_levels(
+            price=price,
+            impulse_high=impulse_high,
+            impulse_low=impulse_low,
+            fib=fib,
+            atr15=atr15,
+            atr1h=atr1h,
+            local_support=local_support,
+            local_resistance=local_resistance,
+            range_pct_24h=range_pct_24h,
+            leg_gain_pct=leg_gain_pct,
+            fall_from_high_pct=fall_from_high_pct,
+            symbol=sym,
+            lifecycle_phase=lifecycle_phase,
+            liquidity=liq_ctx,
+            poc_direction=str((regime or {}).get("poc_direction_1h") or ""),
+        )
+        inv_key = "invalidation_above"
+    elif direction == "long":
+        local_support = float(lc.get("local_support") or 0)
+        support_zone = float(setup.get("support_zone") or local_support or impulse_low)
+        resistance_break = float(
+            setup.get("resistance_break_level")
+            or float(lc.get("local_resistance") or 0)
+            or impulse_high
+        )
+        levels = structural_long_levels(
+            price=price,
+            impulse_high=impulse_high,
+            impulse_low=impulse_low,
+            fib=fib,
+            atr15=atr15,
+            atr1h=atr1h,
+            local_support=support_zone,
+            local_resistance=resistance_break,
+            range_pct_24h=range_pct_24h,
+            leg_gain_pct=leg_gain_pct,
+            fall_from_high_pct=fall_from_high_pct,
+            symbol=sym,
+            lifecycle_phase=lifecycle_phase,
+            liquidity=liq_ctx,
+        )
+        inv_key = "invalidation_below"
+    else:
+        return False
+    if not levels.get("viable", True):
+        return False
+    setup.update(
+        {
+            "entry_zone": levels["entry_zone"],
+            "stop_loss": levels["stop_loss"],
+            "tp1": levels["tp1"],
+            "tp2": levels["tp2"],
+            "tp1_label": levels.get("tp1_label", ""),
+            "tp2_label": levels.get("tp2_label", ""),
+            "risk_reward": levels.get("risk_reward"),
+            "sl_dist_pct": levels.get("sl_dist_pct"),
+            "tp2_dist_pct": levels.get("tp2_dist_pct"),
+            "levels_viable": levels.get("viable", True),
+            "levels_veto": levels.get("veto") or [],
+            inv_key: levels[inv_key],
+        }
+    )
+    return True
