@@ -139,6 +139,8 @@ _INITIATION_HARD_DUMP = frozenset(
         "5m_rejection_exhaustion",
         "ws_liq_cascade_long_flush",
         "pp_short_break",
+        "dump_continuation_confirm",
+        "dump_fast_confirm",
     }
 )
 

@@ -176,6 +176,14 @@ def confirm_dump(
         confirmed = fuel >= cal.confirm_min_score and (
             len(structural) >= 2 or (closed_break and secondary >= 2)
         )
+        # Dump continuation (dump_active + fall >= 15%): structure already broke earlier,
+        # so the structural-close-below gate is replaced by secondary signal alignment.
+        # `dump_continuation` is always in secondary for these symbols; a 2nd independent
+        # secondary (oi_flush, liq, ask_heavy, div) is required to avoid noise entries.
+        # Market-data-missing ticks only have count=1 → naturally deferred to next tick.
+        if not confirmed and dump_continuation and fuel >= cal.confirm_min_score and secondary >= 2:
+            confirmed = True
+            hard.append("dump_continuation_confirm")
         # Fast dump confirm: on a sub-5m confirm TF a single closed break + 1 secondary
         # is enough — a 5–8% dump completes in minutes, waiting 2× 5m bars misses it.
         if (
