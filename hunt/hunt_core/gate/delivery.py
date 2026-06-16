@@ -1053,9 +1053,12 @@ def _effective_min_rr(
     base = _min_rr(symbol, direction, lc)
     if direction != "short":
         return max(_DELIVERY_MIN_RR_FLOOR, base)
+    # For confirmed structural dumps (price broke key support on closed bar),
+    # allow lower RR floor (1.05) — the structural trigger IS the edge.
     structural_floor = _confirmed_structural_dump_min_rr(setup, lc)
     if structural_floor is not None:
-        return max(_DELIVERY_MIN_RR_FLOOR, min(base, structural_floor))
+        return min(base, structural_floor)
+    # Dump continuation (dump already >15% in progress): allow 1.05 RR floor.
     if _dump_continuation_short_ok(
         setup,
         phase=str(lc.get("phase") or ""),
@@ -1063,7 +1066,7 @@ def _effective_min_rr(
         fuel=fuel,
         cal_min_fuel=cal.confirm_min_score,
     ):
-        return max(_DELIVERY_MIN_RR_FLOOR, min(base, _DUMP_CONTINUATION_MIN_RR))
+        return min(base, _DUMP_CONTINUATION_MIN_RR)
     return max(_DELIVERY_MIN_RR_FLOOR, base)
 
 
@@ -1480,7 +1483,7 @@ def collect_report_blockers(
     sess = r.get("session") or {}
     chg24 = abs(float(r.get("chg_24h_pct") or 0))
     rng24 = float(sess.get("range_pct_24h") or 0)
-    if not (
+    if sym not in PINNED_SYMBOLS and not (
         bool(r.get("young_listing"))
         or chg24 >= cal.anomaly_min_chg_24h_pct
         or rng24 >= cal.anomaly_min_range_24h_pct
@@ -1714,7 +1717,7 @@ def evaluate_alert_gate(
     sess = r.get("session") or {}
     chg24 = abs(float(r.get("chg_24h_pct") or 0))
     rng24 = float(sess.get("range_pct_24h") or 0)
-    if not (
+    if sym not in PINNED_SYMBOLS and not (
         bool(r.get("young_listing"))
         or chg24 >= cal.anomaly_min_chg_24h_pct
         or rng24 >= cal.anomaly_min_range_24h_pct
