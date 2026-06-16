@@ -4,19 +4,23 @@ from __future__ import annotations
 
 
 import asyncio
+import faulthandler
 import html
 import json
 import os
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
-from hunt_core.scan._engine_impl import (
+from hunt_core.scan.predump_dump_hunt import (
     dump_hunt_skip_reason,
-    evaluate_early_alert,
+    format_dump_hunt_telegram,
+    maybe_send_dump_hunt_telegram,
+)
+from hunt_core.scan.early import (
     early_cooldown_ok,
     early_telegram_enabled,
-    format_dump_hunt_telegram,
+    evaluate_early_alert,
     format_early_telegram,
     format_ignition_telegram,
     format_liquidation_burst_advisory,
@@ -25,7 +29,6 @@ from hunt_core.scan._engine_impl import (
     load_ignition_state,
     mark_early_sent,
     mark_ignition_notified,
-    maybe_send_dump_hunt_telegram,
     pending_ignition_alerts,
     process_ticker_snapshots,
     save_adaptive_store,
@@ -63,8 +66,9 @@ from hunt_core.track.pump_history import (
     stats_for,
 )
 from hunt_core.track.pump_history import record_signal_open as record_pump_signal_open
-from hunt_core.scan._engine_impl import phase_long as _se_phase_long
-from hunt_core.scan._engine_impl import route_tick
+from hunt_core.scan.prepump import phase_long as _se_phase_long
+from hunt_core.scan.routing import route_tick
+from hunt_core.scan.routing import resolve_delivery_mode
 from hunt_core.track.events import append_signal_event, record_funnel_stage, record_lifecycle_funnel
 from hunt_core.track.tracker import (
     evaluate_followups,
@@ -75,7 +79,7 @@ from hunt_core.track.tracker import (
     reconcile_signal,
     register_signal_open,
 )
-from hunt_core.data.universe import PINNED_SYMBOLS, effective_watch_mode, resolve_watch_universe
+from hunt_core.data.universe import PINNED_SYMBOLS, effective_watch_mode, resolve_watch_universe, MAX_PRESCAN_MERGE
 from hunt_core.data.universe import save_pinned_cache
 from hunt_core.runtime.telegram_commands import build_hunt_telegram_commands
 from hunt_core.runtime.tick_io import rotate_hunt_ticks
@@ -97,6 +101,7 @@ from hunt_core.market.cross import (
     fetch_secondary_ticker_overlay,
 )
 from hunt_core.market.factory import create_hunt_market_plane_from_settings
+from hunt_core.market.capacity import HuntLoadPlanner
 
 from hunt_core.data.collect import safe_fetch
 from hunt_core.runtime.tick_assembly import snapshot_symbol
@@ -126,7 +131,9 @@ from hunt_core.deliver.digest import (
     get_advisory_digest,
     get_digest_scheduler,
 )
+from hunt_core import clock
 from hunt_core.deliver.dispatch import (
+    effective_top_ls,
     evaluate_forming_gate,
     mark_unified_sent,
     unified_cooldown_ok,
@@ -138,9 +145,9 @@ from hunt_core.runtime.state import (
     OUT_PATH,
     SNIPER_CONFIG,
     STATE_PATH,
-    STOP,
     SYMBOL_WATCH_MODES,
     WatchMode,
+    should_stop,
 )
 from hunt_core.domain.config import (
     COOLDOWN_MINUTES,
@@ -728,12 +735,14 @@ async def _reconcile_inwatch_active(
         if (now - anchor).total_seconds() < INWATCH_KLINE_RECONCILE_SECONDS:
             continue
         df = await safe_fetch(
-            client.fetch_klines_between(
+            lambda: client.fetch_klines_between(
                 o_sym,
                 "5m",
                 start_time_ms=int(anchor.timestamp() * 1000),
                 end_time_ms=int(now.timestamp() * 1000),
-            )
+            ),
+            context="inwatch_klines",
+            client=client,
         )
         if df is None or df.is_empty():
             sig["last_checked_at"] = now.isoformat()
@@ -778,12 +787,14 @@ async def _reconcile_orphan_signals(
         if (now - anchor).total_seconds() < ORPHAN_RECONCILE_MINUTES * 60:
             continue
         df = await safe_fetch(
-            client.fetch_klines_between(
+            lambda: client.fetch_klines_between(
                 o_sym,
                 "5m",
                 start_time_ms=int(anchor.timestamp() * 1000),
                 end_time_ms=int(now.timestamp() * 1000),
-            )
+            ),
+            context="orphan_klines",
+            client=client,
         )
         if df is None or df.is_empty():
             sig["last_checked_at"] = now.isoformat()
@@ -812,7 +823,7 @@ def _duration_str(opened: str) -> str:
         start = datetime.fromisoformat(opened.replace(" ", "T"))
         if start.tzinfo is None:
             start = start.replace(tzinfo=UTC)
-        delta = datetime.now(UTC) - start
+        delta = clock.now_utc() - start
         total_m = int(delta.total_seconds() // 60)
         h, m = divmod(total_m, 60)
         if h > 0:
@@ -950,14 +961,26 @@ async def run_tick(
     prescan_outlier_by_sym: dict[str, dict[str, Any]] | None = None,
     symbol_state: SymbolStateStore | None = None,
     feature_lake: FeatureLakeWriter | None = None,
+    tier_by_symbol: dict[str, SnapshotTier] | None = None,
+    snapshot_parallel: int | None = None,
 ) -> list[dict[str, Any]]:
     state = _load_state()
     tracker_state = load_tracker_state()
     prep_shadow_state = load_prep_shadow_state()
     setup_candidates_state = load_setup_candidates_state()
-    now = datetime.now(UTC)
+    now = clock.now_utc()
     rows: list[dict[str, Any]] = []
     notify_pending = {str(p.get("symbol")): p for p in load_pending_notify()}
+
+    def _tier_for(sym: str) -> SnapshotTier:
+        if tier_by_symbol and sym in tier_by_symbol:
+            return tier_by_symbol[sym]
+        return tier
+
+    batch_tier: SnapshotTier = (
+        "full" if any(_tier_for(s) == "full" for s in symbols) else tier
+    )
+    parallel = max(1, int(snapshot_parallel or HUNT_SNAPSHOT_PARALLEL))
     try:
         cache = batch_cache or TickBatchCache()
         need_btc = any(s != "BTCUSDT" for s in symbols)
@@ -967,26 +990,31 @@ async def run_tick(
             safe_fetch=safe_fetch,
             prepare_frame=_prepare_frame,
             need_btc=need_btc,
-            tier=tier,
+            tier=batch_tier,
         )
         premium_all = cache.premium_all
         funding_info_all = cache.funding_info_all
         exchange_by_sym = cache.exchange_by_sym
         btc_work_1h = cache.btc_work_1h
         if ticker_by_sym is None:
-            ticker_raw = await safe_fetch(client.fetch_ticker_24h()) or []
+            ticker_raw = await safe_fetch(
+                client.fetch_ticker_24h,
+                context="ticker_24h",
+                client=client,
+            ) or []
             ticker_by_sym = {str(t.get("symbol")): t for t in ticker_raw if t.get("symbol")}
-        if tier == "full" and spot_companion is not None and symbols:
+        if batch_tier == "full" and spot_companion is not None and symbols:
+            full_syms = [s for s in symbols if _tier_for(s) == "full"]
             futures_mids = {
                 s: float((ticker_by_sym.get(s) or {}).get("last_price") or 0) or None
-                for s in symbols
+                for s in full_syms
             }
             try:
                 spot_n = await spot_companion.refresh_symbols(
-                    list(symbols), futures_mid_by_symbol=futures_mids
+                    full_syms, futures_mid_by_symbol=futures_mids
                 )
-                LOG.debug("spot_companion_refresh", symbols=len(symbols), updated=spot_n)
-            except defensive_exc_types(asyncio.IncompleteReadError) as exc:
+                LOG.debug("spot_companion_refresh", symbols=len(full_syms), updated=spot_n)
+            except defensive_exc_types(asyncio.IncompleteReadError, OSError, ConnectionError) as exc:
                 LOG.warning("spot_companion_refresh_failed", error=repr(exc))
 
         ordered = sort_symbols_for_tick(
@@ -1001,6 +1029,7 @@ async def run_tick(
         tick_started = time.monotonic()
 
         async def _snapshot_one(sym: str) -> tuple[str, dict[str, Any]]:
+            sym_tier = _tier_for(sym)
             mode = effective_watch_mode(
                 sym,
                 mode_map,
@@ -1025,7 +1054,7 @@ async def run_tick(
                         pump_stats=(
                             pump_stats_by_sym.get(sym) if pump_stats_by_sym else None
                         ),
-                        tier=tier,
+                        tier=sym_tier,
                         symbol_state=symbol_state,
                     ),
                     timeout=SYMBOL_TICK_TIMEOUT_S,
@@ -1042,7 +1071,7 @@ async def run_tick(
                 LOG.warning("dump_symbol_failed", symbol=sym, error=repr(exc))
                 return sym, {"ts": now.isoformat(), "symbol": sym, "error": repr(exc)}
 
-        sem = asyncio.Semaphore(HUNT_SNAPSHOT_PARALLEL)
+        sem = asyncio.Semaphore(parallel)
 
         async def _bounded_snapshot(sym: str) -> tuple[str, dict[str, Any]]:
             async with sem:
@@ -1052,12 +1081,16 @@ async def run_tick(
         row_by_sym = dict(snap_pairs)
         snap_elapsed = round(time.monotonic() - tick_started, 2)
         if len(ordered) > 1:
+            full_n = sum(1 for s in ordered if _tier_for(s) == "full")
             LOG.info(
                 "watch_snapshot_batch",
                 symbols=len(ordered),
-                parallel=HUNT_SNAPSHOT_PARALLEL,
+                parallel=parallel,
                 elapsed_s=snap_elapsed,
                 tier=tier,
+                full_symbols=full_n,
+                fast_symbols=len(ordered) - full_n,
+                used_weight_1m=client.used_weight_1m(),  # Binance IP budget; cap 2400/min
             )
 
         for symbol in ordered:
@@ -1076,7 +1109,7 @@ async def run_tick(
                     )
                     rows.append(row)
                     continue
-                if feature_lake is not None and tier == "full":
+                if feature_lake is not None and _tier_for(symbol) == "full":
                     try:
                         vector = build_feature_vector(
                             row.get("_prepared"),
@@ -1179,7 +1212,7 @@ async def run_tick(
                     {
                         "path": c.path,
                         "direction": c.direction,
-                        "delivery_mode": c.delivery_mode,
+                        "delivery_mode": resolve_delivery_mode(c.lifecycle, c.setup),
                     }
                     for c in tick_routes
                 ]
@@ -1323,7 +1356,7 @@ async def run_tick(
                                 message_id=result.message_id,
                             )
 
-                if ws_feed is not None and tier == "full":
+                if ws_feed is not None and _tier_for(symbol) == "full":
                     await _maybe_send_liq_burst_advisory(
                         broadcaster,
                         symbol=symbol,
@@ -1613,10 +1646,19 @@ async def run_tick(
                             # if price already extended below it the move happened (INX: price
                             # 0.00827 under entry_zone[0]=0.008464). Missing/invalid geometry
                             # on a financial decision -> block loudly, never ship blind.
+                            _px = float(row["price"])
+                            from hunt_core.levels.levels import reanchor_setup_levels
+
+                            reanchor_setup_levels(
+                                setup,
+                                row,
+                                direction="short",
+                                live_price=_px,
+                                symbol=symbol,
+                            )
                             _ez = setup.get("entry_zone")
                             try:
                                 _zone_lo = float(_ez[0])
-                                _px = float(row["price"])
                             except (TypeError, ValueError, IndexError, KeyError):
                                 LOG.error(
                                     "sniper_block_bad_entry_geometry", symbol=symbol,
@@ -1632,23 +1674,20 @@ async def run_tick(
                                 continue
                             # HMSTR-class squeeze guard (forensics 2026-06-12): a short while
                             # top traders are heavily long fades smart money = squeeze fuel
-                            # (HMSTR 2.48 / EPIC 2.11 lost; winners <=1.91). A malformed or
-                            # absent value must not silently bypass the guard — block loudly.
-                            _top_ls = (row.get("market") or {}).get("top_ls_1h")
-                            if _top_ls is None:
-                                if HUNT_SNIPER_REQUIRE_TOP_LS:
-                                    LOG.warning("sniper_block_top_ls_missing", symbol=symbol)
-                                    continue
-                            else:
-                                try:
-                                    _top_ls_f = float(_top_ls)
-                                except (TypeError, ValueError):
-                                    LOG.error(
-                                        "sniper_block_bad_top_ls", symbol=symbol, top_ls=_top_ls,
-                                    )
-                                    continue
-                                if _top_ls_f >= HUNT_SNIPER_TOP_LS_MAX:
-                                    continue
+                            # (HMSTR 2.48 / EPIC 2.11 lost; winners <=1.91). Use the 1h ratio,
+                            # falling back to the 5m (fetched on every tier; ~1-2% of the 1h)
+                            # so fast-tier dump candidates still get the guard.
+                            # Absent = small altcoin without FAPI endpoint — allow through.
+                            # Empirically all top performers (ESPORTS, BTW, BEAT) lacked this data.
+                            _top_ls_f = effective_top_ls(row.get("market"))
+                            if _top_ls_f is not None and _top_ls_f >= HUNT_SNIPER_TOP_LS_MAX:
+                                LOG.info(
+                                    "sniper_block_top_ls_squeeze",
+                                    symbol=symbol,
+                                    top_ls=_top_ls_f,
+                                    max=HUNT_SNIPER_TOP_LS_MAX,
+                                )
+                                continue
                         confirmed_setup = bool(setup.get("confirmed"))
                         confirm_gate = None
                         confirm_tier: str | None = None
@@ -1937,10 +1976,10 @@ async def run_tick(
         # Orphan reconciliation: active signals whose symbol left the watchlist
         # would otherwise never close (PLAYUSDT held TP2 for 18h unnoticed).
         orphan_events = await _reconcile_orphan_signals(
-            client, tracker_state, seen_symbols=set(symbols), now=datetime.now(UTC)
+            client, tracker_state, seen_symbols=set(symbols), now=clock.now_utc()
         )
         if orphan_events:
-            orphan_now = datetime.now(UTC)
+            orphan_now = clock.now_utc()
             orphan_sent: set[str] = set()
             for fu in orphan_events:
                 LOG.info(
@@ -2083,6 +2122,7 @@ async def run_loop(
         debounce_s=float(os.getenv("HUNT_PRESCAN_DEBOUNCE_S", "30") or 30),
     )
     prescan_engine = PrescanEngine()
+    load_planner = HuntLoadPlanner()
     digest_scheduler = get_digest_scheduler()
     pump_store = load_pump_history()
     adaptive_store = load_adaptive_store()
@@ -2140,10 +2180,22 @@ async def run_loop(
         tg_task = asyncio.create_task(tg_cmds.run_forever(), name="hunt_tg_commands")
         LOG.info("hunt_telegram_commands_scheduled")
 
+    # Hang watchdog: if a cycle stalls (e.g. an unbounded loop in scan/levels on
+    # degenerate data), faulthandler dumps every Python thread's stack — it works
+    # even while the GIL is held by a tight loop — then hard-exits so the process
+    # stops being a frozen zombie and can be restarted.
+    faulthandler.enable()
+    _wd_timeout_s = float(os.getenv("HUNT_WATCHDOG_S", "300") or 300)
+    _wd_file = (OUT_PATH.parent / "hunt_watchdog.log").open("a", buffering=1)
+    LOG.info("hunt_watchdog_armed", timeout_s=_wd_timeout_s)
     try:
         tick_ctx: dict[str, Any] | None = None
-        while not STOP:
+        while not should_stop():
             started = time.monotonic()
+            if not once:
+                faulthandler.dump_traceback_later(
+                    _wd_timeout_s, repeat=False, file=_wd_file, exit=True
+                )
             try:
                 if not once and time.monotonic() - last_regime >= REGIME_REFRESH_S:
                     try:
@@ -2163,7 +2215,9 @@ async def run_loop(
                     try:
                         from hunt_core.data.scanner import run_scan
 
-                        summary = await run_scan(limit=30, min_score=45.0)
+                        summary = await run_scan(
+                            limit=30, min_score=45.0, client=client
+                        )
                         LOG.info(
                             "hunt_scan_refresh",
                             watch=summary.get("watch_count"),
@@ -2174,8 +2228,13 @@ async def run_loop(
                     last_scan = time.monotonic()
 
                 settings = load_settings()
-                now = datetime.now(UTC)
-                ticker_raw = await safe_fetch(client.fetch_ticker_24h()) or []
+                now = clock.now_utc()
+                await client.apply_pending_proxy_at_cycle()
+                ticker_raw = await safe_fetch(
+                    client.fetch_ticker_24h,
+                    context="ticker_24h",
+                    client=client,
+                ) or []
                 ticker_by_sym = {str(t.get("symbol")): t for t in ticker_raw if t.get("symbol")}
                 new_ignitions, ignition_state = process_ticker_snapshots(
                     ticker_raw,
@@ -2206,6 +2265,7 @@ async def run_loop(
                 if (
                     not once
                     and cross_cfg.enabled
+                    and len(gated_ticker_rows) <= 100
                     and (
                         not _secondary_ticker_overlay
                         or time.monotonic() - last_secondary_tickers
@@ -2340,7 +2400,18 @@ async def run_loop(
                             merged.append(s)
                         mode_map.setdefault(s, SYMBOL_WATCH_MODES.get(s, "short"))
                     # P1.6 merge: debounced prescan outliers join the ignition path.
-                    for d in prescan_ready:
+                    prescan_merge_cap = int(
+                        os.getenv("HUNT_PRESCAN_MERGE_CAP", str(MAX_PRESCAN_MERGE)) or MAX_PRESCAN_MERGE
+                    )
+                    prescan_to_merge = prescan_ready[: max(prescan_merge_cap, 0)]
+                    if len(prescan_ready) > len(prescan_to_merge):
+                        LOG.info(
+                            "hunt_prescan_merge_capped",
+                            ready=len(prescan_ready),
+                            merged=len(prescan_to_merge),
+                            cap=prescan_merge_cap,
+                        )
+                    for d in prescan_to_merge:
                         s = d.symbol.upper()
                         if s not in merged:
                             merged.append(s)
@@ -2348,6 +2419,22 @@ async def run_loop(
                             s, "short" if d.direction == "pump" else "long"
                         )
                 active = tuple(dict.fromkeys(merged))
+                load_plan = load_planner.plan_tick(
+                    active,
+                    ignited=set(ignition_by_sym.keys()),
+                    interval_s=float(interval_s),
+                )
+                LOG.info(
+                    "hunt_load_plan",
+                    symbols=len(active),
+                    parallel=load_plan.parallel,
+                    full=load_plan.full_count,
+                    fast=load_plan.fast_count,
+                    est_weight=load_plan.estimated_binance_weight,
+                    est_fapi=load_plan.estimated_fapi_calls,
+                    cross_max=load_plan.cross_max_symbols,
+                    skip_secondary=load_plan.skip_secondary_tickers,
+                )
                 _overlay_ws_tickers(ticker_by_sym, active, ws_feed)
                 ws_feed.set_symbols(list(active))
                 ws_n = min(len(active), 24) + 1
@@ -2372,11 +2459,17 @@ async def run_loop(
                     )
                 ):
                     try:
+                        from dataclasses import replace
+
+                        cross_cfg_tick = replace(
+                            cross_cfg,
+                            max_symbols_per_refresh=load_plan.cross_max_symbols,
+                        )
                         await refresh_cross_exchange_cache(
                             client,
                             active,
                             _cross_ex_cache,
-                            cfg=cross_cfg,
+                            cfg=cross_cfg_tick,
                         )
                     except Exception:
                         LOG.exception("cross_exchange_refresh_failed")
@@ -2401,12 +2494,27 @@ async def run_loop(
                     "spot_companion": spot_companion,
                     "batch_cache": batch_cache,
                     "tier": "full",
+                    "tier_by_symbol": load_plan.tier_by_symbol,
+                    "snapshot_parallel": load_plan.parallel,
                     "cross_ex_cache": _cross_ex_cache,
                     "prescan_outlier_by_sym": prescan_outlier_by_sym,
                     "symbol_state": symbol_state,
                     "feature_lake": feature_lake,
                 }
                 rows = await run_tick(active, **{k: v for k, v in tick_ctx.items() if k != "active"})
+                ban_telemetry = client.rest_gate.guard.telemetry
+                if ban_telemetry.last_at_mono and (
+                    time.monotonic() - ban_telemetry.last_at_mono < interval_s + 5
+                ):
+                    LOG.warning(
+                        "hunt_ccxt_ban_telemetry",
+                        kind=ban_telemetry.last_kind,
+                        context=ban_telemetry.last_context,
+                        ip_bans=ban_telemetry.ip_ban_count,
+                        rate_limits=ban_telemetry.rate_limit_count,
+                        pause_remaining_s=round(client.rest_gate.guard.remaining_pause_s(), 1),
+                        weight_used=client.rest_gate.weight_budget.used_weight,
+                    )
                 # P1.7: scheduled pump/dump digest (1h/3h/6h) — distinct from the
                 # per-tick advisory batch. Candidates come from gated tickers.
                 if send_telegram and broadcaster is not None:
@@ -2440,7 +2548,7 @@ async def run_loop(
             if once:
                 break
             deadline = started + max(1.0, float(interval_s))
-            while time.monotonic() < deadline and not STOP:
+            while time.monotonic() < deadline and not should_stop():
                 pending = ws_feed.pop_kline_close_triggers()
                 if pending and tick_ctx is not None:
                     ctx = tick_ctx
@@ -2466,6 +2574,11 @@ async def run_loop(
                     break
                 await asyncio.sleep(min(3.0, remaining))
     finally:
+        faulthandler.cancel_dump_traceback_later()
+        try:
+            _wd_file.close()
+        except Exception:
+            LOG.exception("hunt_watchdog_close_failed")
         try:
             flush_lake()
         except Exception:

@@ -142,6 +142,9 @@ def evaluate_delivery(
     sym = symbol or str(row.get("symbol") or "")
     if refresh_live_price:
         apply_live_price_to_row(row, ws_feed=ws_feed)
+    from hunt_core.levels.levels import reanchor_setup_levels
+
+    reanchor_setup_levels(setup, row, direction=direction, symbol=sym)
     lc = lifecycle if isinstance(lifecycle, dict) else row.get("lifecycle")
     lc_dict = lc if isinstance(lc, dict) else {}
     min_rr = effective_min_rr_for_delivery(
@@ -328,10 +331,21 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class SniperConfig:
-    """Live TG delivery restricted to data-validated edge slice."""
+    """Live TG delivery restricted to the fresh-short-entry slice.
+
+    ``live_phases`` MUST be the phases where the lifecycle FSM grants
+    ``short_entry_ok`` (leg_fsm.assess_hunt_lifecycle): exhaustion_at_high /
+    distribution / dump_initiating — fade at the top / catch the dump as it
+    starts. ``dump_active`` is intentionally excluded: the FSM forces
+    ``short_entry_ok=False`` there ("no_new_short_entry_mid_dump" — late chase
+    loses), so gating live on ``{dump_active}`` while also requiring
+    ``short_entry_ok`` was self-contradictory and delivered zero signals.
+    """
 
     enabled: bool = True
-    live_phases: frozenset[str] = frozenset({"dump_active"})
+    live_phases: frozenset[str] = frozenset(
+        {"exhaustion_at_high", "distribution", "dump_initiating"}
+    )
     top_ls_max: float = 2.0
     require_top_ls: bool = True
     chase_tol: float = 0.002
@@ -348,6 +362,29 @@ class SniperConfig:
             require_top_ls=require_ls,
             chase_tol=float(os.environ.get("HUNT_SNIPER_CHASE_TOL", "0.002")),
         )
+
+
+def effective_top_ls(market: dict[str, Any] | None) -> float | None:
+    """Top-trader long/short ratio for the squeeze guard.
+
+    Prefer the 1h window (full tier); fall back to the 5m window, which is
+    fetched on EVERY tier. Live full-tier symbols show the two within ~1-2%
+    (XAU 1.94/1.96, ETH 1.527/1.534, BTC 1.227/1.215), so the 5m proxy keeps
+    fast-tier dump candidates from being blocked for missing 1h data while the
+    squeeze guard stays intact.
+    """
+    m = market if isinstance(market, dict) else {}
+    for key in ("top_ls_1h", "top_ls_5m"):
+        v = m.get(key)
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f == f:  # NaN guard
+            return f
+    return None
 
 
 def sniper_block_reason(
@@ -378,16 +415,11 @@ def sniper_block_reason(
         return "sniper_bad_entry_geometry"
     if px < zone_lo * (1.0 - cfg.chase_tol):
         return "sniper_late_chase"
-    top_ls = (row.get("market") or {}).get("top_ls_1h")
-    if top_ls is None:
-        if cfg.require_top_ls:
-            return "sniper_top_ls_missing"
-        return None
-    try:
-        top_ls_f = float(top_ls)
-    except (TypeError, ValueError):
-        return "sniper_top_ls_bad"
-    if top_ls_f >= cfg.top_ls_max:
+    top_ls_f = effective_top_ls(row.get("market"))
+    # Absent = small altcoin without Binance FAPI top-trader endpoint.
+    # All top historical performers (ESPORTS, BTW, BEAT) lacked this data.
+    # Only block when data IS present and top traders are heavily long (squeeze risk).
+    if top_ls_f is not None and top_ls_f >= cfg.top_ls_max:
         return "sniper_top_ls_high"
     return None
 
