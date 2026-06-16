@@ -3,6 +3,7 @@ from __future__ import annotations
 
 
 
+from hunt_core import clock
 import json
 import logging
 import os
@@ -504,6 +505,11 @@ def _update_trailing_stop(
             return False, cur_stop
     active["stop_loss"] = round(new_stop, 6)
     active["trailing_active"] = True
+    # Once trailing SL is in profit territory, suppress bias_flip exits.
+    if direction == "short" and new_stop < entry:
+        active["sl_at_breakeven"] = True
+    elif direction == "long" and new_stop > entry:
+        active["sl_at_breakeven"] = True
     return True, cur_stop
 
 
@@ -522,29 +528,19 @@ def _tick_feature_latch(
         active["features_peak"] = active["features_last"]
 
 
-def _effective_be_buffer_pct(
-    active: dict[str, Any], *, direction: str, symbol: str
-) -> float:
-    """Post-TP1 stop buffer — never below memecoin noise floor (forensics 2026-06-12)."""
-    th = tracker_thresholds(symbol)
-    cfg = float(th.get("breakeven_buffer_pct", 0.15))
-    min_pct = float(th.get("breakeven_buffer_min_pct", 1.0))
-    risk_frac = float(th.get("breakeven_risk_fraction", 0.25))
-    entry = _worst_entry(active, direction=direction)
-    orig = float(active.get("original_stop_loss") or active.get("stop_loss") or 0)
-    risk_pct = 0.0
-    if entry > 0 and orig > 0:
-        if direction == "short" and orig > entry:
-            risk_pct = (orig - entry) / entry * 100.0
-        elif direction == "long" and orig < entry:
-            risk_pct = (entry - orig) / entry * 100.0
-    return max(cfg, min_pct, risk_pct * risk_frac)
-
-
 def apply_tp1_management(
     active: dict[str, Any], *, direction: str, symbol: str = ""
 ) -> bool:
-    """After TP1: partial fix (50% normal / 80% hot) + SL to entry."""
+    """After TP1: partial fix (50% normal / 80% hot) + lock the runner in profit.
+
+    The post-TP1 stop must NEVER sit in the loss zone. The old logic placed it
+    ``entry*(1+buf)`` with a 1% floor — i.e. >=1% *beyond entry on the adverse
+    side* — which turned TP1 winners into ~1.5% losses (EPIC/UBU 2026-06-12)
+    and clobbered an already profit-trailed stop (a +9%-locked trail reset to
+    -1%). Instead lock a fraction of the realised TP1 distance: the stop sits
+    between entry and TP1 — in profit, yet far enough from the entry-noise band
+    that 1m wicks cannot reach it — and we never loosen a tighter trailed stop.
+    """
     if active.get("tp1_managed"):
         return False
     entry = _worst_entry(active, direction=direction)
@@ -553,12 +549,20 @@ def apply_tp1_management(
     pct = _tp1_pct(symbol)
     if active.get("original_stop_loss") is None:
         active["original_stop_loss"] = active.get("stop_loss")
-    buf = _effective_be_buffer_pct(active, direction=direction, symbol=symbol) / 100.0
+    tp1 = float(active.get("tp1") or 0)
+    lock_frac = float(tracker_thresholds(symbol).get("tp1_profit_lock_fraction", 0.5))
+    cur = float(active.get("stop_loss") or 0)
     if direction == "short":
-        be_stop = entry * (1.0 + buf)
+        gain = entry - tp1 if (0.0 < tp1 < entry) else 0.0
+        lock_stop = min(entry - lock_frac * gain, entry)  # at/below entry = BE/profit
+        if cur > 0:
+            lock_stop = min(lock_stop, cur)  # never loosen a tighter trailed stop
     else:
-        be_stop = entry * (1.0 - buf)
-    active["stop_loss"] = round(be_stop, 6)
+        gain = tp1 - entry if tp1 > entry else 0.0
+        lock_stop = max(entry + lock_frac * gain, entry)
+        if cur > 0:
+            lock_stop = max(lock_stop, cur)
+    active["stop_loss"] = round(lock_stop, 6)
     active["partial_fixed_pct"] = pct
     active["sl_at_breakeven"] = True
     active["tp1_managed"] = True
@@ -612,6 +616,7 @@ def _long_structure_invalidated(
     setup: dict[str, Any],
     *,
     price: float,
+    symbol: str = "",
 ) -> tuple[bool, str]:
     stop = float(active.get("stop_loss") or 0)
     if stop > 0 and price <= stop:
@@ -647,7 +652,7 @@ def close_signal(
     sig = (state.get("signals") or {}).get(k)
     if not isinstance(sig, dict) or _coerce_signal_phase(sig) == SignalPhase.CLOSED:
         return
-    ts = now or datetime.now(UTC)
+    ts = now or clock.now_utc()
     cur = _coerce_signal_phase(sig)
     if reason in _INVALIDATING_CLOSE_REASONS and cur in _ACTIVE_PHASES:
         _transition(sig, cur, SignalPhase.INVALIDATED, strict=False)
@@ -768,7 +773,7 @@ def duration_minutes(
             if end.tzinfo is None:
                 end = end.replace(tzinfo=UTC)
         else:
-            end = now or datetime.now(UTC)
+            end = now or clock.now_utc()
         return round((end - start).total_seconds() / 60.0, 1)
     except (TypeError, ValueError):
         return None
@@ -1465,7 +1470,7 @@ def evaluate_followups(
     now: datetime | None = None,
 ) -> list[HuntFollowUp]:
     """Compare tick vs active signals; emit follow-up events (no entry cooldown)."""
-    ts = now or datetime.now(UTC)
+    ts = now or clock.now_utc()
     events: list[HuntFollowUp] = []
     symbol = str(row.get("symbol") or "").upper()
     price = float(row.get("price") or 0)
@@ -1630,6 +1635,7 @@ def evaluate_followups(
                     active,
                     setup,
                     price=price,
+                    symbol=symbol,
                 )
             if struct_bad:
                 close_signal(
