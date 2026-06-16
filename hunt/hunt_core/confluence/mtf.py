@@ -42,6 +42,16 @@ _HTF_TFS = ["1w", "1d", "4h"]
 
 
 def _trend_from_snap(snap: dict[str, Any]) -> Literal["bull", "bear", "neutral"]:
+    # Prefer the canonical EMA-stack computation over the cached "trend" string.
+    # The cached value may be "mixed" (neutral) even when close < ema20 < ema50
+    # (post-pump dump: ema200 still below due to pre-pump history, so the full
+    # 4-EMA bear stack fails despite a clear 3-EMA bearish alignment).
+    from hunt_core.analysis.trend_engine import trend_from_snapshot
+
+    recomputed = trend_from_snapshot(snap, require_adx=False)
+    if recomputed in ("bull", "bear"):
+        return recomputed  # type: ignore[return-value]
+    # Fall back to cached label (catches old snapshots with pre-computed trend).
     t = snap.get("trend") or ""
     if t == "bull":
         return "bull"
@@ -123,13 +133,16 @@ def build_mtf_confluence(
         atr = price * 0.01
 
     def _build(direction: str) -> ScenarioScore:
-        # HTF score
+        # HTF score — only count TFs with a determinate trend (bull or bear).
+        # A neutral TF (no EMA data in fast-tier scan) provides zero signal and
+        # should not inflate htf_total: that would make family_vote_low fire when
+        # the only available HTF (4H) correctly aligns with direction.
         htf_aligned = 0
         htf_total = 0
         evidence: list[str] = []
         for k in _HTF_TFS:
             sig = tf_signals.get(k)
-            if sig is None:
+            if sig is None or sig.trend == "neutral":
                 continue
             htf_total += 1
             ok = (direction == "long" and sig.trend == "bull") or (

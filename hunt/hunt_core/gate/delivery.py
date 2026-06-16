@@ -949,6 +949,13 @@ def _short_dump_delivery_too_late(
     phase = str(lc.get("phase") or "")
     setup_phase = str(setup.get("phase") or "")
     if phase == "dump_active":
+        # Exception: dump_continuation_confirm = fresh structural breakdown WITHIN
+        # an ongoing dump (new support broken, secondary signals confirmed). This is
+        # not a blind mid-dump chase — it's a confirmed continuation with structural
+        # and secondary signal alignment (see confirm_dump() in predump.py).
+        hard = setup.get("confirm_hard") or []
+        if "dump_continuation_confirm" in hard:
+            return None
         return GateResult(
             False,
             "dump_mid_leg",
@@ -987,9 +994,18 @@ def _dump_continuation_short_ok(
     fuel: float,
     cal_min_fuel: float,
 ) -> bool:
-    """Deprecated mid-dump TG path — product ships at dump start only."""
-    del setup, phase, lc, fuel, cal_min_fuel
-    return False
+    """Allow confirmed dump continuation: fresh structural break within dump_active.
+
+    Only fires when confirm_dump() set dump_continuation_confirm — which requires
+    fall >= 15%, structural signals (support break / pp_short_break), and secondary
+    alignment (secondary >= 2). This is not a blind mid-dump chase.
+    """
+    if phase != "dump_active":
+        return False
+    if fuel < cal_min_fuel:
+        return False
+    hard = setup.get("confirm_hard") or []
+    return "dump_continuation_confirm" in hard
 
 
 _DUMP_CONTINUATION_MIN_RR = 1.05

@@ -89,8 +89,11 @@ def trend_from_snapshot(
     if stack != "neutral":
         return stack
 
-    # Partial stack without ema200 (lite snapshots)
-    if ema50 > 0 and ema20 > 0 and close > 0 and ema200 <= 0:
+    # Partial 3-EMA stack: works when ema200 is missing (lite snapshots) OR when
+    # ema200 is present but mispositioned (pre-pump artifact: ema200 < close because
+    # the 200-bar average still reflects pre-pump history, making the full 4-EMA
+    # bear stack impossible even when price is clearly below ema20 and ema50).
+    if ema50 > 0 and ema20 > 0 and close > 0:
         if close > ema20 > ema50:
             return "bull"
         if close < ema20 < ema50:

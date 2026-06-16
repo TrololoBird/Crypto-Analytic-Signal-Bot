@@ -187,9 +187,20 @@ def evaluate_delivery(
         )
         row["mtf"] = mtf
     if mtf is not None:
+        from hunt_core.confluence.mtf import MTFConfluence
+
         votes = family_vote_count(mtf, direction=direction)
-        if votes < FAMILY_VOTE_MIN:
-            code = f"family_vote_low:{votes}<{FAMILY_VOTE_MIN}"
+        # Adaptive threshold: dynamic altcoins only have 4H data (no 1W/1D EMAs
+        # loaded in fast-tier scan). When htf_total < FAMILY_VOTE_MIN, require
+        # all available HTFs to align rather than an impossible absolute count.
+        htf_total = (
+            (mtf.short_scenario if direction == "short" else mtf.long_scenario).htf_total
+            if isinstance(mtf, MTFConfluence)
+            else FAMILY_VOTE_MIN
+        )
+        required_votes = min(FAMILY_VOTE_MIN, htf_total) if htf_total > 0 else FAMILY_VOTE_MIN
+        if votes < required_votes or htf_total == 0:
+            code = f"family_vote_low:{votes}<{required_votes}"
             return GateResult(ok=False, code=code, message=code), None
     gate = run_gate_pipeline(
         direction=direction,
