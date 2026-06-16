@@ -477,6 +477,8 @@ def _squeeze_note(row: dict[str, Any], *, direction: str) -> str | None:
 
 
 def _for_against(row: dict[str, Any], *, direction: str, setup: dict[str, Any]) -> tuple[list[str], list[str]]:
+    from hunt_core.deliver.telegram import phase_human  # noqa: PLC0415
+
     for_us: list[str] = []
     against: list[str] = []
     triggers = list(setup.get("confirm_hard") or setup.get("triggers") or [])[:8]
