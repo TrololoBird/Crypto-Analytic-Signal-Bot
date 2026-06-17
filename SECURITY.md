@@ -47,7 +47,7 @@ Out of scope:
 |------|--------|
 | Package | `aiohttp` pinned `>=3.13.5,<3.14` in `pyproject.toml` |
 | Blocker | `aiogram>=3.28.2` requires `aiohttp<3.14` ([PyPI constraints](https://pypi.org/project/aiogram/)) |
-| CVEs | CVE-2026-34993 (CookieJar deserialization), CVE-2026-47265 (cross-origin redirect cookies) |
+| CVEs | CVE-2026-34993 (CookieJar deserialization), CVE-2026-47265 (cross-origin redirect cookies), CVE-2026-50269, CVE-2026-54273–54280 (3.13.5 advisories) |
 | Mitigation | Bot does **not** load untrusted cookie jars; REST/WS targets Binance public endpoints only; no user cookie input |
 | Remediation | Re-evaluate when aiogram supports `aiohttp>=3.14` — remove ignore in `.github/dependabot.yml` and bump cap |
 

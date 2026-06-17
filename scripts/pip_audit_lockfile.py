@@ -16,6 +16,16 @@ IGNORED_VULNS = frozenset(
     {
         "CVE-2026-34993",
         "CVE-2026-47265",
+        # aiohttp 3.13.5 advisories (same aiogram cap; public endpoints only)
+        "CVE-2026-50269",
+        "CVE-2026-54273",
+        "CVE-2026-54274",
+        "CVE-2026-54275",
+        "CVE-2026-54276",
+        "CVE-2026-54277",
+        "CVE-2026-54278",
+        "CVE-2026-54279",
+        "CVE-2026-54280",
     }
 )
 

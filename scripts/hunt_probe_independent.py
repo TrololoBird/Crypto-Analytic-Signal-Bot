@@ -28,12 +28,12 @@ HUNT = ROOT / "hunt"
 if str(HUNT) not in sys.path:
     sys.path.insert(0, str(HUNT))
 
-from hunt_core.market.factory import (  # noqa: E402
+from hunt_core.market.factory import (
     close_exchange_sync,
     create_sync_binance_future,
     fetch_klines_sync,
 )
-from hunt_core.market.symbols import to_ccxt_symbol  # noqa: E402
+from hunt_core.market.symbols import to_ccxt_symbol
 
 WATCHLIST = ROOT / "hunt" / "data" / "hunt_watchlist.json"
 WARMUP_MIN = 60
