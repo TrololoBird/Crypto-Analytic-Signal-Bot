@@ -67,9 +67,7 @@ def fetch_klines(symbol: str, interval: str, limit: int, proxy: str | None) -> p
         trust_env=proxy is None,
     )
     if len(rows) < WARMUP_MIN:
-        raise ProbeError(
-            f"{symbol}: klines вернул {len(rows)} баров, нужно ≥{WARMUP_MIN}"
-        )
+        raise ProbeError(f"{symbol}: klines вернул {len(rows)} баров, нужно ≥{WARMUP_MIN}")
     df = pl.DataFrame(
         {
             "open_time": [int(r[0]) for r in rows],
