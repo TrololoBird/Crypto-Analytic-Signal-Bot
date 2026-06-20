@@ -1,7 +1,7 @@
 """Technical analysis feature preparation (Polars-native runtime path).
 
 Indicators stay Polars-native with optional `polars_ta` for EMA/ROC/OBV.
-Pure-Polars formulas are canonical for Wilder RSI/ATR/ADX, MACD, BB (ddof=0, TradingView parity), and structure.
+Pure-Polars formulas are canonical for Wilder RSI/ATR/ADX, MACD, BB (ddof=1, sample std), and structure.
 """
 from __future__ import annotations
 

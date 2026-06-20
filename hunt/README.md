@@ -44,21 +44,21 @@ hunt/
 
 ## Verification
 
+After `pip install -e "./hunt"` (repo root, venv active):
+
 ```bash
-cd hunt && PYTHONPATH=.
-python -m compileall -q hunt_core
+python -m compileall -q hunt/hunt_core
 python -m hunt_core._dev.check_ccxt
 python -m hunt_core._dev.budget
 python -m hunt_core._dev.check_scenarios
-python -m hunt_core._dev.ccxt_plane_smoke BTCUSDT ETHUSDT --ws-seconds 3
-python -m hunt_core._dev.smoke_signals --baseline data/baseline/hunt_baseline.json BTCUSDT
-```
-
-Offline logic checks replaced by `_dev/check_*` + CI live-smoke (no `verify` subcommand).
-
-```bash
 python -m hunt_core._dev.check_logic
+python -m hunt_core._dev.replay_fusion --all --q-gate 0.92
+python -m hunt_core._dev.authority_audit
+python -m hunt_core._dev.ccxt_plane_smoke BTCUSDT ETHUSDT --ws-seconds 3
+python -m hunt_core._dev.smoke_signals --baseline hunt/data/baseline/hunt_baseline.json BTCUSDT
 ```
+
+Offline logic checks: `_dev/check_*` + CI live-smoke (no `verify` subcommand).
 
 ## Docs
 

@@ -31,6 +31,21 @@ def format_advisory_early(row: dict[str, Any], *, note: str) -> str:
     return f"⏳ <b>{sym}</b> · EARLY advisory\n{note}"
 
 
+def format_liquidation_burst_message(burst: Any) -> str:
+    from hunt_core.detect.legacy_compat import format_liquidation_burst_advisory
+
+    return format_liquidation_burst_advisory(burst)
+
+
+def format_ignition_message(ignition: Any, *, history_line: str = "") -> str:
+    from hunt_core.detect.legacy_compat import format_ignition_telegram
+
+    msg = format_ignition_telegram(ignition)
+    if history_line:
+        msg = f"{msg}\n<i>{html.escape(history_line)}</i>"
+    return msg
+
+
 def format_pinned_summary(row: dict[str, Any]) -> str:
     sym = str(row.get("symbol") or "").replace("USDT", "-USDT")
     verdict = row.get("pinned_verdict") or row.get("pinned_scenario") or {}
@@ -55,17 +70,16 @@ def format_telegram_confirm(
         delivery_tier=delivery_tier,
         confirm_reasons=confirm_reasons,
     )
-    grid = build_confluence_grid(row)
-    if grid:
-        body = f"{body}\n{format_grid_telegram(grid)}"
-    if confirm_reasons:
-        body = f"{body}\n<i>{html.escape(', '.join(confirm_reasons[:6]))}</i>"
+    if "Level map" not in body:
+        grid = build_confluence_grid(row)
+        if grid:
+            body = f"{body}\n{format_grid_telegram(grid)}"
     return body
 
 
 def format_squeeze_telegram(row: dict[str, Any]) -> str:
     """Squeeze advisory card — canonical template (was deliver/telegram.py)."""
-    from hunt_core.deliver.telegram import fmt_price, phase_human
+    from hunt_core.deliver._labels import fmt_price, phase_human
 
     sym = html.escape(str(row["symbol"]).replace("USDT", "-USDT"))
     sq = row.get("squeeze") or {}
@@ -132,14 +146,39 @@ def _squeeze_direction(
     elif phase_txt:
         evidence.append(f"Lifecycle: {html.escape(phase_txt)}")
 
-    dump_score = float(dump.get("dump_score") or 0)
-    long_score = float(long_setup.get("long_score") or 0)
-    if dump_score > long_score + 10:
+    structure = row.get("structure") if isinstance(row.get("structure"), dict) else {}
+    struct_bias = str(
+        structure.get("structure_bias")
+        or lifecycle.get("structure_bias")
+        or ""
+    ).lower()
+    if struct_bias == "short":
+        bear += 2
+        evidence.append("Structure: медвежий BOS/CHoCH")
+    elif struct_bias == "long":
+        bull += 2
+        evidence.append("Structure: бычий BOS/CHoCH")
+
+    from hunt_core.gate._ev import setup_conviction_pct, setup_p_win
+
+    def _side_strength(setup: dict[str, Any], *, direction: str) -> float:
+        p = setup_p_win(setup)
+        if p is not None:
+            return p * 100.0
+        return setup_conviction_pct(setup, direction=direction)
+
+    short_strength = _side_strength(dump, direction="short")
+    long_strength = _side_strength(long_setup, direction="long")
+    if short_strength > long_strength + 10:
         bear += 1
-        evidence.append(f"Score шорт {dump_score:.0f} > лонг {long_score:.0f}")
-    elif long_score > dump_score + 10:
+        evidence.append(
+            f"Conviction шорт {short_strength:.0f} > лонг {long_strength:.0f}"
+        )
+    elif long_strength > short_strength + 10:
         bull += 1
-        evidence.append(f"Score лонг {long_score:.0f} > шорт {dump_score:.0f}")
+        evidence.append(
+            f"Conviction лонг {long_strength:.0f} > шорт {short_strength:.0f}"
+        )
 
     try:
         oi_z = float(sq.get("oi_z") or 0)
@@ -154,16 +193,26 @@ def _squeeze_direction(
     except (TypeError, ValueError):
         pass
 
+    # Normalize funding to a decimal fraction (0.0001 ≈ 0.01%). funding_pct is stored
+    # as a percent number (funding_rate*100), so it must be /100 — mixing it with the
+    # raw funding_rate fraction under one threshold mis-scaled both the thresholds and
+    # the displayed % by 100x (M10).
     try:
-        fund = float(sq.get("funding_pct") or 0)
-        if fund > 0.05:
+        from hunt_core.contract import normalize_funding_fraction
+
+        fund = normalize_funding_fraction(sq.get("funding_rate"))
+        if fund is None:
+            fund = normalize_funding_fraction(sq.get("funding_pct"))
+        if fund is None:
+            fund = 0.0
+        if fund >= 0.001:
             bear += 1
-            evidence.append(f"Funding перегрет ({fund:.4f}%) — лонги платят")
-        elif fund < -0.01:
+            evidence.append(f"Funding перегрет ({fund * 100:.3f}%) — лонги платят")
+        elif fund <= -0.0001:
             bull += 1
-            evidence.append(f"Funding отрицательный ({fund:.4f}%) — шорты платят")
-        elif abs(fund) > 0.0001:
-            evidence.append(f"Funding {fund:.4f}% (нейтрально)")
+            evidence.append(f"Funding отрицательный ({fund * 100:.3f}%) — шорты платят")
+        elif abs(fund) > 1e-6:
+            evidence.append(f"Funding {fund * 100:.3f}% (нейтрально)")
     except (TypeError, ValueError):
         pass
 
@@ -171,10 +220,10 @@ def _squeeze_direction(
         return "🔴", "ВНИЗ — вероятен шорт-пробой", evidence
     if bull > bear:
         return "🟢", "ВВЕРХ — вероятен лонг-пробой", evidence
-    if dump_score > long_score:
-        return "🔴", "СЛАБЫЙ УКЛОН ВНИЗ (score dump>long)", evidence
-    if long_score > dump_score:
-        return "🟢", "СЛАБЫЙ УКЛОН ВВЕРХ (score long>dump)", evidence
+    if short_strength > long_strength:
+        return "🔴", "СЛАБЫЙ УКЛОН ВНИЗ (conviction short>long)", evidence
+    if long_strength > short_strength:
+        return "🟢", "СЛАБЫЙ УКЛОН ВВЕРХ (conviction long>short)", evidence
     return "⚪", "НЕЙТРАЛЬНО — ждать closed-bar confirm", evidence
 
 
@@ -203,6 +252,8 @@ __all__ = [
     "format_advisory_early",
     "format_confirm_strong",
     "format_followup_telegram_message",
+    "format_ignition_message",
+    "format_liquidation_burst_message",
     "format_pinned_summary",
     "format_setup_lines_for_probe",
     "format_squeeze_telegram",

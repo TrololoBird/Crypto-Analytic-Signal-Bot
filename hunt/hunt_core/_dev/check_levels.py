@@ -18,6 +18,7 @@ def main() -> int:
         local_support=95.0,
         local_resistance=110.0,
         symbol="TESTUSDT",
+        lifecycle_phase="dump_initiating",
     )
     bad: list[str] = []
     sl = float(short.get("stop_loss") or 0)

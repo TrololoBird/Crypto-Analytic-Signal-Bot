@@ -14,7 +14,7 @@ pip install -e "hunt/[calibrate]"    # polarbt, ml4t-engineer (offline only)
 
 ```bash
 python -c "from hunt_core.bootstrap import require_feature_stack; require_feature_stack()"
-cd hunt && PYTHONPATH=. python -m hunt_core._dev.check_ccxt
+python -m hunt_core._dev.check_ccxt
 ```
 
 ## Core dependencies

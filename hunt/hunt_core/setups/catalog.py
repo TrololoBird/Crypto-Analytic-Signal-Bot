@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
@@ -33,6 +34,9 @@ _SETUP_INTERCEPT: dict[str, float] = {
     "value_accept_reject": -0.08,
     "oi_cascade": -0.18,
     "accumulation_breakout": -0.14,
+    "cex_pump": -0.06,
+    "cex_dump": -0.08,
+    "btc_decoupled": -0.06,
 }
 
 
@@ -137,10 +141,110 @@ def _lake_adjustment(lake_stats: dict[str, Any] | None, *, setup_id: str, direct
     return (wr - 0.5) * 0.8 - max(0.0, sl_rate - 0.30) * 0.6
 
 
+def setup_lake_outcome_n(
+    lake_stats: dict[str, Any] | None,
+    *,
+    setup_id: str,
+    direction: str,
+) -> int:
+    """Closed deduped outcomes for a setup×direction (lake calibration flip threshold)."""
+    if not lake_stats:
+        return 0
+    sym_stats = lake_stats.get("by_setup") or lake_stats.get("setups") or {}
+    row = (
+        sym_stats.get(f"{setup_id}:{direction}")
+        or sym_stats.get(setup_id)
+        or {}
+    )
+    if not isinstance(row, dict):
+        return 0
+    return int(row.get("n") or row.get("n_closed") or 0)
+
+
+def _ev_bootstrap_deliver_enabled() -> bool:
+    """Bootstrap: deliver EV-primary setups while still uncalibrated (default on).
+
+    Without this the engine deadlocks — a setup needs >=min_n lake outcomes to flip
+    to delivery, but cannot accumulate outcomes without delivering. During bootstrap
+    the EV/P(win) floors govern quality (lake_adjustment is 0 until n>=min_n, so P is
+    the first-principles prior); once n>=min_n calibration refines it. Disable with
+    HUNT_EV_BOOTSTRAP=0.
+    """
+    return os.environ.get("HUNT_EV_BOOTSTRAP", "1").strip().lower() in {"1", "true", "yes"}
+
+
+def setup_ev_flip_eligible(
+    lake_stats: dict[str, Any] | None,
+    *,
+    setup_id: str,
+    direction: str,
+    min_n: int = 8,
+) -> bool:
+    """Per-setup EV-primary flip: calibrated (n>=min_n) OR bootstrap exploration."""
+    n = setup_lake_outcome_n(lake_stats, setup_id=setup_id, direction=direction)
+    if n >= min_n:
+        return True
+    return _ev_bootstrap_deliver_enabled()
+
+
+_MAP_CONFLUENCE_CAP = 0.6
+
+
+def map_confluence_logit(market: dict[str, Any] | None, direction: str) -> float:
+    """Logit adjustment from professional-map confluence for a setup direction.
+
+    Long setups are lifted by accumulation, short-squeeze fuel, ask-thinning/void above and
+    bullish CVD divergence — and penalised by long-squeeze (dump) risk. Short setups mirror it.
+    Bounded to ±:data:`_MAP_CONFLUENCE_CAP` so maps tilt, never dominate, the calibrated score.
+    """
+    if not isinstance(market, dict):
+        return 0.0
+
+    def fval(key: str) -> float | None:
+        try:
+            v = market.get(key)
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    acc = fval("map_accumulation_score")
+    fuel_short = fval("liq_squeeze_fuel_short")  # short-squeeze → pump (long fuel)
+    fuel_long = fval("liq_squeeze_fuel_long")    # long-squeeze → dump (short fuel)
+    cvd = market.get("map_cvd_divergence")
+    score = 0.0
+    if direction == "long":
+        if acc is not None and acc >= 0.5:
+            score += 0.5 * acc
+        if fuel_short is not None and fuel_short >= 0.5:
+            score += 0.5 * fuel_short
+        if market.get("map_ask_thinning"):
+            score += 0.12
+        if cvd == "bullish_div":
+            score += 0.15
+        if fuel_long is not None and fuel_long >= 0.6:
+            score -= 0.4 * fuel_long
+        if cvd == "bearish_div":
+            score -= 0.15
+    elif direction == "short":
+        if fuel_long is not None and fuel_long >= 0.5:
+            score += 0.5 * fuel_long
+        if cvd == "bearish_div":
+            score += 0.15
+        if acc is not None and acc >= 0.6:
+            score -= 0.4 * acc
+        if fuel_short is not None and fuel_short >= 0.6:
+            score -= 0.4 * fuel_short
+        if cvd == "bullish_div":
+            score -= 0.15
+    return round(max(-_MAP_CONFLUENCE_CAP, min(_MAP_CONFLUENCE_CAP, score)), 4)
+
+
 def score_setup_probability(
     evidence: SetupEvidence,
     regime: RegimeResult | dict[str, Any] | str | None,
     lake_stats: dict[str, Any] | None = None,
+    *,
+    market: dict[str, Any] | None = None,
 ) -> float:
     """Return calibrated probability in [0, 0.95] for a closed-bar setup."""
     label = _regime_label(regime)
@@ -154,8 +258,9 @@ def score_setup_probability(
     strength_logit = (evidence.strength - 0.5) * 3.2
     reason_bonus = min(0.25, len(evidence.reasons) * 0.04)
     lake_adj = _lake_adjustment(lake_stats, setup_id=evidence.setup_id, direction=direction)
+    map_logit = map_confluence_logit(market, direction)
 
-    z = intercept + prior + strength_logit + reason_bonus + regime_conf + lake_adj
+    z = intercept + prior + strength_logit + reason_bonus + regime_conf + lake_adj + map_logit
     if not evidence.confirmed:
         z -= 1.2
 
@@ -171,6 +276,9 @@ HUNT_SETUP_IDS: tuple[str, ...] = (
     "value_accept_reject",
     "oi_cascade",
     "accumulation_breakout",
+    "cex_pump",
+    "cex_dump",
+    "btc_decoupled",
 )
 
 
@@ -183,6 +291,28 @@ class HuntSetupMeta:
     ttl_minutes: int = 120
 
 
+# Catalog setup_id → structural setup_type for delivery gate (no_setup_type).
+_CATALOG_SETUP_TYPE: dict[str, str] = {
+    "bos_choch": "bos_retest",
+    "dump_initiation": "bos_retest",
+    "accumulation_breakout": "bos_retest",
+    "liquidity_sweep": "sweep_reclaim",
+    "value_accept_reject": "sweep_reclaim",
+    "oi_cascade": "bos_retest",
+    "squeeze_expansion": "bos_retest",
+    "cex_pump": "bos_retest",
+    "cex_dump": "bos_retest",
+    "btc_decoupled": "bos_retest",
+}
+
+
+def catalog_struct_setup_type(setup_id: str | None) -> str | None:
+    sid = str(setup_id or "").strip()
+    if not sid:
+        return None
+    return _CATALOG_SETUP_TYPE.get(sid)
+
+
 HUNT_SETUP_META: dict[str, HuntSetupMeta] = {
     "dump_initiation": HuntSetupMeta("dump_initiation", "5m", "15m", "limit", 90),
     "squeeze_expansion": HuntSetupMeta("squeeze_expansion", "15m", "15m", "limit", 120),
@@ -191,6 +321,9 @@ HUNT_SETUP_META: dict[str, HuntSetupMeta] = {
     "value_accept_reject": HuntSetupMeta("value_accept_reject", "15m", "15m", "limit", 120),
     "oi_cascade": HuntSetupMeta("oi_cascade", "5m", "15m", "limit", 90),
     "accumulation_breakout": HuntSetupMeta("accumulation_breakout", "15m", "1h", "limit", 180),
+    "cex_pump": HuntSetupMeta("cex_pump", "1m", "15m", "limit", 45),
+    "cex_dump": HuntSetupMeta("cex_dump", "1m", "15m", "limit", 45),
+    "btc_decoupled": HuntSetupMeta("btc_decoupled", "5m", "15m", "limit", 90),
 }
 
 
@@ -218,9 +351,12 @@ DetectorFn = Callable[[dict[str, Any], dict[str, Any]], SetupEvidence | None]
 
 
 def _catalog_detectors() -> tuple[DetectorFn, ...]:
-    from hunt_core.scan.detectors import (
+    from hunt_core.setups.detectors import (
         detect_accumulation_breakout,
         detect_bos_choch,
+        detect_btc_decoupled,
+        detect_cex_dump,
+        detect_cex_pump,
         detect_dump_initiation,
         detect_liquidity_sweep,
         detect_oi_cascade,
@@ -236,6 +372,9 @@ def _catalog_detectors() -> tuple[DetectorFn, ...]:
         detect_value_accept_reject,
         detect_oi_cascade,
         detect_accumulation_breakout,
+        detect_btc_decoupled,
+        detect_cex_pump,
+        detect_cex_dump,
     )
 
 
@@ -274,7 +413,11 @@ def run_setup_catalog(
                 continue
         if regime_conflicts_direction(label, evidence.direction):
             continue
-        prob = score_setup_probability(evidence, regime=label)
+        prob = score_setup_probability(
+            evidence,
+            regime=label,
+            market=row.get("market") if isinstance(row.get("market"), dict) else None,
+        )
         hits.append(
             SetupEvidence(
                 setup_id=evidence.setup_id,
@@ -292,15 +435,239 @@ def run_setup_catalog(
     return hits
 
 
+def _evidence_levels(evidence: SetupEvidence, price: float) -> dict[str, Any]:
+    entry = evidence.entry if evidence.entry > 0 else price
+    pad = max(entry * 0.002, 1e-8) if entry > 0 else max(price * 0.002, 1e-8)
+    return {
+        "setup_id": evidence.setup_id,
+        "entry_zone": [round(entry - pad, 6), round(entry + pad, 6)],
+        "stop_loss": round(evidence.stop_loss, 6),
+        "tp1": round(evidence.tp1, 6),
+        "tp2": round(evidence.tp2, 6),
+    }
+
+
+def run_setup_detectors(
+    row: dict[str, Any],
+    prepared: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Run catalog detectors and attach calibrated P + EV (Phase 3B shadow)."""
+    from hunt_core.contract import compute_setup_ev
+
+    regime = resolve_catalog_regime(row, prepared)
+    structure = prepared.get("structure") if isinstance(prepared.get("structure"), dict) else {}
+    price = float(row.get("price") or prepared.get("price") or 0)
+    market = row.get("market") if isinstance(row.get("market"), dict) else None
+    out: list[dict[str, Any]] = []
+    for detect in _catalog_detectors():
+        evidence = detect(row, prepared)
+        if evidence is None:
+            continue
+        p_win = score_setup_probability(evidence, regime=regime, market=market)
+        levels = _evidence_levels(evidence, price)
+        ev_detail = compute_setup_ev(
+            {
+                "setup_id": evidence.setup_id,
+                "direction": evidence.direction,
+                "strength": evidence.strength,
+                "p_win": p_win,
+                "probability": p_win,
+                "reasons": evidence.reasons,
+            },
+            levels,
+            direction=evidence.direction,
+            structure=structure,
+        )
+        out.append(
+            {
+                "setup_id": evidence.setup_id,
+                "direction": evidence.direction,
+                "strength": evidence.strength,
+                "confirmed": evidence.confirmed,
+                "reasons": evidence.reasons,
+                "p_win": p_win,
+                "ev": ev_detail.get("ev"),
+                "ev_detail": ev_detail,
+                "levels": levels,
+            }
+        )
+    return out
+
+
+def pick_max_ev_candidate(
+    candidates: list[dict[str, Any]],
+    direction: Direction,
+) -> dict[str, Any] | None:
+    """Return highest-EV catalog candidate for a direction."""
+    pool = [
+        c
+        for c in candidates
+        if c.get("direction") == direction and c.get("ev") is not None
+    ]
+    if not pool:
+        return None
+    return max(pool, key=lambda item: float(item["ev"]))
+
+
+def legacy_fuel_merge_enabled() -> bool:
+    """Legacy fuel side-boost path — off when ev_primary_default (config) or env default."""
+    env = os.environ.get("HUNT_LEGACY_FUEL")
+    if env is not None:
+        return env.strip().lower() in {"1", "true", "yes"}
+    from hunt_core.params.store import universal_section
+
+    dl = universal_section("delivery")
+    return not bool(dl.get("ev_primary_default", True))
+
+
+def promote_catalog_ev_setup(
+    setup: dict[str, Any],
+    direction: Direction,
+    ev_candidate: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Promote best catalog EV candidate — primary decision path (replaces merge_* fuel boost)."""
+    if legacy_fuel_merge_enabled() or ev_candidate is None:
+        return setup
+    sid = str(ev_candidate.get("setup_id") or "")
+    lake = ev_candidate.get("lake_stats") if isinstance(ev_candidate.get("lake_stats"), dict) else None
+    if lake is None:
+        try:
+            from hunt_core.params.store import load_calibration
+
+            cal = load_calibration()
+            oc = cal.get("outcome_calibration") or {}
+            by_setup = oc.get("by_setup") if isinstance(oc.get("by_setup"), dict) else oc
+            if isinstance(by_setup, dict):
+                lake = {"by_setup": by_setup}
+        except Exception:
+            lake = None
+    try:
+        ev = float(ev_candidate.get("ev"))
+    except (TypeError, ValueError):
+        return setup
+    if ev <= 0:
+        return setup
+    out = apply_ev_primary_setup(setup, direction, ev_candidate)
+    flip = sid and lake and setup_ev_flip_eligible(lake, setup_id=sid, direction=direction)
+    if sid and lake and not flip:
+        out["ev_shadow_only"] = True
+    return out
+
+
+def apply_ev_primary_setup(
+    setup: dict[str, Any],
+    direction: Direction,
+    ev_candidate: dict[str, Any],
+) -> dict[str, Any]:
+    """Promote catalog EV-primary candidate over fuel merge_* injection."""
+    out = dict(setup)
+    sid = str(ev_candidate.get("setup_id") or "")
+    levels = ev_candidate.get("levels") if isinstance(ev_candidate.get("levels"), dict) else {}
+    strength = float(ev_candidate.get("strength") or 0)
+    score_key = "dump_score" if direction == "short" else "long_score"
+    fuel_key = "dump_fuel" if direction == "short" else "long_fuel"
+    catalog_boost = round(38.0 + strength * 42.0, 1)
+    out[score_key] = max(float(out.get(score_key) or 0), catalog_boost)
+    out[fuel_key] = max(float(out.get(fuel_key) or 0), catalog_boost)
+    out["catalog_setup"] = sid
+    out["catalog_strength"] = round(strength, 3)
+    out["ev_primary"] = True
+    out["setup_id"] = sid
+    struct_type = catalog_struct_setup_type(sid)
+    if struct_type:
+        out["setup_type"] = struct_type
+    out["phase"] = sid
+    if ev_candidate.get("p_win") is not None:
+        out["p_win"] = ev_candidate.get("p_win")
+        out["catalog_p_win"] = ev_candidate.get("p_win")
+        out["delivery_p_win"] = ev_candidate.get("p_win")
+    if ev_candidate.get("ev") is not None:
+        out["ev_primary_ev"] = ev_candidate.get("ev")
+    if ev_candidate.get("confirmed"):
+        out["catalog_confirmed"] = True
+    hard = list(out.get("confirm_hard") or [])
+    for reason in ev_candidate.get("reasons") or ():
+        tag = str(reason)
+        if tag not in hard:
+            hard.append(tag)
+    out["confirm_hard"] = hard
+    for key in ("entry_zone", "stop_loss", "tp1", "tp2"):
+        val = levels.get(key)
+        if val:
+            out.setdefault(key, val)
+    return out
+
+
+def sync_ev_primary_confirm(
+    setup: dict[str, Any],
+    *,
+    direction: Direction,
+    symbol: str,
+) -> bool:
+    """Confirm EV-primary when catalog economics qualify (unifies shadow + live path)."""
+    if not setup.get("ev_primary"):
+        return bool(setup.get("confirmed"))
+    from hunt_core.gate._ev import ev_primary_delivery_qualified
+
+    if ev_primary_delivery_qualified(setup, direction=direction, symbol=symbol):
+        setup["confirmed"] = True
+        setup["catalog_confirmed"] = True
+        return True
+    if setup.get("catalog_confirmed") and float(setup.get("catalog_strength") or 0) >= 0.55:
+        setup["confirmed"] = True
+        return True
+    return bool(setup.get("confirmed"))
+
+
+def build_ev_delivery_eval(
+    result: dict[str, Any],
+    *,
+    symbol: str,
+    lifecycle: dict[str, Any],
+) -> dict[str, Any]:
+    """Telemetry mirror of live dump/long EV-primary gate (no duplicate detector pass)."""
+    from hunt_core.gate._report import collect_report_blockers
+
+    out: dict[str, Any] = {}
+    for direction, key in (("short", "dump"), ("long", "long")):
+        setup = result.get(key)
+        if not isinstance(setup, dict):
+            continue
+        if not setup.get("ev_primary"):
+            continue
+        blockers = collect_report_blockers(
+            setup,
+            direction=direction,
+            symbol=symbol,
+            lifecycle=lifecycle,
+            row=result,
+        )
+        out[direction] = {
+            "setup_id": setup.get("catalog_setup") or setup.get("setup_id"),
+            "p_win": setup.get("delivery_p_win") or setup.get("p_win"),
+            "ev": setup.get("delivery_ev") or setup.get("ev_primary_ev"),
+            "would_deliver": not blockers and bool(setup.get("confirmed")),
+            "blockers": [b.code for b in blockers],
+            "ev_shadow_only": bool(setup.get("ev_shadow_only")),
+        }
+    return out
+
+
 __all__ = [
     "HUNT_SETUP_IDS",
     "HUNT_SETUP_META",
     "HuntSetupMeta",
     "SetupEvidence",
+    "apply_ev_primary_setup",
     "atr_from_tf",
+    "build_ev_delivery_eval",
+    "catalog_struct_setup_type",
     "closed_bar_close",
     "closed_tf",
     "confirm_tf_chain",
+    "legacy_fuel_merge_enabled",
+    "pick_max_ev_candidate",
+    "promote_catalog_ev_setup",
     "require_closed_bar",
     "resolve_catalog_regime",
     "resolve_setup_order_type",
@@ -308,5 +675,7 @@ __all__ = [
     "resolve_setup_trigger_tf",
     "resolve_setup_ttl_minutes",
     "run_setup_catalog",
+    "run_setup_detectors",
     "score_setup_probability",
+    "sync_ev_primary_confirm",
 ]

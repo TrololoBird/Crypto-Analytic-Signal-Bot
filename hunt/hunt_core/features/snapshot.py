@@ -27,7 +27,6 @@ from hunt_core.features.polars_ta_bridge import rsi_series as _rsi_series
 from hunt_core.features.prepare_columns import patch_work_4h, resolve_prepare_groups_for_symbol
 from hunt_core.features.prepare_frame import _prepare_frame
 from hunt_core.features.research_plugins import enrich_research_columns, research_snapshot_fields
-from hunt_core.analysis.pinned_deep import enrich_pinned_tf_snapshot
 from hunt_core.analysis.trend_engine import legacy_trend_label, trend_from_snapshot
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.features.structure import detect_pp
@@ -93,6 +92,8 @@ def kline_integrity_reject(
 ) -> dict[str, Any]:
     violations = list(report.violations)
     primary = violations[0] if violations else "data.klines_incomplete"
+    from hunt_core.runtime.tick_jsonl import ensure_fusion_lifecycle_fields
+
     return {
         "ts": datetime.now(UTC).isoformat(),
         "symbol": symbol,
@@ -105,6 +106,7 @@ def kline_integrity_reject(
             "violations": violations,
             "details": dict(report.details),
         },
+        "lifecycle": ensure_fusion_lifecycle_fields(None),
     }
 
 
@@ -181,6 +183,125 @@ def _series_chg_pct(values: Any) -> float | None:
         return None
     return round((float(values[-1]) / first - 1.0) * 100.0, 2)
 
+
+def stamp_derivative_zscores(
+    market: dict[str, Any],
+    *,
+    pack: dict[str, Any] | None = None,
+    client: Any | None = None,
+    symbol: str = "",
+    prepared: Any | None = None,
+    ws_snap: dict[str, Any] | None = None,
+) -> None:
+    """Ensure z-scores + basis/premium on market — pack, client cache, prepared, or WS."""
+    if not isinstance(market, dict):
+        return
+    pack = pack if isinstance(pack, dict) else {}
+    ws = ws_snap if isinstance(ws_snap, dict) else {}
+
+    if market.get("oi_z") is None:
+        series = pack.get("oi_series")
+        if not isinstance(series, list) and client is not None and symbol:
+            series = client.get_cached_oi_series(symbol)
+        z = _series_z(series)
+        if z is not None:
+            market["oi_z"] = z
+        chg = _series_chg_pct(series)
+        if chg is not None and market.get("oi_chg_4h_pct") is None:
+            market["oi_chg_4h_pct"] = chg
+
+    if market.get("gls_z") is None:
+        gls_series = pack.get("gls_series")
+        if not isinstance(gls_series, list) and client is not None and symbol:
+            gls_series = client.get_cached_gls_series(symbol)
+        gz = _series_z(gls_series)
+        if gz is not None:
+            market["gls_z"] = gz
+
+    if market.get("funding_zscore_48h") is None and prepared is not None:
+        fz_prep = getattr(prepared, "funding_rate_zscore_48h", None)
+        if fz_prep is not None:
+            market["funding_zscore_48h"] = float(fz_prep)
+    if market.get("funding_zscore_48h") is None and client is not None and symbol:
+        fz = client.get_cached_funding_rate_zscore(symbol)
+        if fz is not None:
+            market["funding_zscore_48h"] = round(float(fz), 3)
+
+    # Basis / premium — WS mark/index AP is authoritative on hot_carry; REST/cache fills gaps.
+    try:
+        if ws.get("basis_ap_bps") is not None:
+            market["basis_ap_bps"] = float(ws["basis_ap_bps"])
+    except (TypeError, ValueError):
+        pass
+    for ws_key, mkey in (
+        ("basis_bps_live", "basis_bps"),
+        ("mark_live", "mark"),
+        ("live_mark_price", "mark"),
+        ("live_index_price", "index"),
+        ("live_funding_rate", "funding_rate"),
+    ):
+        if ws.get(ws_key) is not None and market.get(mkey) is None:
+            try:
+                market[mkey] = float(ws[ws_key])
+            except (TypeError, ValueError):
+                pass
+    if ws.get("live_funding_rate") is not None and market.get("funding_pct") is None:
+        try:
+            market["funding_pct"] = round(float(ws["live_funding_rate"]) * 100.0, 4)
+        except (TypeError, ValueError):
+            pass
+
+    if prepared is not None:
+        for attr, key in (
+            ("basis_pct", "basis_pct"),
+            ("premium_zscore_5m", "premium_zscore_5m"),
+            ("premium_slope_5m", "premium_slope_5m"),
+            ("mark_index_spread_bps", "mark_index_spread_bps"),
+            ("mark_price", "mark"),
+        ):
+            if market.get(key) is None:
+                val = getattr(prepared, attr, None)
+                if val is not None:
+                    market[key] = val
+    if market.get("basis_bps") is None and market.get("basis_pct") is not None:
+        try:
+            market["basis_bps"] = round(float(market["basis_pct"]) * 100.0, 2)
+        except (TypeError, ValueError):
+            pass
+    if market.get("basis_5m") is None and market.get("basis_pct") is not None:
+        try:
+            market["basis_5m"] = float(market["basis_pct"])
+        except (TypeError, ValueError):
+            pass
+
+    basis_pack = pack.get("basis_5m")
+    if basis_pack is not None:
+        try:
+            bp = float(basis_pack)
+            market.setdefault("basis_pct", bp)
+            market.setdefault("basis_5m", bp)
+            market.setdefault("basis_bps", round(bp * 100.0, 2))
+        except (TypeError, ValueError):
+            pass
+
+    if client is not None and symbol:
+        stats = client.get_cached_basis_stats(symbol, period="5m")
+        if stats is None:
+            stats = client.get_cached_basis_stats(symbol, period="1h")
+        if stats:
+            if market.get("basis_pct") is None and stats.get("latest_basis_pct") is not None:
+                bp = float(stats["latest_basis_pct"])
+                market["basis_pct"] = bp
+                market["basis_5m"] = bp
+                market["basis_bps"] = round(bp * 100.0, 2)
+            if market.get("premium_zscore_5m") is None and stats.get("premium_zscore_5m") is not None:
+                market["premium_zscore_5m"] = float(stats["premium_zscore_5m"])
+            if market.get("premium_slope_5m") is None and stats.get("premium_slope_5m") is not None:
+                market["premium_slope_5m"] = float(stats["premium_slope_5m"])
+            spread_bps = stats.get("mark_index_spread_bps")
+            if spread_bps is not None:
+                market.setdefault("mark_index_spread_bps", float(spread_bps))
+                market.setdefault("basis_ap_bps", float(spread_bps))
 
 
 _RETURN_Z_WINDOW = 50
@@ -287,47 +408,25 @@ async def attach_cross_market_fields(
     client: HuntCcxtClient,
     symbol: str,
     ws_feed: HuntCcxtStreams | None,
+    cross_snapshot: dict[str, Any] | None = None,
 ) -> None:
-    """Set cross_data_source on market: ws when cross WS live, else REST fallback."""
-    cross_ws = ws_feed is not None and ws_feed.cross_ws_connected
-    if cross_ws:
-        market["cross_data_source"] = "ws"
-        ws_cross = ws_feed.live_funding_cross(symbol)
-        if ws_cross:
-            market["cross_funding_secondary"] = {
-                ex: fields.get("fundingRate")
-                for ex, fields in ws_cross.items()
-                if isinstance(fields, dict)
-            }
-        return
+    """Merge REST cross snapshot + live WS overlay — never partial-null secondaries."""
+    from hunt_core.market.cross import apply_cross_snapshot_to_market
 
-    try:
-        snap = await client.fetch_cross_exchange_snapshot(symbol)
-    except Exception as exc:
-        LOG.warning("cross_rest_fallback_failed | symbol=%s error=%s", symbol, exc)
-        market["cross_data_source"] = "unavailable"
-        return
-
-    funding = snap.get("funding") if isinstance(snap.get("funding"), dict) else {}
-    oi_usd = snap.get("oi_usd") if isinstance(snap.get("oi_usd"), dict) else {}
-    secondary_funding = {
-        k: v for k, v in funding.items() if k != "binance" and v is not None
-    }
-    secondary_oi = {k: v for k, v in oi_usd.items() if v is not None}
-    if secondary_funding or secondary_oi:
-        market["cross_data_source"] = "rest"
-        if secondary_funding:
-            market["cross_funding_secondary"] = secondary_funding
-        if secondary_oi:
-            market["cross_oi_usd_secondary"] = secondary_oi
-        if snap.get("funding_spread") is not None:
-            market["cross_funding_spread"] = snap.get("funding_spread")
-        if snap.get("oi_total") is not None:
-            market["cross_oi_total"] = snap.get("oi_total")
-        if snap.get("funding_consensus") is not None:
-            market["cross_funding_consensus"] = snap.get("funding_consensus")
-    else:
-        market["cross_data_source"] = "unavailable"
+    ws_cross = ws_feed.live_funding_cross(symbol) if ws_feed is not None else None
+    snap = cross_snapshot
+    if snap is None:
+        try:
+            snap = await client.fetch_cross_exchange_snapshot(symbol)
+        except Exception as exc:
+            LOG.warning("cross_rest_fallback_failed | symbol=%s error=%s", symbol, exc)
+            if ws_cross:
+                snap = {"symbol": symbol, "funding": {"binance": market.get("funding_rate")}}
+                apply_cross_snapshot_to_market(market, snap, ws_cross=ws_cross)
+                return
+            market["cross_data_source"] = "unavailable"
+            return
+    apply_cross_snapshot_to_market(market, snap, ws_cross=ws_cross)
 
 def btc_corr_1h(sym_work_1h: Any, btc_work_1h: Any, *, lookback: int = 24) -> float | None:
     if (
@@ -435,14 +534,25 @@ def apply_rest_enrichments_local(
 ) -> None:
     prepared.oi_current = pack.get("oi") or client.get_cached_open_interest(symbol)
     prepared.oi_change_pct = pack.get("oi_chg_1h") or client.get_cached_oi_change(symbol, "1h")
-    prepared.ls_ratio = pack.get("ls_1h") or client.get_cached_ls_ratio(symbol, "1h")
+    prepared.ls_ratio = (
+        pack.get("ls_1h")
+        or pack.get("ls_5m")
+        or client.get_cached_ls_ratio(symbol, "1h")
+        or client.get_cached_ls_ratio(symbol, "5m")
+    )
     prepared.top_account_ls_ratio = prepared.ls_ratio
-    prepared.top_position_ls_ratio = pack.get(
-        "top_ls_1h"
-    ) or client.get_cached_top_position_ls_ratio(symbol, "1h")
+    prepared.top_position_ls_ratio = (
+        pack.get("top_ls_1h")
+        or pack.get("top_ls_5m")
+        or client.get_cached_top_position_ls_ratio(symbol, "1h")
+        or client.get_cached_top_position_ls_ratio(symbol, "5m")
+    )
     prepared.top_trader_position_ratio = prepared.top_position_ls_ratio
-    prepared.global_ls_ratio = pack.get("global_ls_1h") or client.get_cached_global_ls_ratio(
-        symbol, "1h"
+    prepared.global_ls_ratio = (
+        pack.get("global_ls_1h")
+        or pack.get("global_ls_5m")
+        or client.get_cached_global_ls_ratio(symbol, "1h")
+        or client.get_cached_global_ls_ratio(symbol, "5m")
     )
     prepared.global_account_ls_ratio = prepared.global_ls_ratio
     if prepared.ls_ratio is not None and prepared.global_ls_ratio is not None:
@@ -513,7 +623,13 @@ def apply_rest_enrichments_local(
     prepared.microprice_bias_source = prepared.depth_imbalance_source
     agg = pack.get("agg_trades")
     if agg is not None:
-        prepared.agg_trade_delta_30s = getattr(agg, "delta_ratio", None)
+        # agg_trade_delta_* is a buy-share in [0,1] (0.5 balanced) per the WS source
+        # and scoring thresholds; the REST snapshot exposes a signed delta in [-1,1],
+        # so convert to the same scale (else the sell trigger over-fires → short bias).
+        rest_signed = getattr(agg, "delta_ratio", None)
+        prepared.agg_trade_delta_30s = (
+            (float(rest_signed) + 1.0) / 2.0 if rest_signed is not None else None
+        )
         prepared.orderflow_source = "agg_trade_rest"
     prepared.data_source_mix = "futures_rest_full"
 
@@ -546,6 +662,12 @@ def _overlay_ws_market(prepared: Any, ws_snap: dict[str, Any] | None) -> None:
     if live_mp is not None and ws_snap.get("ws_connected"):
         prepared.microprice_bias = float(live_mp)
         prepared.microprice_bias_source = "ws_book"
+    ratio_60 = ws_snap.get("agg_trade_buy_ratio_60s")
+    ratio_30 = ws_snap.get("agg_trade_buy_ratio_30s")
+    if ratio_60 is not None:
+        prepared.agg_trade_buy_ratio_60s = float(ratio_60)
+    if ratio_30 is not None:
+        prepared.agg_trade_buy_ratio_30s = float(ratio_30)
 
 
 def market_snapshot(
@@ -590,7 +712,9 @@ def market_snapshot(
         "premium_zscore_5m": prepared.premium_zscore_5m,
         "premium_slope_5m": prepared.premium_slope_5m,
         "funding_rate": prepared.funding_rate,
-        "funding_pct": round((prepared.funding_rate or 0) * 100, 4),
+        "funding_pct": round(float(prepared.funding_rate) * 100, 4)
+        if prepared.funding_rate is not None
+        else None,
         "funding_trend": prepared.funding_trend,
         "funding_zscore_48h": prepared.funding_rate_zscore_48h,
         "funding_cap": prepared.funding_rate_cap,
@@ -622,7 +746,9 @@ def market_snapshot(
         "agg_trade_delta": getattr(agg, "delta_ratio", None) if agg else None,
         "agg_buy_qty": getattr(agg, "buy_qty", None) if agg else None,
         "agg_sell_qty": getattr(agg, "sell_qty", None) if agg else None,
-        "vol_24h_m": round(float(ticker.get("quote_volume") or 0) / 1e6, 1),
+        "vol_24h_m": round(float(ticker.get("quote_volume")) / 1e6, 1)
+        if ticker.get("quote_volume") is not None
+        else None,
         "trade_count_24h": ticker.get("trade_count"),
         **(ws_snap or {}),
         **(spot_extra or {}),
@@ -647,6 +773,9 @@ def regime_snapshot(prepared: Any) -> dict[str, Any]:
         "val_15m": prepared.val_15m,
         "btc_corr_1h": prepared.btc_corr_1h,
         "btc_beta_1h": getattr(prepared, "btc_beta_1h", None),
+        "btc_decoupled_pump": getattr(prepared, "btc_decoupled_pump", False),
+        "btc_decoupled_dump": getattr(prepared, "btc_decoupled_dump", False),
+        "pump_cycle": getattr(prepared, "pump_cycle", None),
     }
 
 
@@ -856,8 +985,6 @@ def tf_snapshot_for_symbol(
         chart_patterns=chart_patterns,
         candle_patterns=candle_patterns,
     )
-    if symbol in PINNED_SYMBOLS and base.get("status") != "empty":
-        return enrich_pinned_tf_snapshot(base, df, symbol=symbol)
     return base
 
 
@@ -971,6 +1098,9 @@ def tf_snapshot(
         "dist_ema20_pct": round((c / e20 - 1) * 100, 2) if e20 else None,
         "macd_hist": round(_col(df, "macd_hist", idx=idx), 6),
         "vol_ratio": round(_col(df, "volume_ratio20", 1, idx=idx), 2),
+        "taker_imbalance_cusum": round(_col(df, "taker_imbalance_cusum", 0, idx=idx), 3)
+        if "taker_imbalance_cusum" in df.columns
+        else None,
         **_distribution_stats(df, idx=idx),
         "delta_ratio": round(_col(df, "delta_ratio", 0.5, idx=idx), 3)
         if "delta_ratio" in df.columns
@@ -1065,9 +1195,9 @@ def tf_snapshot(
 
 
 def squeeze_watch(tf: dict[str, Any], market: dict[str, Any]) -> dict[str, Any] | None:
-    from hunt_core.scan.presqueeze import squeeze_watch as _squeeze_watch
-
-    return _squeeze_watch(tf, market)
+    # Volatility compression is now a fusion factor (detect/factors.compression); the
+    # standalone squeeze-watch telemetry block is retired.
+    return None
 
 
 def format_squeeze_telegram(row: dict[str, Any]) -> str:

@@ -726,6 +726,54 @@ class MarketBlock(TypedDict, total=False):
     depth_imbalance: float | None
     liquidation_score_5m: float | None
     microprice_bias: float | None
+    liq_heatmap_nearest_long: float | None
+    liq_heatmap_nearest_short: float | None
+    liq_cascade_risk: str | None
+    liq_forward_confidence: float | None
+    map_sticky_wall_count: int | None
+    map_stacked_imbalance: str | None
+    map_vp_poc: float | None
+    map_vp_accumulation: float | None
+    map_vp_va_width_pct: float | None
+    map_vp_va_contraction: float | None
+    map_cvd_divergence: str | None
+    map_accum_bid_absorption: bool | None
+    map_void_above: float | None
+    map_void_above_pct: float | None
+    map_ask_thinning: bool | None
+    liq_forward_weight: float | None
+    liq_squeeze_fuel_long: float | None
+    liq_squeeze_fuel_short: float | None
+    liq_funding_rate: float | None
+    map_accumulation_score: float | None
+    map_oi_z: float | None
+
+
+MARKET_DESCRIPTIONS: dict[str, str] = {
+    "liq_heatmap_nearest_long": "Nearest long liquidation magnet below price (real+forward map)",
+    "liq_heatmap_nearest_short": "Nearest short squeeze magnet above price",
+    "liq_cascade_risk": "Cascade direction: long_flush | short_squeeze",
+    "liq_forward_confidence": "Forward OID overlay confidence vs realized WS events",
+    "liq_forward_weight": "Effective forward zone weight in signals (confidence × blend)",
+    "liq_squeeze_fuel_short": "Short-squeeze fuel 0-1 (crowded shorts + neg funding + short magnets above) → pump",
+    "liq_squeeze_fuel_long": "Long-squeeze fuel 0-1 (crowded longs + pos funding + long magnets below) → dump",
+    "liq_funding_rate": "Funding rate threaded into liquidation squeeze model",
+    "map_accumulation_score": "Pre-pump accumulation fusion 0-1 (VP coil + bid absorption + thin asks + bullish CVD + rising OI)",
+    "map_oi_z": "Open-interest z-score in maps (OI↑ + price flat = accumulation)",
+    "map_sticky_wall_count": "Count of persistent resting walls (anti-spoof)",
+    "map_stacked_imbalance": "Footprint stacked buy/sell imbalance",
+    "map_cvd_divergence": "Price vs CVD divergence (bullish_div | bearish_div)",
+    "map_vp_poc": "Volume profile point of control (1h primary)",
+    "map_vp_accumulation": "VP coil/accumulation score 0-1 (contraction + stable POC)",
+    "map_vp_va_width_pct": "Value-area width (VAH-VAL) as % of POC — tighter = coil",
+    "map_vp_va_contraction": "Value-area width ratio vs longer period (<1 = coil)",
+    "map_accum_bid_absorption": "Sticky bid + bid-side absorption (accumulation)",
+    "map_void_above": "Nearest liquidity void above price (fast-move path)",
+    "map_void_above_pct": "Distance % to nearest liquidity void above price",
+    "map_ask_thinning": "Ask-side thinning above — path of least resistance up",
+    "map_iceberg_count": "Detected iceberg/replenishment levels",
+    "map_absorption_count": "Absorption zones (resting + aggressive opposite flow)",
+}
 
 
 class TickRow(TypedDict, total=False):
@@ -741,6 +789,7 @@ class TickRow(TypedDict, total=False):
     regime: dict[str, Any]
     session: dict[str, Any]
     book_walls: dict[str, Any]
+    maps: dict[str, Any]
 
 
 class TrackerFeatureVector(TypedDict, total=False):
@@ -890,6 +939,9 @@ PUBLIC_FEATURE_FIELDS: tuple[str, ...] = (
     "val_15m",
     "funding_rate_zscore_48h",
     "liquidation_cascade_5m",
+    "taker_imbalance_cusum",
+    "agg_trade_buy_ratio_60s",
+    "agg_trade_buy_ratio_30s",
 )
 
 # CCXT source map for ops/debug when readiness gates fail (see hunt/docs/CCXT.md).
@@ -960,6 +1012,213 @@ def _normalized_float(value: Any, default: float | None = None) -> float | None:
     return parsed
 
 
+def parse_liquidation_score(value: Any) -> float | None:
+    """WS liquidation score: short_notional / total in [0, 1]. None if missing/invalid.
+
+    Rejects the legacy -1.0 sentinel and [-1, +1] convention leakage (T1/A1).
+    """
+    parsed = _normalized_float(value)
+    if parsed is None or parsed < 0.0 or parsed > 1.0:
+        return None
+    return parsed
+
+
+def normalize_funding_fraction(value: Any) -> float | None:
+    """Normalize funding to fraction (0.0008 = 0.08%). Accepts percent or fraction."""
+    parsed = _normalized_float(value)
+    if parsed is None:
+        return None
+    if abs(parsed) > 0.05:
+        return parsed / 100.0
+    return parsed
+
+
+def worst_entry_edge(setup: Mapping[str, Any], *, direction: str) -> float | None:
+    """Worst-case fill edge for R:R (short → entry high, long → entry low)."""
+    ez = setup.get("entry_zone")
+    try:
+        if isinstance(ez, (list, tuple)) and len(ez) >= 2:
+            lo = float(ez[0])
+            hi = float(ez[1])
+            if direction == "short":
+                return hi if hi > 0 else None
+            return lo if lo > 0 else None
+    except (TypeError, ValueError, IndexError):
+        pass
+    return None
+
+
+def stamp_market_field_provenance(
+    market: dict[str, Any],
+    field: str,
+    *,
+    source: str,
+    age_seconds: float | None = None,
+) -> None:
+    """Attach source + age for a populated market derivative (Phase 2 / #45)."""
+    if not isinstance(market, dict) or market.get(field) is None:
+        return
+    prov = market.setdefault("_provenance", {})
+    if not isinstance(prov, dict):
+        prov = {}
+        market["_provenance"] = prov
+    entry: dict[str, Any] = {"source": source, "value": market.get(field)}
+    if age_seconds is not None:
+        entry["age_seconds"] = round(float(age_seconds), 1)
+        market[f"{field}_age_seconds"] = entry["age_seconds"]
+    prov[field] = entry
+
+
+def stamp_market_derivatives_provenance(market: dict[str, Any]) -> None:
+    """Batch #45: stamp known derivative fields from market dict metadata."""
+    if not isinstance(market, dict):
+        return
+    for field in (
+        "funding_rate",
+        "open_interest",
+        "oi_z",
+        "gls_z",
+        "long_short_ratio",
+        "taker_buy_ratio",
+        "cvd_px",
+        "liquidation_score",
+    ):
+        if market.get(field) is None:
+            continue
+        age = market.get(f"{field}_age_seconds")
+        src = str(market.get(f"{field}_source") or market.get("_source") or "enrich")
+        stamp_market_field_provenance(
+            market,
+            field,
+            source=src,
+            age_seconds=float(age) if age is not None else None,
+        )
+
+
+def record_data_quality_violation(
+    row: dict[str, Any],
+    field: str,
+    *,
+    reason: str,
+) -> None:
+    """#43 fail-loud: mark hot-path field as missing instead of silent fill_0."""
+    dq = row.setdefault("data_quality", {})
+    if not isinstance(dq, dict):
+        dq = {}
+        row["data_quality"] = dq
+    violations = dq.setdefault("violations", [])
+    if not isinstance(violations, list):
+        violations = []
+        dq["violations"] = violations
+    violations.append({"field": field, "reason": reason})
+    row[field] = None
+
+
+def compute_setup_ev(
+    evidence: Mapping[str, Any],
+    levels_dict: Mapping[str, Any],
+    *,
+    direction: str,
+    structure: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Phase 3B EV: P from catalog evidence + worst_entry_edge geometry."""
+    norm_dir = normalize_direction(direction)
+    if norm_dir is None:
+        return {"ev": None, "p_win": None, "reason": "invalid_direction"}
+    setup = dict(levels_dict)
+    p = _normalized_float(evidence.get("p_win") or evidence.get("probability"))
+    if p is None:
+        strength = _normalized_float(evidence.get("strength"))
+        if strength is not None:
+            p = min(0.85, max(0.15, 0.35 + strength * 0.45))
+    entry = worst_entry_edge(setup, direction=norm_dir)
+    sl = _normalized_float(setup.get("stop_loss"))
+    tp1 = _normalized_float(setup.get("tp1"))
+    if p is None or entry is None or sl is None or tp1 is None:
+        return {"ev": None, "p_win": p, "reason": "incomplete_levels"}
+    if norm_dir == "short":
+        risk = sl - entry
+        reward = entry - tp1
+    else:
+        risk = entry - sl
+        reward = tp1 - entry
+    if risk <= RISK_REWARD_EPSILON or reward <= 0:
+        return {"ev": None, "p_win": round(p, 3), "reason": "degenerate_geometry"}
+    struct = structure if isinstance(structure, dict) else {}
+    if struct.get("at_level"):
+        p = min(0.85, p + 0.05)
+    if struct.get("choch_detected"):
+        p = min(0.85, p + 0.04)
+    sb = str(struct.get("structure_bias") or "")
+    if (norm_dir == "short" and sb == "short") or (norm_dir == "long" and sb == "long"):
+        p = min(0.85, p + 0.03)
+    p = min(0.85, max(0.15, p))
+    ev = round(p * reward - (1.0 - p) * risk, 6)
+    return {
+        "ev": ev,
+        "p_win": round(p, 3),
+        "reward": reward,
+        "risk": risk,
+        "rr": round(reward / risk, 2),
+        "setup_id": evidence.get("setup_id"),
+    }
+
+
+def compute_rule_based_ev(
+    setup: Mapping[str, Any],
+    *,
+    direction: str,
+    structure: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Phase 6 shadow EV: P from structure+ignition+RR geometry (no ML)."""
+    from hunt_core.contract import compute_setup_risk_reward, worst_entry_edge
+
+    rr = compute_setup_risk_reward(setup, direction=direction)
+    entry = worst_entry_edge(setup, direction=direction)
+    sl = _normalized_float(setup.get("stop_loss"))
+    tp1 = _normalized_float(setup.get("tp1"))
+    if rr is None or entry is None or sl is None or tp1 is None:
+        return {"ev": None, "p_win": None, "reason": "incomplete_levels"}
+    risk = abs(sl - entry) if direction == "short" else abs(entry - sl)
+    reward = abs(entry - tp1) if direction == "short" else abs(tp1 - entry)
+    if risk <= 0 or reward <= 0:
+        return {"ev": None, "p_win": None, "reason": "degenerate_geometry"}
+    struct = structure if isinstance(structure, dict) else {}
+    p = 0.45
+    if struct.get("at_level"):
+        p += 0.08
+    if struct.get("choch_detected"):
+        p += 0.10
+    sb = str(struct.get("structure_bias") or "")
+    if (direction == "short" and sb == "short") or (direction == "long" and sb == "long"):
+        p += 0.07
+    ign = _normalized_float(setup.get("ignition_score"))
+    if ign is not None:
+        p += min(0.15, ign / 100.0 * 0.15)
+    p = min(0.85, max(0.15, p))
+    ev = round(p * reward - (1.0 - p) * risk, 6)
+    return {"ev": ev, "p_win": round(p, 3), "reward": reward, "risk": risk, "rr": rr}
+
+
+def compute_setup_risk_reward(setup: Mapping[str, Any], *, direction: str) -> float | None:
+    """Measured R:R from latched entry edge, SL, and TP1."""
+    stored = _normalized_float(setup.get("risk_reward"))
+    entry = worst_entry_edge(setup, direction=direction)
+    sl = _normalized_float(setup.get("stop_loss"))
+    tp1 = _normalized_float(setup.get("tp1"))
+    if entry is None or sl is None or tp1 is None or entry <= 0:
+        return stored
+    if direction == "short":
+        risk = sl - entry
+        reward = entry - tp1
+    else:
+        risk = entry - sl
+        reward = tp1 - entry
+    if risk <= RISK_REWARD_EPSILON or reward <= 0:
+        return stored
+    return round(reward / risk, 2)
+
+
 def _normalized_bool(value: Any, *, default: bool | None = None) -> bool | None:
     if value is None:
         return default
@@ -993,6 +1252,7 @@ def build_public_feature_snapshot(prepared: Any) -> dict[str, Any]:
             return None
         return fast_value > slow_value
 
+    work_1m = getattr(prepared, "work_1m", None)
     work_15m = getattr(prepared, "work_15m", None)
     work_1h = getattr(prepared, "work_1h", None)
     work_4h = getattr(prepared, "work_4h", None)
@@ -1029,7 +1289,9 @@ def build_public_feature_snapshot(prepared: Any) -> dict[str, Any]:
     features["top_vs_global_ls_gap"] = _normalized_float(
         getattr(prepared, "top_vs_global_ls_gap", None)
     )
-    features["liquidation_score"] = _normalized_float(getattr(prepared, "liquidation_score", None))
+    features["liquidation_score"] = parse_liquidation_score(
+        getattr(prepared, "liquidation_score", None)
+    )
     features["mark_index_spread_bps"] = _normalized_float(
         getattr(prepared, "mark_index_spread_bps", None)
     )
@@ -1075,6 +1337,21 @@ def build_public_feature_snapshot(prepared: Any) -> dict[str, Any]:
         features["liquidation_cascade_5m"] = None
     else:
         features["liquidation_cascade_5m"] = bool(cascade)
+
+    cusum = _frame_value(work_1m, "taker_imbalance_cusum")
+    if cusum is None:
+        cusum = _frame_value(work_15m, "taker_imbalance_cusum")
+    features["taker_imbalance_cusum"] = cusum
+
+    market_ctx = getattr(prepared, "market_ctx", None) or {}
+    if not isinstance(market_ctx, dict):
+        market_ctx = {}
+    features["agg_trade_buy_ratio_60s"] = _normalized_float(
+        getattr(prepared, "agg_trade_buy_ratio_60s", None) or market_ctx.get("agg_trade_buy_ratio_60s")
+    )
+    features["agg_trade_buy_ratio_30s"] = _normalized_float(
+        getattr(prepared, "agg_trade_buy_ratio_30s", None) or market_ctx.get("agg_trade_buy_ratio_30s")
+    )
 
     return normalize_public_feature_payload(features)
 

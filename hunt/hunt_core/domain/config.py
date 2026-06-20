@@ -13,7 +13,10 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from hunt_core.secrets import load_secrets, parse_operator_user_ids
-from hunt_core.setups.catalog import HUNT_SETUP_IDS
+
+# Strategy catalog removed with the legacy detection stack; the fusion engine has no
+# per-strategy setup ids. Empty so config validation accepts no [setups.*] entries.
+HUNT_SETUP_IDS: tuple[str, ...] = ()
 
 REQUIRED_PINNED_SYMBOLS: tuple[str, ...] = (
     "BTCUSDT",
@@ -150,6 +153,8 @@ class HuntSettings(_StrictModel):
     delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
     notifiers: NotifierConfig = Field(default_factory=NotifierConfig)
     assets: dict[str, AssetConfig] = Field(default_factory=dict)
+    # Maps runtime config is loaded via hunt_core.maps.config.load_maps_config()
+    # (full 18-field TOML [maps] + HUNT_MAPS_* env), the single source of truth.
 
     @property
     def telemetry_dir(self) -> Path:
@@ -213,11 +218,25 @@ def _load_toml(path: Path) -> dict[str, Any]:
 
 
 def _resolve_config_source(config_file: Path) -> Path:
-    if config_file.exists():
+    name = config_file.name if config_file.name else "config.toml"
+    if config_file.is_file():
         return config_file
+    # watch.sh cwd is hunt/ — canonical config lives at repo root.
+    for base in (Path.cwd(), *Path.cwd().parents):
+        candidate = base / name
+        if candidate.is_file():
+            return candidate
+        if base == base.parent:
+            break
     example = config_file.with_name("config.toml.example")
-    if example.exists():
+    if example.is_file():
         return example
+    for base in (Path.cwd(), *Path.cwd().parents):
+        candidate = base / "config.toml.example"
+        if candidate.is_file():
+            return candidate
+        if base == base.parent:
+            break
     return config_file
 
 
@@ -391,7 +410,7 @@ def load_config_defaults_toml() -> dict[str, Any]:
         if lc_block:
             out["lifecycle"] = lc_block
 
-    for section in ("collect", "scoring", "tracker"):
+    for section in ("collect", "scoring", "tracker", "delivery"):
         block = raw.get(section)
         if isinstance(block, dict):
             out[section] = {k: v for k, v in block.items() if v is not None}

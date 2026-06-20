@@ -7,6 +7,7 @@ from __future__ import annotations
 
 
 import math
+import time
 from dataclasses import dataclass, field
 import logging
 from typing import Any
@@ -150,6 +151,34 @@ REQUIRED_REST_SCALAR_KEYS: tuple[str, ...] = (
 )
 
 REQUIRED_BOOK_KEYS: tuple[str, ...] = ("bid_price", "ask_price", "bid_qty", "ask_qty")
+
+# Minimum market derivatives for hot-lane delivery (fast / hot snapshot tiers).
+DELIVERY_MARKET_KEYS_FAST: tuple[str, ...] = (
+    "oi",
+    "oi_chg_1h",
+    "funding",
+    "taker_5m",
+    "taker_1h",
+    "top_ls_5m",
+    "global_ls_5m",
+    "oi_z",
+    "gls_z",
+    "basis_5m",
+)
+
+DELIVERY_MARKET_KEYS_FULL: tuple[str, ...] = DELIVERY_MARKET_KEYS_FAST + (
+    "oi_chg_5m",
+    "ls_1h",
+    "basis_5m",
+    "oi_z",
+    "gls_z",
+)
+
+_DELIVERY_KEY_ALIASES: dict[str, tuple[str, ...]] = {
+    "funding": ("funding", "funding_rate", "live_funding_rate", "funding_live"),
+    "basis_5m": ("basis_5m", "basis_pct", "basis_bps"),
+    "ls_1h": ("ls_1h", "global_ls_1h"),
+}
 
 MIN_SERIES_LEN = 12
 GAP_CHECK_TAIL = 80
@@ -773,6 +802,89 @@ async def repair_kline_map_gaps(
                 len(remaining),
             )
     return kline_map, errors
+
+
+
+
+def _delivery_keys_for_tier(tier: str) -> tuple[str, ...]:
+    if tier in ("fast", "hot"):
+        return DELIVERY_MARKET_KEYS_FAST
+    return DELIVERY_MARKET_KEYS_FULL
+
+
+def _market_derivative_value(market: dict[str, Any], key: str) -> Any:
+    for alias in _DELIVERY_KEY_ALIASES.get(key, (key,)):
+        if alias in market:
+            return market.get(alias)
+    return None
+
+
+def _market_derivative_finite(market: dict[str, Any], key: str) -> bool:
+    val = _market_derivative_value(market, key)
+    if val is None:
+        return False
+    try:
+        return math.isfinite(float(val))
+    except (TypeError, ValueError):
+        return False
+
+
+def audit_market_derivatives(market: dict[str, Any], *, tier: str) -> list[str]:
+    """Return violation strings for missing/non-finite delivery derivative fields."""
+    violations: list[str] = []
+    if not isinstance(market, dict):
+        return ["market.missing_block"]
+
+    for key in _delivery_keys_for_tier(tier):
+        if not _market_derivative_finite(market, key):
+            violations.append(f"market.{key}=missing_or_invalid")
+    return violations
+
+
+def delivery_derivatives_complete(row: dict[str, Any], *, tier: str) -> tuple[bool, list[str]]:
+    market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    violations = audit_market_derivatives(market, tier=tier)
+    return (not violations, violations)
+
+
+def stamp_market_freshness(
+    market: dict[str, Any],
+    ws_snap: dict[str, Any] | None,
+    pack: dict[str, Any] | None,
+) -> None:
+    """Attach per-field age seconds when WS last-message age is known."""
+    if not isinstance(market, dict):
+        return
+
+    ws_age: float | None = None
+    if isinstance(ws_snap, dict):
+        raw = ws_snap.get("ws_last_msg_age_s")
+        if raw is not None:
+            try:
+                ws_age = round(float(raw), 1)
+            except (TypeError, ValueError):
+                ws_age = None
+
+    if ws_age is not None:
+        market["ws_last_msg_age_s"] = ws_age
+        for key in DELIVERY_MARKET_KEYS_FULL:
+            if _market_derivative_finite(market, key):
+                market[f"{key}_age_seconds"] = ws_age
+
+    if not isinstance(pack, dict):
+        return
+    for key, fetched_at in pack.items():
+        if not key.endswith("_fetched_at"):
+            continue
+        base = key[: -len("_fetched_at")]
+        if base not in DELIVERY_MARKET_KEYS_FULL:
+            continue
+        try:
+            age_s = max(0.0, time.monotonic() - float(fetched_at))
+        except (TypeError, ValueError):
+            continue
+        if _market_derivative_finite(market, base) and f"{base}_age_seconds" not in market:
+            market[f"{base}_age_seconds"] = round(age_s, 1)
 
 
 def series_z_strict(values: list[float], *, field: str) -> float:

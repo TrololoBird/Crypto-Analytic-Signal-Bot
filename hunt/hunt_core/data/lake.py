@@ -21,17 +21,18 @@ _cooldown_flush: tuple[dict[str, str], Path] | None = None
 
 
 def buffer_tick_rows(rows: list[dict[str, Any]]) -> None:
+    from hunt_core.runtime.tick_jsonl import serialize_tick_row
+
     for row in rows:
-        _tick_lines.append(json.dumps(row, default=str))
+        _tick_lines.append(serialize_tick_row(row))
 
 
 def flush_tick_buffer() -> int:
     if not _tick_lines:
         return 0
-    TICK_JSONL.parent.mkdir(parents=True, exist_ok=True)
-    with TICK_JSONL.open("a", encoding="utf-8") as fh:
-        for line in _tick_lines:
-            fh.write(line + "\n")
+    from hunt_core.data.jsonl_io import append_jsonl_lines
+
+    append_jsonl_lines(TICK_JSONL, list(_tick_lines))
     n = len(_tick_lines)
     _tick_lines.clear()
     return n
@@ -69,7 +70,20 @@ def flush_cooldown_state() -> bool:
     return True
 
 
+
+_MAP_LAKE_PATH = LAKE_PARQUET.parent / "maps" / "snapshots.jsonl"
+
+
+def flush_map_lake() -> int:
+    """Flush MapTimeSeriesStore ring-buffer snapshots to JSONL lake."""
+    try:
+        from hunt_core.maps.engine import get_map_store
+        return get_map_store().flush_lake(_MAP_LAKE_PATH)
+    except Exception:
+        return 0
+
 def flush_lake() -> None:
+    flush_map_lake()
     flush_tick_buffer()
     flush_tracker_state()
     flush_cooldown_state()
@@ -142,7 +156,9 @@ def get_feature_lake_writer() -> FeatureLakeWriter:
 
 
 def serialize_tick_row(row: dict[str, Any]) -> str:
-    return json.dumps(row, default=str)
+    from hunt_core.runtime.tick_jsonl import serialize_tick_row as _serialize
+
+    return _serialize(row)
 
 
 def append_tick_rows(rows: list[dict[str, Any]]) -> int:

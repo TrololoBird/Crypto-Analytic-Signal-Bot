@@ -70,7 +70,11 @@ _BINANCE_KLINE_MAX = 1500
 def kline_fetch_limit(configured_min_bars: int, timeframe: str) -> int:
     """Bars to request from REST/WS so prepare survives warmup trimming."""
     baseline = _KLINE_FETCH_BASELINE.get(timeframe, 240)
-    required = max(baseline, int(configured_min_bars) + _KLINE_FETCH_BUFFER_BARS)
+    warmup = _PREPARED_FRAME_WARMUP_RESERVE.get(timeframe, 120)
+    required = max(
+        baseline,
+        int(configured_min_bars) + warmup + _KLINE_FETCH_BUFFER_BARS,
+    )
     return min(_BINANCE_KLINE_MAX, required)
 
 
@@ -85,10 +89,15 @@ def configured_frame_minimums(settings: BotSettings) -> dict[str, int]:
 
 
 def raw_frame_minimums(settings: BotSettings) -> dict[str, int]:
-    """Minimum raw kline rows before prepare (with REST shortfall tolerance)."""
+    """Minimum raw kline rows before prepare (warmup reserve + REST shortfall tolerance)."""
     configured = configured_frame_minimums(settings)
     return {
-        tf: max(30, int(min_bars) - _RAW_FRAME_ROW_TOLERANCE.get(tf, 2))
+        tf: max(
+            30,
+            int(min_bars)
+            + _PREPARED_FRAME_WARMUP_RESERVE.get(tf, 120)
+            - _RAW_FRAME_ROW_TOLERANCE.get(tf, 2),
+        )
         for tf, min_bars in configured.items()
     }
 

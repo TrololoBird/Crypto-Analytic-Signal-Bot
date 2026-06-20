@@ -194,6 +194,37 @@ def ccxt_ws_method_available(exchange: Any, method: str) -> bool:
     return callable(getattr(exchange, snake, None))
 
 
+def exchange_funding_ws_capable(exchange_id: str) -> bool:
+    """True when Hunt venue matrix + CCXT both allow Pro ``watchFundingRates``."""
+    from hunt_core.market.cross import VENUE_FUNDING_WS
+
+    if exchange_id not in VENUE_FUNDING_WS:
+        return False
+    import ccxt.pro as ccxtpro
+
+    cls = getattr(ccxtpro, exchange_id, None)
+    if cls is None:
+        return False
+    ex = cls({"options": {"defaultType": "swap"}})
+    return ccxt_ws_method_available(ex, "watchFundingRates")
+
+
+def liquidation_ws_mode(exchange: Any) -> str:
+    """How to subscribe to liquidation WS on this CCXT Pro exchange.
+
+    Returns ``mux`` | ``per_symbol`` | ``skip``.
+
+    ``has[watchLiquidations]=True`` means the method exists — **not** that it
+    accepts a no-arg all-market call. Bybit/OKX require ``watch_liquidations(symbol)``.
+    Only ``watchLiquidationsForSymbols`` is a true multiplex stream.
+    """
+    if ccxt_ws_method_available(exchange, "watchLiquidationsForSymbols"):
+        return "mux"
+    if ccxt_ws_method_available(exchange, "watchLiquidations"):
+        return "per_symbol"
+    return "skip"
+
+
 def is_ccxt_ip_ban(exc: BaseException) -> bool:
     return CcxtGuard().classify(exc) == "ip_ban"
 
@@ -217,6 +248,7 @@ def ccxt_error_summary(exc: BaseException) -> dict[str, Any]:
 __all__ = [
     "ccxt_method_available",
     "ccxt_ws_method_available",
+    "liquidation_ws_mode",
     "CCXT_RATE_LIMIT_EXC",
     "CCXT_TRANSPORT_EXC",
     "BanKind",

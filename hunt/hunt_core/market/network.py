@@ -375,9 +375,25 @@ _LOCAL_CANDIDATES = (
     "http://127.0.0.1:8080",
 )
 _PROBE_TIMEOUT = aiohttp.ClientTimeout(total=12.0, connect=8.0)
-_PROBE_CONCURRENCY = 20
+_PROBE_CONCURRENCY = 12
+_CCXT_PROBE_TIMEOUT_MS = 12_000
+_CCXT_PROBE_LOAD_S = 14.0
+_AUTO_DISCOVER_CAP_S = 120.0
+_MAX_PUBLIC_CANDIDATES = 800
 _MIN_SYMBOLS = 100
 _MAX_WORKING = 12
+# CCXT load_markets screen before bulk public-proxy discovery.
+_SCREEN_CONCURRENCY = 80
+_SCREEN_KEEP = 24
+
+
+async def _quick_proxy_screen(url: str, sem: asyncio.Semaphore) -> str | None:
+    """Reachability screen via CCXT load_markets — same transport as hunt REST."""
+    async with sem:
+        try:
+            return url if await _probe_ccxt_markets(url) else None
+        except Exception:
+            return None
 
 
 async def filter_working_proxies(urls: list[str]) -> list[str]:
@@ -389,9 +405,13 @@ async def _probe_ccxt_markets(proxy_url: str | None) -> bool:
     """Probe via CCXT — same transport as hunt market plane."""
     from hunt_core.market.factory import close_exchange_async, create_async_binance_future
 
-    ex = create_async_binance_future(proxy_url=proxy_url, trust_env=False)
+    ex = create_async_binance_future(
+        proxy_url=proxy_url,
+        trust_env=False,
+        timeout_ms=_CCXT_PROBE_TIMEOUT_MS,
+    )
     try:
-        await ex.load_markets()
+        await asyncio.wait_for(ex.load_markets(), timeout=_CCXT_PROBE_LOAD_S)
         ok = len(ex.markets) > _MIN_SYMBOLS
         if ok:
             LOG.info(
@@ -400,6 +420,12 @@ async def _probe_ccxt_markets(proxy_url: str | None) -> bool:
                 len(ex.markets),
             )
         return ok
+    except (TimeoutError, asyncio.TimeoutError):
+        LOG.debug(
+            "hunt proxy ccxt timeout | url=%s",
+            mask_proxy_url(proxy_url or "direct"),
+        )
+        return False
     except Exception as exc:
         LOG.debug(
             "hunt proxy ccxt fail | url=%s err=%s",
@@ -432,7 +458,17 @@ async def probe_ccxt_direct() -> bool:
 
 async def auto_discover_proxies(*, include_public: bool = False) -> list[str]:
     """Return working proxy URLs for hunt CCXT plane."""
+    try:
+        return await asyncio.wait_for(
+            _auto_discover_proxies_impl(include_public=include_public),
+            timeout=_AUTO_DISCOVER_CAP_S,
+        )
+    except TimeoutError:
+        LOG.warning("hunt_proxy_auto_discover_timeout | cap_s=%.0f", _AUTO_DISCOVER_CAP_S)
+        return []
 
+
+async def _auto_discover_proxies_impl(*, include_public: bool = False) -> list[str]:
     working: list[str] = []
 
     if await _probe_ccxt_markets(None):
@@ -453,57 +489,65 @@ async def auto_discover_proxies(*, include_public: bool = False) -> list[str]:
     if not include_public:
         return working
 
-    candidates = await _fetch_public_candidates()
-    sem = asyncio.Semaphore(_PROBE_CONCURRENCY)
+    raw_candidates = await _fetch_public_candidates()
+    if not raw_candidates:
+        return working
 
-    async def _one(url: str) -> str | None:
-        async with sem:
-            if await _probe_ccxt_markets(url):
-                return url
-        return None
+    # CCXT load_markets screen on public proxy candidates (canonical hunt transport).
+    screen_sem = asyncio.Semaphore(_SCREEN_CONCURRENCY)
+    screened = await asyncio.gather(
+        *[_quick_proxy_screen(u, screen_sem) for u in raw_candidates]
+    )
+    survivors = [u for u in screened if u][:_SCREEN_KEEP]
+    LOG.info(
+        "hunt proxy screen | candidates=%d reachable=%d",
+        len(raw_candidates),
+        len(survivors),
+    )
 
-    results = await asyncio.gather(*[_one(url) for url in candidates])
-    for url in results:
-        if url and url not in working:
+    for url in survivors:
+        if url not in working:
             working.append(url)
         if len(working) >= _MAX_WORKING:
             break
     return working
 
 
+# Free public proxy lists (github raw — no auth). (url, default_scheme). Many sources so a
+# usable subset survives the Binance reachability screen even though most entries are dead.
+_PUBLIC_PROXY_SOURCES: tuple[tuple[str, str], ...] = (
+    ("https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt", "socks5"),
+    ("https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt", "http"),
+    ("https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt", "socks5"),
+    ("https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt", "socks4"),
+    ("https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt", "http"),
+    ("https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt", "socks5"),
+    ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt", "socks5"),
+    ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt", "http"),
+    ("https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-socks5.txt", "socks5"),
+)
+
+
 async def _fetch_public_candidates() -> list[str]:
-    list_urls = (
-        "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt",
-        "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt",
-    )
     merged: list[str] = []
+    seen: set[str] = set()
     async with aiohttp.ClientSession(timeout=_PROBE_TIMEOUT) as session:
-        for url in list_urls:
+        for url, default_scheme in _PUBLIC_PROXY_SOURCES:
             try:
                 async with session.get(url) as resp:
                     if resp.status != 200:
                         continue
                     text = await resp.text()
-                    scheme = "socks5" if "socks5" in url else "http"
-                    for item in _parse_host_port_lines(text):
-                        if not item.startswith("http"):
-                            merged.append(
-                                f"{scheme}://{item.split('://', 1)[-1]}"
-                                if "://" not in item
-                                else item
-                            )
-                        else:
-                            merged.append(item)
             except Exception:
                 continue
-    deduped: list[str] = []
-    for item in merged:
-        if item not in deduped:
-            deduped.append(item)
-    return deduped[:200]
+            for item in _parse_host_port_lines(text, default_scheme=default_scheme):
+                if item not in seen:
+                    seen.add(item)
+                    merged.append(item)
+    return merged[:_MAX_PUBLIC_CANDIDATES]
 
 
-def _parse_host_port_lines(text: str) -> list[str]:
+def _parse_host_port_lines(text: str, *, default_scheme: str = "socks5") -> list[str]:
     out: list[str] = []
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
@@ -513,14 +557,18 @@ def _parse_host_port_lines(text: str) -> list[str]:
             out.append(normalize_proxy_url(stripped))
             continue
         if re.match(r"^\d{1,3}(\.\d{1,3}){3}:\d+$", stripped):
-            host, port = stripped.rsplit(":", 1)
-            scheme = "socks5" if int(port) not in {80, 8080, 3128, 8888} else "http"
-            out.append(f"{scheme}://{host}:{port}")
+            # Trust the source's known protocol (lists are protocol-specific).
+            out.append(f"{default_scheme}://{stripped}")
     return out
 
 
 def write_proxies_to_config(path: Path, urls: list[str], *, direct_ok: bool = False) -> None:
-    """Update ``[bot.network]`` in config.toml with discovered proxies."""
+    """Update ``[bot.network]`` in config.toml with discovered proxies.
+
+    HuntSettings roots config under the top-level ``[bot]`` table
+    (``load_settings``: ``bot_raw = parsed.get("bot")``), so the canonical section
+    read back is ``[bot.network]`` → ``proxy_url`` / ``proxy_urls``.
+    """
     text = path.read_text(encoding="utf-8")
     block = _render_network_block(urls, direct_ok=direct_ok)
     pattern = re.compile(r"(?:#[^\n]*\n)*\[bot\.network\].*?(?=\n\[|\Z)", re.DOTALL)

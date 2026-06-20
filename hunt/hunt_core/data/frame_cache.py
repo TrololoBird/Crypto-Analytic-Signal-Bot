@@ -66,13 +66,26 @@ class SymbolFrameCache:
             for k, v in row.items()
             if k not in {"_prepared", "dump", "long", "lifecycle", "factor_panel"}
         }
-        self._carry[symbol.upper()] = RowCarrySnapshot(row=slim)
+        sym = symbol.upper()
+        enrich = self._enrichment.get(sym)
+        if enrich is not None and enrich.fresh() and isinstance(slim.get("market"), dict):
+            pack = enrich.pack
+            market = dict(slim["market"])
+            for key in ("oi_series", "gls_series", "oi_z", "gls_z", "oi_chg_5m", "oi_chg_1h"):
+                if pack.get(key) is not None and market.get(key) is None:
+                    market[key] = pack[key]
+            slim["market"] = market
+        self._carry[sym] = RowCarrySnapshot(row=slim)
 
     def get_carry_row(self, symbol: str) -> dict[str, Any] | None:
         snap = self._carry.get(symbol.upper())
         if snap is None or not snap.fresh():
             return None
         return dict(snap.row)
+
+    def get_kline_frame(self, symbol: str, interval: str) -> Any | None:
+        """WS/bootstrap OHLCV fallback when REST fetch fails on hot path."""
+        return (self._frames.get(symbol.upper()) or {}).get(str(interval))
 
     def has_carry_ready(self, symbol: str) -> bool:
         return self.has_delta_ready(symbol) and self.get_carry_row(symbol) is not None

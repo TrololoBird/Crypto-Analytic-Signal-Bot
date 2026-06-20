@@ -19,11 +19,6 @@ from typing import Any, Literal
 
 import polars as pl
 
-from hunt_core.scan.early import (
-    early_cooldown_ok,
-    evaluate_early_alert,
-    mark_early_sent,
-)
 from hunt_core.params.store import prep_shadow_thresholds, stats_thresholds
 from hunt_core.paths import PREP_SHADOW_EVENTS, PREP_SHADOW_STATE
 
@@ -69,9 +64,9 @@ def _append_event(event: str, *, shadow: dict[str, Any], extra: dict[str, Any] |
         "tier": shadow.get("tier"),
         "payload": {**(extra or {}), "paper_pnl_pct": shadow.get("paper_pnl_pct", 0.0)},
     }
-    PREP_SHADOW_EVENTS.parent.mkdir(parents=True, exist_ok=True)
-    with PREP_SHADOW_EVENTS.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(row, default=str) + "\n")
+    from hunt_core.track.events import _append_jsonl_line
+
+    _append_jsonl_line(PREP_SHADOW_EVENTS, json.dumps(row, default=str) + "\n")
 
 
 def _pnl_pct(direction: str, entry: float, exit_px: float) -> float:
@@ -276,74 +271,6 @@ def _open_shadow(
     return shadow
 
 
-def process_prep_shadow(
-    state: dict[str, Any],
-    *,
-    symbol: str,
-    direction: str,
-    setup: dict[str, Any],
-    row: dict[str, Any],
-    lifecycle: Any | None,
-    now: datetime | None = None,
-) -> list[dict[str, Any]]:
-    """Update open shadows and maybe record a new prep/imminent/start event."""
-    cfg = prep_shadow_thresholds()
-    if not cfg.get("enabled", True):
-        return []
-
-    ts = now or datetime.now(UTC)
-    sym = symbol.upper()
-    price = float(row.get("price") or 0)
-    if price <= 0 or not setup:
-        return []
-
-    lc = lifecycle if isinstance(lifecycle, dict) else {}
-    closed_events: list[dict[str, Any]] = []
-    key = _active_key(sym, direction)
-    active = state.setdefault("active", {})
-    cooldowns = state.setdefault("cooldowns", {})
-
-    cur = active.get(key)
-    if cur and cur.get("status") == "active":
-        reason = _update_active_shadow(cur, price=price, row=row, setup=setup, now=ts)
-        if reason:
-            closed_events.append(
-                _close_shadow(state, cur, reason=reason, exit_price=price, now=ts)
-            )
-
-    alert = evaluate_early_alert(
-        setup,
-        direction=direction,
-        symbol=sym,
-        lifecycle=lc,
-        row=row,
-    )
-    if alert.kind in ("none", "confirm"):
-        return closed_events
-    if not early_cooldown_ok(sym, direction, alert.tier, cooldowns, now=ts):
-        return closed_events
-
-    min_tier_rank = ("prep", "imminent", "start").index(str(cfg.get("min_tier", "prep")))
-    tier_rank = ("prep", "imminent", "start").index(alert.tier) if alert.tier in ("prep", "imminent", "start") else 0
-    if tier_rank < min_tier_rank:
-        return closed_events
-
-    mark_early_sent(sym, direction, alert.tier, cooldowns, now=ts)
-    opened = _open_shadow(
-        state,
-        symbol=sym,
-        direction=direction,
-        tier=alert.tier,
-        setup=setup,
-        row=row,
-        lifecycle=lc,
-        alert_message=alert.message,
-        now=ts,
-    )
-    closed_events.append(opened)
-    return closed_events
-
-
 @dataclass(frozen=True, slots=True)
 class PrepShadowSummary:
     n_closed: int
@@ -491,25 +418,3 @@ def format_prep_shadow_html(summary: PrepShadowSummary | None = None) -> str:
 
 def format_prep_shadow_text(summary: PrepShadowSummary | None = None) -> str:
     return format_prep_shadow_html(summary).replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", "").replace("<i>", "").replace("</i>", "")
-
-
-def prep_shadow_delivery_fuel_adjustment(
-    state: dict[str, Any] | None = None,
-) -> tuple[float, str | None]:
-    """Rolling prep-shadow WR → tighten/relax delivery min_fuel (target 70% WR)."""
-    cfg = prep_shadow_thresholds()
-    min_n = int(cfg.get("delivery_min_samples", 8))
-    wr_floor = float(cfg.get("delivery_wr_floor_pct", 50.0))
-    wr_relax = float(cfg.get("delivery_wr_relax_pct", 62.0))
-    bump = float(cfg.get("delivery_fuel_bump", 3.0))
-    relax = float(cfg.get("delivery_fuel_relax", 1.0))
-
-    summary = summarize_prep_shadows(state)
-    if summary.n_closed < min_n or summary.direction_wr is None:
-        return 0.0, None
-    wr = float(summary.direction_wr)
-    if wr < wr_floor:
-        return bump, f"prep shadow WR {wr:.0f}% < {wr_floor:.0f}% (n={summary.n_closed})"
-    if wr >= wr_relax:
-        return -relax, f"prep shadow WR {wr:.0f}% ≥ {wr_relax:.0f}% — relax"
-    return 0.0, None

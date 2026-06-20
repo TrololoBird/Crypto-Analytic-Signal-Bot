@@ -29,10 +29,13 @@ def build_confluence_grid(row: dict[str, Any]) -> list[dict[str, Any]]:
 def format_grid_telegram(grid: list[dict[str, Any]]) -> str:
     if not grid:
         return ""
-    lines = ["<b>Level map</b>"]
+    from hunt_core.deliver._labels import fmt_price  # noqa: PLC0415
+
+    lines = ["<b>Level map</b> <i>(POC/structure · не стакан и не ликвидации)</i>"]
     for g in grid[:6]:
         tf = g.get("tf", "?")
-        parts = [f"{k}={g[k]}" for k in ("poc", "support", "resistance", "vah", "val") if g.get(k)]
+        # fmt_price avoids float noise like poc=0.42266075000000003 (MLIVE-9).
+        parts = [f"{k}={fmt_price(g[k])}" for k in ("poc", "support", "resistance", "vah", "val") if g.get(k)]
         lines.append(f"· {tf}: " + ", ".join(parts[:4]))
     return "\n".join(lines)
 

@@ -15,10 +15,19 @@ from typing import Any
 
 from hunt_core.deliver.telegram import TelegramBroadcaster
 
-from hunt_core.analysis.deep_signal import (
-    build_poc_level_scenarios,
-    format_poc_level_scenarios_telegram,
-)
+# Legacy POC-scenario + strategy-catalog detection removed; report degrades gracefully.
+def build_poc_level_scenarios(*_a, **_k) -> None: return None
+def format_poc_level_scenarios_telegram(*_a, **_k) -> str: return ""
+
+
+class SetupEvidence:  # inert placeholder for type references
+    pass
+
+
+def resolve_catalog_regime(*_a, **_k) -> str: return "neutral"
+def run_setup_catalog(*_a, **_k) -> list: return []
+
+
 from hunt_core.data.universe import load_watchlist_symbols
 from hunt_core.track.candidates import load_setup_candidates_state
 from hunt_core.gate.delivery import (
@@ -29,8 +38,6 @@ from hunt_core.gate.delivery import (
 )
 from hunt_core.paths import WATCHLIST
 from hunt_core.runtime.symbol_probe import normalize_symbol, probe_symbol_signal
-from hunt_core.setups.catalog import SetupEvidence
-from hunt_core.setups.catalog import resolve_catalog_regime, run_setup_catalog
 from hunt_core.track.tracker import load_tracker_state
 
 _PROBE_RETRIES = 3

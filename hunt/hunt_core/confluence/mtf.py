@@ -206,7 +206,10 @@ def build_mtf_confluence(
         if liq_pack is None and (row.get("market") or market):
             liq_pack = build_liquidity_scenarios({**row, "market": market or row.get("market")})
     if liq_pack is not None:
-        ls, ss, notes = apply_liquidity_to_mtf_scores(long_s.score, short_s.score, liq_pack)
+        mkt = market or row.get("market") if row else market
+        ls, ss, notes = apply_liquidity_to_mtf_scores(
+            long_s.score, short_s.score, liq_pack, market=mkt if isinstance(mkt, dict) else None
+        )
         long_s = ScenarioScore(
             direction=long_s.direction,
             score=ls,
@@ -255,3 +258,37 @@ def build_mtf_confluence(
         short_scenario=short_s,
         dominant=dominant,
     )
+
+
+def _scenario_to_dict(sc: ScenarioScore) -> dict[str, Any]:
+    return {
+        "direction": sc.direction,
+        "score": round(float(sc.score), 4),
+        "htf_count": int(sc.htf_count),
+        "htf_total": int(sc.htf_total),
+        "entry_lo": float(sc.entry_lo),
+        "entry_hi": float(sc.entry_hi),
+        "tp1": float(sc.tp1),
+        "tp2": float(sc.tp2),
+        "stop": float(sc.stop),
+        "evidence": list(sc.evidence),
+    }
+
+
+def mtf_confluence_to_dict(mtf: MTFConfluence) -> dict[str, Any]:
+    """JSONL-safe MTF payload with HTF counts for ``family_vote_count`` replay."""
+    return {
+        "symbol": mtf.symbol,
+        "price": float(mtf.price),
+        "dominant": mtf.dominant,
+        "long_scenario": _scenario_to_dict(mtf.long_scenario),
+        "short_scenario": _scenario_to_dict(mtf.short_scenario),
+        "long_htf_count": int(mtf.long_scenario.htf_count),
+        "short_htf_count": int(mtf.short_scenario.htf_count),
+        "long_htf_total": int(mtf.long_scenario.htf_total),
+        "short_htf_total": int(mtf.short_scenario.htf_total),
+    }
+
+
+# Bind method on dataclass for tick_jsonl mtf_to_json_dict().
+MTFConfluence.to_dict = mtf_confluence_to_dict  # type: ignore[method-assign]

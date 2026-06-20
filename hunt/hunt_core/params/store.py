@@ -7,6 +7,7 @@ from __future__ import annotations
 
 
 import json
+import os
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
@@ -19,97 +20,45 @@ _CALIBRATION_KEYS = frozenset(
     {"computed_at", "data_summary", "universal", "per_symbol", "outcome_calibration"}
 )
 
-# Defaults mirror hardcoded hunt sources when no calibration file exists.
+
+def self_tuning_frozen() -> bool:
+    """Phase 0/6: freeze adaptive loops unless clean deduped labels are enabled."""
+    if os.environ.get("HUNT_CLEAN_LABELS", "0").strip().lower() in {"1", "true", "yes"}:
+        return os.environ.get("HUNT_FREEZE_SELF_TUNING", "0").strip().lower() in {"1", "true", "yes"}
+    return os.environ.get("HUNT_FREEZE_SELF_TUNING", "1").strip() != "0"
+
+# Defaults when no calibration file exists.
 #
-# Score ladder (P0 doc): ``gates.confirm_min_score`` (60) = raw trigger sum at confirm;
-# ``delivery.min_fuel`` (72) = cluster-capped fuel floor for Telegram delivery — intentionally
-# stricter than confirm_min; do not collapse without gate_edge evidence.
+# Detection thresholds live in ``detect/calibrate.py`` (self-calibrating). This file
+# retains delivery floors, geometry caps, liquidity/cooldown, and sample-size floors.
 UNIVERSAL_DEFAULTS: dict[str, Any] = {
+    "fusion": {
+        "min_n": 30,
+        "q_gate": 0.92,
+        "q_phase": 0.85,
+        "min_active_factors": 2,
+        "lookback": 120,
+        "global_gate_floor": 0.55,
+        "abs_magnitude_floor": 0.5,
+        "vol_floor_pct": 0.15,
+        "cusum_k": 0.5,
+        "cusum_span": 96,
+        "phase_mid_exit_ratio": 0.65,
+        "phase_mid_exit_bars": 2,
+        "funding_min_n": 48,
+    },
     "gates": {
         "confirm_min_score": 60.0,
         "confirm_min_score_no_div": 68.0,
         "forming_min_score": 45.0,
-        "adx_trend_block": 40.0,
-        "adx_trend_min": 28.0,
         "min_risk_reward": 1.15,
     },
     "delivery": {
+        "min_ev": 0.0,
+        "min_p_win": 0.42,
+        "min_p_win_forming": 0.35,
         "min_fuel": 72.0,
         "min_structural_hard": 2,
-        "exhaustion_short_min_fuel": 78.0,
-        "accumulation_long_min_fuel": 74.0,
-        "exhaustion_adx_max": 32.0,
-        "impulse_long_min_pos": 0.52,
-        "impulse_long_above_mid": True,
-        "impulse_long_min_oi_chg_1h": 0.005,
-        "short_start_max_fall_pct": 3.0,
-        "short_pre_dump_headroom_pct": 5.0,
-        "short_first_break_max_fall_pct": 5.0,
-    },
-    "lifecycle": {
-        "meaningful_dump_pct": 8.0,
-        "pre_dump_max_fall_pct": 3.0,
-        "pre_dump_headroom_pct": 5.0,
-        "violent_dump_fall_pct": 15.0,
-        "fast_dump_fall_pct": 12.0,
-        "parabolic_leg_gain_pct": 20.0,
-        "mega_leg_gain_pct": 80.0,
-        "near_high_pos": 0.82,
-        "near_high_price_ratio": 0.97,
-        "post_dump_bounce_pos": 0.55,
-        "bounce_min_floor_pct": 5.0,
-        "bounce_min_atr_mult": 1.5,
-        "rsi_1h_overbought": 65.0,
-        "rsi_exhaustion_enter": 66.0,
-        "rsi_exhaustion_exit": 63.0,
-        "squeeze_bb_width_pctile_max": 0.25,
-        "squeeze_donchian_width_pct_max": 10.0,
-        "taker_buy_min": 1.05,
-        "taker_sell_max": 0.98,
-        "cascade_wick_ratio_min": 0.25,
-        "premature_exhaustion_pos_tight": 0.92,
-        "premature_exhaustion_bounce_tight_pct": 4.0,
-        "premature_exhaustion_pos": 0.85,
-        "premature_exhaustion_bounce_pct": 15.0,
-    },
-    "collect": {
-        "rsi15_overbought": 72.0,
-        "rsi1h_overbought": 72.0,
-        "rsi15_oversold": 32.0,
-        "rsi1h_oversold": 35.0,
-        "extended_above_impulse_pct": 3.0,
-        "extended_below_impulse_pct": 3.0,
-        "taker_sell_max": 0.98,
-        "taker_buy_min": 1.02,
-        "funding_crowded_long_pct": 0.05,
-        "funding_crowded_short_pct": -0.02,
-        "oi_flush_ratio": 0.997,
-        "oi_build_ratio": 1.003,
-        "basis_ap_premium_bps": 100.0,
-        "basis_ap_discount_bps": -80.0,
-        "microprice_sell_max": -0.05,
-        "microprice_buy_min": 0.05,
-        "structure_break_score": 28.0,
-    },
-    "scoring": {
-        "cluster_cap": 28.0,
-        "trigger_weight_default": 12.0,
-        "trigger_weight_structure": 28.0,
-        "trigger_weight_close_break": 22.0,
-        "trigger_weight_div": 18.0,
-        "trigger_weight_trendline": 8.0,
-        "trigger_weight_rejection": 16.0,
-        "fuel_raw_blend_ratio": 0.55,
-        "accumulation_long_fuel_cap": 72.0,
-        "squeeze_bb_boundary": 0.08,
-        "ema200_confluence_pct": 0.005,
-        "ema200_fuel": 8.0,
-        "squeeze_boundary_fuel": 8.0,
-        "hidden_div_fuel": 10.0,
-        "wall_max_distance_pct": 2.0,
-        "zone_imb_threshold": 0.15,
-        "wall_fuel_score": 6.0,
-        "zone_fuel_score": 4.0,
     },
     "levels": {
         "sl_max_pct_normal": 8.0,
@@ -124,18 +73,11 @@ UNIVERSAL_DEFAULTS: dict[str, Any] = {
     "scanner": {
         "hot_range_pct": 8.0,
         "pump_extreme_pct": 15.0,
-        "pos_near_high": 0.85,
-        "pos_near_low": 0.25,
     },
     "tracker": {
         "tp1_partial_fix_pct_normal": 50.0,
         "tp1_partial_fix_pct_hot": 80.0,
-        "bias_flip_chop_adx_max": 20.0,
-        "prep_confirm_window_hours": 8.0,
-        # Post-TP1 stop locks this fraction of the realised entry->TP1 distance as
-        # profit (sits between entry and TP1: in profit, clear of entry-noise wicks).
         "tp1_profit_lock_fraction": 0.5,
-        # Trailing room = fraction of initial structural risk (orig SL distance).
         "breakeven_risk_fraction": 0.25,
         "mfe_stall_hours": 8.0,
         "mfe_stall_min_pct": 1.0,
@@ -145,43 +87,10 @@ UNIVERSAL_DEFAULTS: dict[str, Any] = {
         "near_tp1_remaining_pct": 3.0,
         "reclaim_buffer": 1.001,
     },
-    "btc": {
-        "corr_soft_min": 0.45,
-        "corr_hard_min": 0.70,
-        "soft_fuel_gap_max": 10.0,
-        "hard_fuel_gap_max": 18.0,
-    },
-    "basis": {
-        "ap_overheat_bps": 120.0,
-        "ap_underheat_bps": -120.0,
-        "prefer_ap_basis": True,
-    },
     "orderflow": {
-        "use_nq": True,
-        "confirm_window_sec": 60,
-        "fast_window_sec": 30,
         "taker_buy_min": 0.58,
         "taker_sell_max": 0.42,
         "require_ws_align": True,
-    },
-    "ws": {
-        "kline_grace_sec": 1.5,
-    },
-    "filters": {
-        "vwap_extreme_atr": 2.25,
-    },
-    "confirm": {
-        "entry_confirm_tf": "5m",
-        # Dumps complete in minutes; longs build over hours. Confirm asymmetrically:
-        # dump on the 1m closed bar, long stays on 5m. Fall back to entry_confirm_tf.
-        "entry_confirm_tf_dump": "1m",
-        "entry_confirm_tf_long": "5m",
-        # When the dump confirm TF is sub-5m, a single closed break on that fast TF
-        # + 1 secondary factor is enough (avoids waiting 2× 5m on liq-thin alts).
-        "dump_fast_confirm": True,
-        "accumulation_secondary_min": 3,
-        "short_bounce_recovery_bounce_min_pct": 8.0,
-        "short_bounce_recovery_fall_max_pct": 15.0,
     },
     "liquidation": {
         "min_long_notional_5m_usd": 25000.0,
@@ -189,40 +98,26 @@ UNIVERSAL_DEFAULTS: dict[str, Any] = {
         "min_events_5m": 6,
         "score_threshold": 0.30,
     },
-    "listings": {
-        "min_1h_bars_confirm": 24,
-        "min_1h_bars_synth": 48,
-        "min_4h_bars_native": 100,
-    },
     "phase_matrix": {
         "min_samples": 12,
         "max_wr": 0.28,
         "prior_wr": 0.35,
     },
-    "stats": {
-        "forward_horizon_hours": 8.0,
-        "meme_slippage_pct": 0.15,
-        "win_label_min_pct": 2.0,
-        "loss_label_max_pct": -2.0,
+    "scoring": {
+        "cex_pump_ret_1m_min": 0.02,
+        "cex_dump_ret_1m_max": -0.02,
+        "cex_z_vol_30m_min": 3.0,
+        "cex_pump_buy_share_min": 0.65,
+        "cex_dump_buy_share_max": 0.35,
     },
-    "walk_forward": {
-        "is_ratio": 0.70,
-        "min_oos_ticks": 400,
-        "min_oos_outcomes": 30,
-        "min_confirm_rate": 0.015,
-        "floors": [60, 62, 64, 66, 68, 70, 72],
+    "confirm": {
+        "entry_confirm_tf": "5m",
+        "entry_confirm_tf_dump": "1m",
+        "entry_confirm_tf_long": "5m",
+        "dump_fast_confirm": True,
     },
-    "prep_shadow": {
-        "enabled": True,
-        "horizon_hours": 8.0,
-        "direction_ok_min_mfe_pct": 2.0,
-        "wrong_direction_mae_pct": 2.5,
-        "min_tier": "prep",
-        "delivery_min_samples": 8,
-        "delivery_wr_floor_pct": 50.0,
-        "delivery_wr_relax_pct": 62.0,
-        "delivery_fuel_bump": 3.0,
-        "delivery_fuel_relax": 1.0,
+    "ws": {
+        "kline_grace_sec": 1.5,
     },
 }
 
@@ -573,6 +468,59 @@ def liquidation_thresholds(symbol: str = "") -> dict[str, float]:
     per = symbol_section(symbol.upper(), "liquidation") if symbol else {}
     merged = _deep_merge(liq, per)
     return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def maps_calibration(symbol: str = "") -> dict[str, float]:
+    """Per-symbol maps forward-confidence calibration from probe outcomes."""
+    maps_sec = universal_section("maps")
+    per = symbol_section(symbol.upper(), "maps") if symbol else {}
+    merged = _deep_merge(maps_sec, per)
+    raw = load_calibration()
+    oc = raw.get("outcome_calibration") if isinstance(raw, dict) else {}
+    maps_oc = oc.get("maps") if isinstance(oc, dict) else {}
+    if isinstance(maps_oc, dict):
+        universal_maps = maps_oc.get("universal")
+        if isinstance(universal_maps, dict):
+            merged = _deep_merge(merged, universal_maps)
+        if symbol:
+            sym_maps = maps_oc.get(symbol.upper())
+            if isinstance(sym_maps, dict):
+                merged = _deep_merge(merged, sym_maps)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def save_maps_calibration(
+    *,
+    universal: dict[str, float] | None = None,
+    per_symbol: dict[str, dict[str, float]] | None = None,
+    path: Path = HUNT_CALIBRATION,
+) -> None:
+    """Persist maps probe metrics into outcome_calibration.maps."""
+    existing: dict[str, Any] = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(existing, dict):
+                existing = {}
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+    oc = existing.setdefault("outcome_calibration", {})
+    if not isinstance(oc, dict):
+        oc = {}
+        existing["outcome_calibration"] = oc
+    maps_oc = oc.setdefault("maps", {})
+    if not isinstance(maps_oc, dict):
+        maps_oc = {}
+        oc["maps"] = maps_oc
+    if universal:
+        maps_oc["universal"] = {k: float(v) for k, v in universal.items()}
+    if per_symbol:
+        for sym, payload in per_symbol.items():
+            if isinstance(payload, dict):
+                maps_oc[str(sym).upper()] = {k: float(v) for k, v in payload.items()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    invalidate_calibration_cache()
 
 
 def listings_thresholds(symbol: str = "") -> dict[str, float]:

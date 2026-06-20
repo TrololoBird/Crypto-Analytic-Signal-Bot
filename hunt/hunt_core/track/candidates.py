@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 from hunt_core.paths import SETUP_CANDIDATES_EVENTS, SETUP_CANDIDATES_STATE
-from hunt_core.params.store import effective_hunt_params
 from hunt_core.features.prepare_columns import feature_vector_from_row
 
 CloseReason = Literal[
@@ -64,9 +63,9 @@ def _append_event(event: str, *, candidate: dict[str, Any], extra: dict[str, Any
         "source": candidate.get("source"),
         "payload": {**(extra or {}), "paper_pnl_pct": candidate.get("paper_pnl_pct")},
     }
-    SETUP_CANDIDATES_EVENTS.parent.mkdir(parents=True, exist_ok=True)
-    with SETUP_CANDIDATES_EVENTS.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(row, default=str) + "\n")
+    from hunt_core.track.events import _append_jsonl_line
+
+    _append_jsonl_line(SETUP_CANDIDATES_EVENTS, json.dumps(row, default=str) + "\n")
 
 
 def _pnl_pct(direction: str, entry: float, exit_px: float) -> float:
@@ -236,6 +235,9 @@ def _open_candidate(
 
     sl, tp1, tp2 = _levels_from_setup(setup, direction=direction, price=price, row=row)
     cid = f"{sym}:{direction}:{stage}:{uuid.uuid4().hex[:8]}"
+    dir_l = direction.lower()
+    fuel_key = "dump_fuel" if dir_l == "short" else "long_fuel"
+    score_key = "dump_score" if dir_l == "short" else "long_score"
     cand: dict[str, Any] = {
         "id": cid,
         "symbol": sym,
@@ -251,8 +253,9 @@ def _open_candidate(
         "lifecycle_phase": str(lifecycle.get("phase") or ""),
         "setup_phase": str(setup.get("phase") or ""),
         "fuel": float(
-            setup.get("dump_fuel") or setup.get("long_fuel")
-            or setup.get("dump_score") or setup.get("long_score") or 0
+            setup.get(fuel_key)
+            or setup.get(score_key)
+            or 0
         ),
         "block_code": block_code or None,
         "parent_candidate_id": parent_id,
@@ -401,16 +404,37 @@ def process_setup_candidate(
         events.append(opened)
         return events
 
+    if (
+        setup.get("early_tier") == "armed"
+        or setup.get("anticipation")
+        or setup.get("intrabar_armed")
+    ) and not setup.get("confirmed"):
+        cur = active.get(key)
+        if isinstance(cur, dict) and cur.get("status") == "active" and cur.get("stage") == "armed":
+            return events
+        opened = _open_candidate(
+            state,
+            symbol=sym,
+            direction=direction,
+            stage="armed",
+            source="early_armed",
+            setup=setup,
+            row=row,
+            lifecycle=lc,
+            now=ts,
+        )
+        events.append(opened)
+        return events
+
     if forming and not setup.get("confirmed"):
         cur = active.get(key)
         if isinstance(cur, dict) and cur.get("status") == "active" and cur.get("stage") == "forming":
             return events
-        fuel = float(
-            setup.get("dump_fuel") or setup.get("long_fuel")
-            or setup.get("dump_score") or setup.get("long_score") or 0
-        )
-        cal = effective_hunt_params(sym)
-        if fuel >= float(cal.forming_min_score):
+        from hunt_core.gate._ev import setup_meets_strength
+
+        if setup_meets_strength(
+            setup, direction=direction, symbol=sym, tier="forming"
+        ):
             opened = _open_candidate(
                 state,
                 symbol=sym,

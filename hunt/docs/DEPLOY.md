@@ -42,9 +42,27 @@ python scripts/clean_session_data.py --mode smoke --config config.toml
 |------|---------|------|
 | CCXT canon | `python -m hunt_core._dev.check_ccxt` | 0 violations |
 | Logic | `python -m hunt_core._dev.check_logic` + `check_scenarios` | exit 0 |
-| LOC budget | `python -m hunt_core._dev.budget` | ≤44k hot LOC, no engine/bot imports |
+| LOC budget | `python -m hunt_core._dev.budget` | ≤58k hot LOC, no engine/bot imports |
 | Compile | `python -m compileall -q hunt/hunt_core` | exit 0 |
 | Live plane | `python -m hunt_core._dev.ccxt_plane_smoke BTCUSDT` | exit 0 |
+| API capacity smoke | watch logs / `ccxt_plane_smoke` on full universe | weight within pace target |
+
+## Rate-limit / capacity ops
+
+Scheduling: `hunt_core/market/capacity.py` (`HuntLoadPlanner`). See [HUNT_ARCHITECTURE.md](HUNT_ARCHITECTURE.md#restws-capacity-marketcapacitypy).
+
+Quick probes:
+
+```bash
+# single symbol baseline
+python -m hunt_core._dev.ccxt_plane_smoke BTCUSDT --ws-seconds 3
+
+# full watch once (no TG) — inspect cycle log for TickLoadPlan weight/fapi estimates
+python -m hunt_core watch --once --no-telegram
+grep -E "weight|fapi|TickLoadPlan" hunt/data/dump_minute_watch.log | tail -20
+```
+
+Tune via env: `HUNT_TARGET_WEIGHT_PER_TICK`, `HUNT_BINANCE_WEIGHT_PACE`, `HUNT_BINANCE_FAPI_PACE`, `HUNT_SNAPSHOT_PARALLEL`.
 
 ## Architecture
 

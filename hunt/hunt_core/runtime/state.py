@@ -150,6 +150,14 @@ def merge_hunt_extremes(
     rh = max(rest_hunt_high, sess.hunt_high, sess.price_high, price) if price > 0 else max(
         rest_hunt_high, sess.hunt_high
     )
+    # Sticky session peak must not inflate fall_pct after a deep dump vs REST window.
+    if (
+        rest_hunt_high > 0
+        and sess.hunt_high > rest_hunt_high * 1.10
+        and price > 0
+        and price < rest_hunt_high * 0.90
+    ):
+        rh = max(rest_hunt_high, sess.price_high, price)
     candidates_lo = [x for x in (rest_hunt_low, sess.hunt_low, sess.price_low, price) if x > 0]
     rl = min(candidates_lo) if candidates_lo else rest_hunt_low
 

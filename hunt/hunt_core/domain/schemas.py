@@ -110,6 +110,7 @@ class PreparedSymbol:
     ask_price: float | None
     spread_bps: float | None
     work_5m: pl.DataFrame | None = None
+    work_1m: pl.DataFrame | None = None
     work_4h: pl.DataFrame | None = None
     work_primary: pl.DataFrame | None = None
     bias_4h: str = "neutral"  # 4H macro context (market regime)
@@ -125,7 +126,7 @@ class PreparedSymbol:
     ls_ratio: float | None = None
     top_account_ls_ratio: float | None = None
     taker_ratio: float | None = None  # taker buy/sell volume ratio (>1.0 = net buyers)
-    liquidation_score: float | None = None  # -1.0 (bearish liq) … +1.0 (bullish liq)
+    liquidation_score: float | None = None  # [0, 1]: short-liq share (0=long flush, 1=short squeeze)
     liquidation_cascade_5m: bool | None = None
     funding_rate_zscore_48h: float | None = None
     funding_trend: str | None = None  # "rising" | "falling" | "flat" | None
@@ -154,6 +155,9 @@ class PreparedSymbol:
     microprice_bias_source: str | None = None
     depth_book_age_seconds: float | None = None
     agg_trade_delta_30s: float | None = None
+    agg_trade_delta_60s: float | None = None
+    agg_trade_buy_ratio_30s: float | None = None
+    agg_trade_buy_ratio_60s: float | None = None
     aggression_shift: float | None = None
     orderflow_source: str | None = None
     liquidation_score_source: str | None = None
@@ -204,6 +208,9 @@ class PreparedSymbol:
     nearest_bid_wall: dict[str, Any] | None = None
     nearest_ask_wall: dict[str, Any] | None = None
     depth_zone_imbalance: float | None = None
+    maps_snapshot: dict[str, Any] | None = None
+    liq_forward_confidence: float | None = None
+    map_stacked_imbalance: str | None = None
     primary_timeframe: str = "15m"
     context_timeframes: tuple[str, ...] = ("1h", "4h")
     settings: BotSettings | None = None
@@ -211,6 +218,10 @@ class PreparedSymbol:
     btc_change_pct: float | None = None
     eth_change_pct: float | None = None
     btc_corr_1h: float | None = None
+    btc_beta_1h: float | None = None
+    pump_cycle: dict[str, Any] | None = None
+    btc_decoupled_pump: bool | None = None
+    btc_decoupled_dump: bool | None = None
 
     def __post_init__(self) -> None:
         if self.top_account_ls_ratio is None and self.ls_ratio is not None:

@@ -1000,6 +1000,9 @@ def _prepare_frame(
 
     When ``active_groups`` is set, optional indicator blocks may be skipped
     (see ``bot.features.prepare_columns``). ``None`` computes every group.
+
+    Incremental hook: callers may pass ``df.lazy()`` through a future
+    ``_prepare_frame_lazy`` path; hot path stays eager Polars for now.
     """
     df = _coerce_temporal_columns(df)
 

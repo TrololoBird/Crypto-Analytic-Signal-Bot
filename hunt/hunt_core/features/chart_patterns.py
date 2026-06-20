@@ -42,6 +42,19 @@ def _swing_prices(
     return out
 
 
+def _confirmed_close(frame: pl.DataFrame) -> float:
+    """Last fully closed bar close (exclude forming tail)."""
+    if frame.is_empty() or "close" not in frame.columns:
+        return 0.0
+    idx = frame.height - 2 if frame.height >= 2 else frame.height - 1
+    if idx < 0:
+        return 0.0
+    try:
+        return float(frame["close"][idx])
+    except (TypeError, ValueError, IndexError):
+        return 0.0
+
+
 def _norm_confidence(score: float) -> float:
     return round(max(0.0, min(1.0, score)), 3)
 
@@ -75,7 +88,9 @@ def detect_double_bottom(work: pl.DataFrame, lookback: int = 50) -> dict[str, An
         return dict(_EMPTY)
 
     max(mid_highs)
-    close = float(frame["close"][-1])
+    close = _confirmed_close(frame)
+    if close <= 0:
+        return dict(_EMPTY)
     recovery = (close - avg_low) / avg_low if close > avg_low else 0.0
     conf = _norm_confidence(0.45 + (0.025 - low_delta_pct) / 0.025 * 0.35 + min(recovery, 0.02) / 0.02 * 0.2)
     return {"pattern": "double_bottom", "confidence": conf, "direction": "long"}

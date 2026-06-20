@@ -7,8 +7,11 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from hunt_core.paths import PREP_SHADOW_EVENTS, SIGNAL_EVENTS, SIGNAL_STATE
+from hunt_core.paths import PREP_SHADOW_EVENTS, SIGNAL_EVENTS, SIGNAL_HISTORY, SIGNAL_STATE
 from hunt_core.track.tracker import _is_signal_active, _mfe_pct, load_tracker_state
+
+# funnel_deliver tier recorded after dispatch fix (2026-06-17 ~02:00 UTC).
+_FUNNEL_TIER_FIX_CUTOFF = "2026-06-17T02:00:00"
 
 
 def _audit_telemetry(events_path: Path, *, since: str) -> list[str]:
@@ -28,6 +31,8 @@ def _audit_telemetry(events_path: Path, *, since: str) -> list[str]:
         if r.get("event") == "funnel_deliver":
             p = r.get("payload") or {}
             # Only validate new-format payloads (post tier/risk_reward patch).
+            if ts < _FUNNEL_TIER_FIX_CUTOFF:
+                continue
             if "gate_code" in p and not p.get("delivery_tier") and not p.get("tier"):
                 funnel_no_tier += 1
     if no_code:
@@ -73,6 +78,53 @@ def _audit_active_geometry() -> list[str]:
     return issues
 
 
+def _print_outcome_wr_summary(path: Path) -> None:
+    """#49: deduped phase×direction WR from signal_history for calibration."""
+    if not path.exists():
+        print("  outcome_wr: signal_history.jsonl missing")
+        return
+    seen_ids: set[int] = set()
+    buckets: dict[tuple[str, str], list[float]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        eid = rec.get("entry_message_id")
+        if eid is not None:
+            try:
+                eid_int = int(eid)
+            except (TypeError, ValueError):
+                eid_int = None
+            if eid_int is not None:
+                if eid_int in seen_ids:
+                    continue
+                seen_ids.add(eid_int)
+        phase = str(
+            rec.get("entry_lifecycle_phase")
+            or rec.get("setup_phase")
+            or rec.get("phase")
+            or "?"
+        )
+        direction = str(rec.get("direction") or "?")
+        pnl = rec.get("pnl_pct")
+        if pnl is None:
+            continue
+        try:
+            buckets.setdefault((phase, direction), []).append(float(pnl))
+        except (TypeError, ValueError):
+            continue
+    if not buckets:
+        print("  outcome_wr: no labeled outcomes")
+        return
+    print("  outcome_wr (deduped by entry_message_id):")
+    for (phase, direction), pnls in sorted(buckets.items(), key=lambda x: -len(x[1]))[:12]:
+        wins = sum(1 for p in pnls if p > 0)
+        print(f"    {phase}/{direction}: n={len(pnls)} wr={wins / len(pnls):.0%} avg_pnl={sum(pnls)/len(pnls):.2f}%")
+
+
 def main() -> int:
     since = (datetime.now(UTC) - timedelta(hours=24)).isoformat()[:19]
     issues: list[str] = []
@@ -95,6 +147,8 @@ def main() -> int:
     print("check_audit top_blockers_24h:")
     for code, n in recent_blocks.most_common(8):
         print(f"  {code}: {n}")
+
+    _print_outcome_wr_summary(SIGNAL_HISTORY)
 
     if issues:
         for item in issues:

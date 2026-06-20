@@ -8,11 +8,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from hunt_core.analysis.deep_signal import resolve_trade_direction
+from hunt_core.data.jsonl_io import append_jsonl_lines, rotate_jsonl_if_needed
 from hunt_core.params.store import effective_hunt_params
-from hunt_core.paths import DATA, SIGNAL_EVENTS
-from hunt_core.scan.predump import confirm_dump
-from hunt_core.scan.prepump import confirm_long
+from hunt_core.paths import DATA, SENT_MESSAGES, SIGNAL_EVENTS, TICK_JSONL
 
 AUDIT_LOG = DATA / "signal_audit.jsonl"
 
@@ -35,6 +33,13 @@ _LIFECYCLE_FUNNEL_MAP: dict[str, str] = {
 }
 
 
+def _append_jsonl_line(path: Path, line: str) -> None:
+    rotate_jsonl_if_needed(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(line)
+
+
 def append_signal_event(
     event: str,
     *,
@@ -52,9 +57,57 @@ def append_signal_event(
         "detail": detail,
         "payload": payload or {},
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(row, default=str) + "\n")
+    _append_jsonl_line(path, json.dumps(row, default=str) + "\n")
+
+
+def record_sent_delivery(
+    *,
+    symbol: str,
+    direction: str,
+    message_id: int | None,
+    html: str,
+    setup: dict[str, Any],
+    delivery_tier: str = "",
+    price: float | None = None,
+    path: Path = SENT_MESSAGES,
+) -> None:
+    """Archive delivered Telegram HTML + levels snapshot for audit (M0)."""
+    levels = {
+        "entry_zone": setup.get("entry_zone"),
+        "stop_loss": setup.get("stop_loss"),
+        "original_stop_loss": setup.get("stop_loss"),
+        "tp1": setup.get("tp1"),
+        "tp2": setup.get("tp2"),
+        "risk_reward": setup.get("risk_reward"),
+        "delivery_tier": delivery_tier or setup.get("delivery_tier"),
+    }
+    row = {
+        "ts": datetime.now(UTC).isoformat(),
+        "symbol": symbol.upper(),
+        "direction": direction.lower(),
+        "message_id": message_id,
+        "price": price,
+        "levels": levels,
+        "html": html,
+        "ev_shadow": setup.get("ev_shadow"),
+        "model_shadow": setup.get("model_shadow"),
+        "setup_type": setup.get("setup_type"),
+    }
+    _append_jsonl_line(path, json.dumps(row, default=str) + "\n")
+    ev = setup.get("ev_shadow")
+    if isinstance(ev, dict) and ev.get("ev") is not None:
+        append_signal_event(
+            "ev_delivery_shadow",
+            symbol=symbol,
+            direction=direction,
+            detail=delivery_tier or str(setup.get("delivery_tier") or ""),
+            payload={
+                "ev": ev.get("ev"),
+                "p_win": ev.get("p_win"),
+                "reason": ev.get("reason"),
+                "delivery_tier": delivery_tier,
+            },
+        )
 
 
 def record_funnel_stage(
@@ -75,6 +128,45 @@ def record_funnel_stage(
         direction=direction,
         detail=detail,
         payload=body,
+        path=path,
+    )
+
+
+def record_flow_cusum_funnel(
+    setup: dict[str, Any],
+    *,
+    symbol: str,
+    direction: str,
+    path: Path = SIGNAL_EVENTS,
+) -> None:
+    """Tag flow_cusum_* triggers in funnel telemetry when present."""
+    triggers = setup.get("triggers") or []
+    tagged = [str(t) for t in triggers if str(t).startswith("flow_cusum")]
+    if not tagged:
+        return
+    record_funnel_stage(
+        "fuel",
+        symbol=symbol,
+        direction=direction,
+        detail=",".join(tagged[:4]),
+        payload={"flow_cusum_triggers": tagged},
+        path=path,
+    )
+
+
+def persist_ev_primary_shadow(
+    row: dict[str, Any],
+    *,
+    path: Path = SIGNAL_EVENTS,
+) -> None:
+    """Persist EV primary shadow tick payload to lake/jsonl (no telegram)."""
+    shadow = row.get("ev_primary_shadow")
+    if not isinstance(shadow, dict) or not shadow:
+        return
+    append_signal_event(
+        "ev_primary_shadow",
+        symbol=str(row.get("symbol") or ""),
+        payload={"ev_primary_shadow": shadow, "tick_ts": row.get("ts")},
         path=path,
     )
 
@@ -202,35 +294,32 @@ def audit_probe_row(row: dict[str, Any], *, source: str = "signal_cmd") -> dict[
     cal = effective_hunt_params(sym)
     bias = str(lc.get("recommended_bias") or "")
 
-    direction, setup, fuel, dir_notes = resolve_trade_direction(row)
-    if direction == "short":
-        indie_conf, hard = confirm_dump(
-            row.get("dump") or {},
-            tf,
-            symbol=sym,
-            price=float(row.get("price") or 0),
-            market=row.get("market") or {},
-            cal=cal,
-            lifecycle_bias=bias if bias in {"long", "short", "wait"} else "",
-        )
-        bot_conf = bool((row.get("dump") or {}).get("confirmed"))
+    # Fusion engine produces the setups; the probe reads its decision directly.
+    dump_s = row.get("dump") or {}
+    long_s = row.get("long") or {}
+    if bias in {"short", "long"}:
+        direction = bias
+    elif dump_s.get("confirmed"):
+        direction = "short"
+    elif long_s.get("confirmed"):
+        direction = "long"
     else:
-        indie_conf, hard = confirm_long(
-            row.get("long") or {},
-            tf,
-            symbol=sym,
-            price=float(row.get("price") or 0),
-            market=row.get("market") or {},
-            cal=cal,
-            lifecycle_bias=bias if bias in {"long", "short", "wait"} else "",
-            lifecycle_phase=str(lc.get("phase") or ""),
+        direction = (
+            "short"
+            if float(dump_s.get("fusion_score") or dump_s.get("p_win") or 0)
+            >= float(long_s.get("fusion_score") or long_s.get("p_win") or 0)
+            else "long"
         )
-        bot_conf = bool((row.get("long") or {}).get("confirmed"))
-
-    if bot_conf != indie_conf:
-        issues.append(f"confirm_mismatch bot={bot_conf} indie={indie_conf} hard={hard}")
-    else:
-        checks.append(f"confirm_ok={indie_conf}")
+    setup = dump_s if direction == "short" else long_s
+    fuel = float(
+        setup.get("fusion_score")
+        or (float(setup.get("p_win") or 0) * 100.0)
+        or 0
+    )
+    dir_notes: list[str] = []
+    indie_conf = bool(setup.get("confirmed"))
+    hard = list(setup.get("confirm_hard") or [])
+    checks.append(f"confirm_ok={indie_conf}")
 
     dq = row.get("data_quality") or {}
     missing = dq.get("fields_missing") or []
@@ -241,12 +330,12 @@ def audit_probe_row(row: dict[str, Any], *, source: str = "signal_cmd") -> dict[
 
     if bias in {"short", "long"}:
         counter = "long" if bias == "short" else "short"
-        alt_fuel = float(
+        alt_raw = (
             (row.get("long") or {}).get("long_fuel")
             if counter == "long"
             else (row.get("dump") or {}).get("dump_fuel")
-            or 0
         )
+        alt_fuel = float(alt_raw or 0)
         if direction == counter and alt_fuel > fuel + 15:
             issues.append(
                 f"direction_vs_lifecycle bias={bias} picked={direction} "
@@ -260,6 +349,25 @@ def audit_probe_row(row: dict[str, Any], *, source: str = "signal_cmd") -> dict[
         checks.append(f"levels_veto={veto}")
     if setup.get("filter_blocks"):
         checks.append(f"filters={setup.get('filter_blocks')}")
+
+    delivery_ok: bool | None = None
+    gate_code = ""
+    if indie_conf:
+        from hunt_core.deliver.dispatch import evaluate_delivery_fast
+
+        gate, tier = evaluate_delivery_fast(
+            row,
+            direction=direction,
+            setup=setup,
+            lifecycle=lc,
+            symbol=sym,
+        )
+        delivery_ok = gate.ok
+        gate_code = str(gate.code or "")
+        if gate.ok:
+            checks.append(f"delivery_ok tier={tier}")
+        else:
+            issues.append(f"delivery_blocked {gate.code}: {gate.message}")
 
     sess = row.get("session") or {}
     chg = abs(float(row.get("chg_24h_pct") or 0))
@@ -284,6 +392,8 @@ def audit_probe_row(row: dict[str, Any], *, source: str = "signal_cmd") -> dict[
         "lifecycle_bias": bias,
         "indie_confirmed": indie_conf,
         "hard": hard,
+        "delivery_ok": delivery_ok,
+        "gate_code": gate_code,
     }
 
 
@@ -301,7 +411,7 @@ def load_pending_symbols(path: Path | None = None) -> list[str]:
         return []
     try:
         payload = json.loads(p.read_text(encoding="utf-8"))
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return []
     pending = payload.get("pending") or []
     return [str(x.get("symbol")).upper() for x in pending if isinstance(x, dict) and x.get("symbol")]
@@ -310,12 +420,17 @@ def load_pending_symbols(path: Path | None = None) -> list[str]:
 __all__ = [
     "AUDIT_LOG",
     "FUNNEL_STAGES",
+    "TICK_JSONL",
     "append_audit_log",
+    "append_jsonl_lines",
     "append_signal_event",
     "audit_probe_row",
     "backtest_levels_on_bars",
     "load_pending_symbols",
+    "persist_ev_primary_shadow",
+    "record_flow_cusum_funnel",
     "record_funnel_stage",
     "record_lifecycle_funnel",
     "record_phase_transition",
+    "rotate_jsonl_if_needed",
 ]

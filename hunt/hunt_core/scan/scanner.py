@@ -1,41 +1,52 @@
-"""Scanner orchestration — public detect API (P7 cutover)."""
+"""Scanner public API — fusion engine cutover shim.
+
+Detection is owned by ``detect/*``; this module re-exports the tick router and
+no-op stubs for legacy call sites that still import ``hunt_core.scan.scanner``.
+"""
 from __future__ import annotations
 
-import os
+from typing import Any
 
-from hunt_core.scan.predump import (
-    confirm_dump,
-    enrich_dump_setup,
-    phase_dump,
-)
-from hunt_core.scan.prepump import (
-    confirm_long,
-    enrich_long_setup,
-    phase_long,
-)
-from hunt_core.scan.early import evaluate_early_alert
-from hunt_core.scan.routing import (
+from hunt_core.detect.routing import (
     DeliveryMode,
     SetupCandidate,
     resolve_delivery_mode,
     route_tick,
 )
 
-HUNT_SCANNER_V2 = os.getenv("HUNT_SCANNER_V2", "").strip().lower() in {"1", "true", "yes"}
+HUNT_SCANNER_V2 = False
 
 
-def route_tick_v2(row: dict) -> list[SetupCandidate]:
-    """When HUNT_SCANNER_V2=1, EARLY hits are advisory-only until bar close."""
-    hits = route_tick(row)
-    if not HUNT_SCANNER_V2:
-        return hits
-    out: list[SetupCandidate] = []
-    for hit in hits:
-        mode = getattr(hit, "delivery_mode", None) or getattr(hit, "mode", "")
-        if str(mode).lower() == "early":
-            hit.advisory_only = True  # type: ignore[attr-defined]
-        out.append(hit)
-    return out
+def route_tick_v2(row: dict[str, Any]) -> list[SetupCandidate]:
+    return route_tick(row)
+
+
+def confirm_dump(*_a: Any, **_k: Any) -> bool:
+    return False
+
+
+def confirm_long(*_a: Any, **_k: Any) -> bool:
+    return False
+
+
+def enrich_dump_setup(setup: dict[str, Any], **_k: Any) -> dict[str, Any]:
+    return setup
+
+
+def enrich_long_setup(setup: dict[str, Any], **_k: Any) -> dict[str, Any]:
+    return setup
+
+
+def evaluate_early_alert(*_a: Any, **_k: Any) -> None:
+    return None
+
+
+def phase_dump(*_a: Any, **_k: Any) -> str:
+    return ""
+
+
+def phase_long(*_a: Any, **_k: Any) -> str:
+    return ""
 
 
 __all__ = [

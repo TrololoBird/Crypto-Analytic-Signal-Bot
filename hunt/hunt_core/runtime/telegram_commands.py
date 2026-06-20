@@ -19,7 +19,6 @@ from hunt_core.deliver.telegram import TelegramBroadcaster
 
 from hunt_core.runtime.signals_report import deliver_signals_report
 from hunt_core.runtime.stats_report import deliver_stats_report, _candidates_rollup_block
-from hunt_core.track.prep_shadow import format_prep_shadow_html, summarize_prep_shadows
 from hunt_core.track.candidates import format_symbol_candidates_html, load_setup_candidates_state
 from hunt_core.runtime.symbol_probe import deliver_signal_probe, normalize_symbol, parse_symbol_text
 
@@ -38,11 +37,14 @@ class HuntTelegramCommands:
         allowed_chat_ids: frozenset[int],
         allowed_user_ids: frozenset[int],
         poll_timeout: int = 25,
+        client: Any = None,
     ) -> None:
         self._token = token
         self._allowed_chat_ids = allowed_chat_ids
         self._allowed_user_ids = allowed_user_ids
         self._poll_timeout = poll_timeout
+        # Shared watch CCXT client — probes reuse it instead of spinning a 2nd plane.
+        self._client = client
         self._offset: int | None = None
         self._session: aiohttp.ClientSession | None = None
         self._probe_lock = asyncio.Lock()
@@ -137,9 +139,13 @@ class HuntTelegramCommands:
                 from hunt_core.runtime.symbol_probe import probe_pinned_deep, probe_symbol_signal
 
                 if sym in PINNED_SYMBOLS:
-                    row = await probe_pinned_deep(sym, stagger_ms=250, auto_watchlist=False)
+                    row = await probe_pinned_deep(
+                        sym, stagger_ms=250, auto_watchlist=False, client=self._client
+                    )
                 else:
-                    row = await probe_symbol_signal(sym, stagger_ms=200, auto_watchlist=False)
+                    row = await probe_symbol_signal(
+                        sym, stagger_ms=200, auto_watchlist=False, client=self._client
+                    )
                     row["_deep_analysis"] = True
                 if row.get("error"):
                     await self._send(
@@ -180,6 +186,7 @@ class HuntTelegramCommands:
                 "Использование: <code>/signal BEATUSDT</code> или <code>/signal BEAT</code>",
             )
             return
+        live = any(p.lower().lstrip("-") in {"live", "fresh"} for p in parts[1:])
         sym = normalize_symbol(parts[0])
         if not sym:
             await self._send(chat_id, "⚠️ Укажи символ, например <code>BEATUSDT</code>")
@@ -189,19 +196,16 @@ class HuntTelegramCommands:
             return
         async with self._probe_lock:
             sym_label = sym.replace("USDT", "-USDT")
-            await self._send(chat_id, f"⏳ <b>/signal {sym_label}</b> — сканирую…")
+            note = "live REST…" if live else "из watch-стора…"
+            await self._send(chat_id, f"⏳ <b>/signal {sym_label}</b> — {note}")
             broadcaster = TelegramBroadcaster(self._token, str(chat_id))
             try:
-                await deliver_signal_probe(broadcaster, sym)
+                await deliver_signal_probe(broadcaster, sym, live=live, client=self._client)
             except Exception:
                 LOG.exception("hunt_signal_cmd_failed", symbol=sym)
                 await self._send(chat_id, f"⚠️ /signal {sym} failed — см. логи hunt")
             finally:
                 await broadcaster.close()
-
-    async def _handle_prepstats(self, chat_id: int) -> None:
-        summary = summarize_prep_shadows()
-        await self._send(chat_id, format_prep_shadow_html(summary))
 
     async def _handle_candidates(self, chat_id: int, parts: list[str]) -> None:
         sym = normalize_symbol(parts[0]) if parts else ""
@@ -235,8 +239,6 @@ class HuntTelegramCommands:
             await self._handle_signals(chat_id, args)
         elif cmd in {"/stats", "/stat"}:
             await self._handle_stats(chat_id)
-        elif cmd in {"/prepstats", "/prep"}:
-            await self._handle_prepstats(chat_id)
         elif cmd in {"/candidates", "/cand"}:
             await self._handle_candidates(chat_id, args)
         elif cmd in {"/help", "/start"}:
@@ -248,7 +250,6 @@ class HuntTelegramCommands:
                 "<code>/candidates</code> — paper pre_* из watch\n"
                 "<code>/analyze BTC</code> — полный разбор (order flow, стакан, POC)\n"
                 "<code>/stats</code> — WR, phase matrix, TG воронка, regime, confidence\n"
-                "<code>/prepstats</code> — shadow prep/start: direction WR, MFE, paper PnL\n"
                 "<code>/candidates [SYM]</code> — paper squeeze/forming/blocked stats\n"
                 "· confirm → полный сигнал\n"
                 "· нет confirm → сценарий + что ждём + watchlist\n"
@@ -387,7 +388,9 @@ class HuntTelegramCommands:
                 await asyncio.sleep(3.0)
 
 
-def build_hunt_telegram_commands(settings: Any) -> HuntTelegramCommands | None:
+def build_hunt_telegram_commands(
+    settings: Any, *, client: Any = None
+) -> HuntTelegramCommands | None:
     token = settings.tg_token
     if not token:
         return None
@@ -405,4 +408,5 @@ def build_hunt_telegram_commands(settings: Any) -> HuntTelegramCommands | None:
         token,
         allowed_chat_ids=frozenset(chat_ids),
         allowed_user_ids=frozenset(user_ids),
+        client=client,
     )

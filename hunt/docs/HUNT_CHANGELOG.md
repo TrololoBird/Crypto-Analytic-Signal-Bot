@@ -1,5 +1,239 @@
 # Hunt Changelog (session notes)
 
+## 2026-06-20 (d) — TZ review: explicit params, gate floor, phase hysteresis
+
+- **Honest scope**: `docs/FUSION_PARAMS.md` + `detect/config.py` — official fusion tunables.
+- **Gate**: `effective = max(symbol_quantile, global_gate_floor)`; MAD epsilon + z-clip.
+- **Phase**: sticky MID hysteresis (`phase_mid_exit_ratio/bars`) — reduces PRE/MID flicker.
+- **Funding**: `funding_min_n=48` for new listings / step-wise rate.
+- **Replay**: forward close return, random ATR baseline, `--walk-forward FRAC`.
+
+## 2026-06-20 (c) — Fusion math hardening (review fixes)
+
+- **Aggregation**: directional factors → signed **median** (replaces Stouffer `Σz/√n`).
+- **Gate**: vol-adjusted magnitude (`magnitude / max(atr_pct, 0.15)`) for quantile gate.
+- **Semantics**: `fusion_score` 0–100 replaces logistic `p_win` on fusion setups; `delivery_p_win` from geometry EV only.
+- **Perf**: `detect/magnitude_cache.py` — O(1) incremental magnitude history (was O(n²) in live).
+- **Safety**: `build_window(ts_max=…)` ts filter; `tests/test_calibrate.py` for degenerate inputs.
+
+## 2026-06-20 (b) — docs/CI/graphify cleanup + supervised session
+
+- **Docs**: rewrote `HUNT_ARCHITECTURE.md`, `ARCHITECTURE_DEBT.md`, `HUNT_TARGET_ARCH.md` for fusion-only path; added `ENGINE_DESIGN.md`.
+- **CI**: `.github/workflows/hunt-ci.yml` — fusion + deep checks.
+- **Ops**: `watch.sh` default single-process (`HUNT_WATCH_SUPERVISE=0`); stale PID lock cleanup; `supervised_session.py` owns restarts.
+- **Graph**: `graphify update .` at repo root.
+
+## 2026-06-20 — phase-7f/8: delete legacy detection stack, fusion-only path
+
+- **Deleted** legacy detection modules: `scan/{prepump,predump,presqueeze,early,predump_dump_hunt,scoring,routing,_confirm_shared,pump_cycle,detectors}` and `regime/{leg_fsm,_lifecycle_assess,_lifecycle_sticky}` (~8k LOC).
+- **Moved** survivors: `detect/market_cycle.py` (from `scan/pump_cycle`), `setups/detectors.py` (from `scan/detectors`); `scan/scanner.py` is a thin shim to `detect/routing`.
+- **Delivery helpers**: `gate/_delivery_helpers.py` holds evidence/maps/orderflow helpers formerly scattered in deleted scan modules; consumers rewired (`gate/*`, `deliver/*`, `_cycle_tick`, dev harnesses).
+- **Compat**: `detect/legacy_compat.py` + `probe_compat.py` stubs for removed deep/early formatters; `track/events.py` fixes missing `hard` in `audit_probe_row`.
+- **Config**: pruned `[collect]`, `[lifecycle.squeeze]`, legacy scoring fuel weights; kept CEX catalog thresholds + `[fusion]` section; `params/store.py` pruned `UNIVERSAL_DEFAULTS`.
+- **CCXT**: `market/network.py` proxy screen uses CCXT markets probe only (no raw `fapi.binance.com` ping).
+- **Docs**: `ARCHITECTURE.md`, `docs/CCXT.md`, `docs/IMPLEMENTATION_STATUS.md` updated for fusion-only pipeline.
+- **Verify**: `py_compile` PASS; `check_factors_fusion` PASS; `check_logic` PASS; `check_ccxt` PASS (0 canon violations).
+
+## 2026-06-19 (g) — Mission lock: pre-dump / pre-pump only (no continuation TG)
+
+- **`gate/_mission.py`**: hard block watch TG when dump/pump **already started** (`dump_active`, `impulse_initiating`, …) or fall/leg past imminent window.
+- **Removed** all `_dump_continuation_short_ok` delivery bypasses (`_lifecycle_gates`, `dispatch.sniper`, `_cycle_tick`, `early`, `_cycle_confirm`).
+- **`dump_continuation_short_ok`** → always `False` (deprecated); `DUMP_CONTINUATION_PHASES` emptied.
+- **Defaults:** `HUNT_WIDE_MODE=0`, `HUNT_SNIPER_MODE=1`; sniper allows long pre-pump phases when `HUNT_LONG_TG=1`.
+- **`ENGINE_DESIGN.md`** rewritten around imminent-only watch + separate `/signal` query plane.
+
+## 2026-06-19 (f) — Maps data-completeness + deeper integration + proxy robustness
+
+- **Data completeness**: `build_map_bundle` now ingests funding / top-trader L/S / basis / OI-z / ws-CVD (threaded from `tick_assembly` `market`+`ws_snap`); `MapBundle.extra` carries the raw cross-signal context.
+- **Squeeze-fuel model** (`maps/liquidation.squeeze_fuel_scores`): crowded side (L/S) + funding sign + liq-magnet distribution → `liq_squeeze_fuel_short` (short-squeeze = pump fuel) / `liq_squeeze_fuel_long`; `build_liquidation_map` gains funding/top_ls/basis params. `None` when no inputs (fail-loud).
+- **Accumulation fusion**: `derive_map_features` emits `map_accumulation_score` (VP coil + bid absorption + thin asks + bullish CVD + rising OI) and `map_oi_z`/`map_funding_rate`/`map_basis_pct`/`map_ws_cvd`.
+- **Strategy catalog**: `setups/catalog.map_confluence_logit` adds a bounded (±0.6) map-confluence term to `score_setup_probability` for **every** catalog setup (threaded `market` at both call sites).
+- **Confirm helpers**: `maps_cascade_aligned` / `maps_flow_confirms` / `maps_accumulation_confirms` now leverage `liq_squeeze_fuel_*` and the fused `map_accumulation_score`.
+- **Gate**: `_quality.check_accumulation_long` waives the weak-P(win) block when `map_accumulation_score ≥ 0.6` (mission: don't filter out early pre-pump accumulation).
+- **Proxy robustness**: standard proxy env (`HTTPS_PROXY`/`ALL_PROXY`/`WSS_PROXY`/`BINANCE_PROXY_URL`) is seeded into the **primary** pool (was fallback-only); startup self-heals by persisting the surviving working set to `[bot.network]`. (Reverted an incorrect `[network]` section rename after confirming `HuntSettings` roots config under `[bot]`.)
+- **Verify**: full `py_compile` PASS; 28-module signal-path import PASS; offline harness PASS (build_map_bundle → derive features → catalog scoring lift +0.14 → accumulation/pre-pump confirm → forecast); proxy config round-trip + pool failover offline PASS. Live Binance futures still blocked by geo (`fapi.binance.com`) in this environment.
+
+## 2026-06-19 (e) — Maps mission completion: close forecast wiring + remove dead config
+
+- **Regression fix**: `prepump.confirm_long` used `pos_rng` before assignment (`UnboundLocalError` on every call) — `context_pos_in_range` resolution moved above `maps_secondary_flags` / `early_accum`.
+- **Forecast on `/signal`**: `format_signal_brief_telegram` now renders `format_accumulation_forecast_section`; `query_service.resolve_query_row` populates `row["maps_forecast"]` (fallback build) so the brief always has it when maps exist.
+- **Forecast on confirm/ARMED card**: `dispatch.format_delivery_card` renders the pre-pump forecast block first among map sections (self-guards when absent).
+- **Forecast de-stub**: `maps/forecast.build_maps_forecast` documented as long-only (pre-pump) by design; added explicit `kind="prepump_long"` to the payload; no misleading generic `direction`.
+- **Calibration loop wired into delivery**: `gate/_phase_matrix.phase_matrix_gate` (previously dead/exported-only) now emits `phase_matrix_disable` in `collect_report_blockers`; EV-primary setups bypass it via `filter_ev_primary_legacy_blockers`; self-disables when `self_tuning_frozen()` or no calibration.
+- **Config cleanup**: removed partial dead `MapsConfigModel` + `HuntSettings.maps` (6 of 18 fields, never read); `maps/config.load_maps_config()` is the single source of truth.
+- **Probe fix**: `maps_calibration_probe.score_tick` hardened against `maps["liquidation"]`/`["orderbook"]` being `None`.
+- **Schema**: `MarketBlock` + `MARKET_DESCRIPTIONS` extended (`map_vp_va_width_pct`, `map_cvd_divergence`, `map_void_above_pct`, `liq_forward_weight`); all optional (`total=False`).
+- **Verify**: `py_compile` 185/185; `check_ccxt`, `check_imports`, `check_logic` PASS; calibration persist→load round-trip verified. Live futures probes (`maps_live_smoke`/`smoke_signals`/`probe_delivery`) blocked by `fapi.binance.com` 451 geo-block + proxy pool exhausted in this environment — re-run where Binance futures is reachable.
+
+## 2026-06-19 (d) — Maps mission integration: pre-pump engine + forecast + calibration loop
+
+- **Accumulation features**: `derive_vp_accumulation_features` (VA contraction, `map_vp_accumulation`); `derive_ob_accumulation_features` (`map_accum_bid_absorption`, `map_void_above`, `map_ask_thinning`); exported via `derive_map_features`.
+- **Pre-pump wiring**: `presqueeze` map-coil path; `detect_accumulation_breakout` / `detect_squeeze_expansion` fire **before** price break on strong maps; `prepump.confirm_long` early-accum confirm (1 structural + map confluence); `scoring.long_analysis` accumulation triggers.
+- **Gates**: `mtf_confirm_veto` waives bear-1h / basis-overheat when `maps_accumulation_confirms`; `forward_confidence_min` from config (not hardcoded 0.25).
+- **Forecast**: `maps/forecast.build_maps_forecast` → `row["maps_forecast"]`; pinned scenario + `/signal` via `format_accumulation_forecast_section`.
+- **Calibration loop**: `params/store.maps_calibration` + `save_maps_calibration`; `maps_calibration_probe --persist`; `liquidation._resolved_forward_confidence` replaces naive event-count formula.
+- **Ops**: `1w` VP in tick `frame_map`; map lake flush on cycle shutdown (`data/lake/maps_bundles.jsonl`).
+
+## 2026-06-19 (c) — Pre-pump / pre-dump maps wiring
+
+- **`_confirm_shared`**: `map_*` triggers count toward fuel clusters; map cascade/sticky/CVD in `leading_flow_ignition_score` and `_orderflow_confirm_aligned`.
+- **`predump.confirm_dump` / `prepump.confirm_long`**: hard confirm via `map_liq_cascade_*` when forward liq confidence ≥0.25; secondary counts map cascade/sticky/flow flags.
+- **`tick_assembly`**: `allow_oi_fetch` on hot tier when symbol is `hot_carry` so forward OID warms on the hot loop.
+
+## 2026-06-19 — Professional multi-exchange maps (`hunt_core/maps/`)
+
+- **New package `hunt_core/maps/`**: Map 1 orderbook heatmap (walls/sticky/void/footprint), Map 2 liquidation (real multi-exchange WS + entry-anchored forward overlay with confidence), Map 3 cumulative volume profile (multi-period/developing VP, HVN/LVN, naked POC).
+- **`MapTimeSeriesStore`**: ring buffers + JSONL lake persistence (`data/lake/maps/snapshots.jsonl` on flush).
+- **Integration**: `tick_assembly` → `build_map_bundle` → `derive_map_features` → `row["market"]`; Bybit/OKX `watchLiquidations` when `HUNT_CROSS_WS=1`; gate map veto (`gate/_maps.py`); scoring + liquidity scenarios; Telegram sections (liq map, orderflow).
+- **Config**: `[maps]` in `hunt/config.defaults.toml`; `HUNT_MAPS_*` env overrides.
+- **Calibration**: `python -m hunt_core._dev.maps_calibration_probe` replays tick JSONL for forward vs realized overlap + sticky-wall reaction score.
+
+## 2026-06-19 (b) — Maps completion pass
+
+- **OID forward path**: `fetch_oi_bars_for_maps` + `maps/oi.py` align OI to OHLCV; cached in `MapTimeSeriesStore`; wired through `cross.attach_cross_microstructure` and `tick_assembly` / `symbol_probe`.
+- **Map 1 depth**: depth heatmap matrix, iceberg/absorption/spoof/CVD divergence, `merge_full_depth_bins`, `book_deep_top_n` REST on slow path.
+- **Engine**: `max_symbols` eviction, OI/liq-estimate cache, calibration updates `forward_confidence`.
+- **Signals**: `apply_liquidity_to_mtf_scores(..., market=)` map boosts; confluence passes `market`.
+- **Delivery**: confirm card (`format_delivery_card`) + upgraded VP/walls/cross-micro sections; `volume_profile` removed from `LIVE_SKIPPABLE_GROUPS`.
+- **Schema**: `maps_snapshot`, `liq_forward_confidence`, `map_stacked_imbalance` on `SymbolContext`; `MARKET_DESCRIPTIONS` extended.
+
+## 2026-06-18 — Handoff plan H0–H9 (live validation + wiring gaps)
+
+- **H1 live:** 3-min continuous watch (`send_telegram=False`); `ev_primary_shadow×56` in telemetry; zero tick crashes post lifecycle fix.
+- **H2 calibration:** `rebuild_calibration` verified on watch boot; per-setup `setup_ev_flip_eligible` (n≥8) in `catalog.promote_catalog_ev_setup`.
+- **H3 hardening:** `probe_delivery --live` uses proxied `create_hunt_market_plane_from_settings`; `_ensure_kinematic_row_fields` backfills chg for kinematic gate.
+- **H4 Phase C:** `check_meme_pump_volume_ratio` on declarative stack; `detect_btc_decoupled` + `pump_cycle` hooks in `detect_dump_initiation`.
+- **H5 truth:** `_latched_levels_payload` reads `delivered_levels_snapshot`; `agg_trade_buy_ratio_*` typed in schemas.
+- **H6 message:** removed duplicate raw trigger footer from delivery card.
+- **H7/H8:** `setup_lake_outcome_n` / flip table; `domain/structure_state.py` wired on tick rows; `EARLY_LEVELS_VETO_BLOCK` selective early alerts.
+
+## 2026-06-18 — P4: QueryService (QueryResult ≠ DeliveryGate)
+
+- **`runtime/query_service.py`**: `QueryResult`, `DirectionQuery`, `build_query_result`, `resolve_query_row`, `format_query_telegram`.
+- **`/signal`**: always shows full scenario brief + formation/delivery status + up to 5 blockers (no early exit on gate block).
+- Store path uses `evaluate_delivery_fast` + `refresh_live_price=False`; live/`--live` uses full delivery eval.
+- **`_dev/probe_delivery`**: uses `build_query_result` for parity; reports `formation_code`, `would_deliver`, all blocker codes.
+
+## 2026-06-18 — P3: anticipation entries (distribution → initiating)
+
+- **`tick_assembly`**: structure `setup_type` + `apply_setup_type_primary_confirm` **before** `confirm_dump`; structure passed to catalog via `prepared_row`.
+- **`predump.confirm_dump`**: seeds `confirm_hard` from catalog/structure; `distribution_structure_confirm` path for LC `{distribution, dump_initiating}` with `anticipation_short_primary_ok` (fall ≤5%, structure + secondary/div).
+- **`detectors.detect_dump_initiation`**: forming path without `close_below_support` — rejection wick, `pp_short_early`, sweep_reclaim.
+- **`catalog.merge_dump_initiation_into_setup`**: tags `anticipation=True`, `entry_archetype=anticipation`.
+- **`early.py`**: `SHORT_PREP_LC` + armed fall window includes `dump_initiating` (up to `short_first_break_max_fall_pct`).
+- **`gate/_rr`**: `SHORT_DUMP_START_LC_PHASES` includes `dump_initiating` (late-entry waiver 3–5% fall).
+- **`gate/_quality`**: exhaustion fade uses forming floor when `anticipation` / `distribution_structure_confirm`.
+
+## 2026-06-18 — P2: unified dump continuation gate + engine design spec
+
+- **`gate/_rr.py`**: `short_dump_delivery_too_late` now consults `dump_continuation_short_ok` — single waiver for lifecycle, quality, report, and RR paths (fixes parallel hard-block in `_quality.py` / `_report.py`).
+- **`docs/ENGINE_DESIGN.md`**: first-principles spec — three planes, entry archetypes, gate stack, prior weights, calibration scope.
+
+## 2026-06-18 — Phase 8: cycle run_tick + run_loop extract
+
+- **`runtime/cycle/_cycle_tick.py`** (~1580 LOC) — `run_tick` (per-symbol snapshot, delivery, follow-ups)
+- **`runtime/cycle/_cycle_loop.py`** (~714 LOC) — `run_loop`, digest candidates, prescan/universe scheduling
+- **`cycle/_impl.py`**: ~945 → **~323 LOC** (delivery helpers, `run_hot_kline_tick`, re-exports)
+- Fixes: confirm imports from `_cycle_confirm`; lazy `_impl` bind inside `run_tick` / `run_loop`
+
+## 2026-06-18 — Phase 8: cycle _impl split (advisory/format/reconcile)
+
+- **`runtime/cycle/_cycle_advisory.py`** (~250 LOC) — liq burst, early alert, cooldown, entry_past_tp1
+- **`runtime/cycle/_cycle_format.py`** (~270 LOC) — `_format_setup_lines`, phase badges, reason humanizer
+- **`runtime/cycle/_cycle_reconcile.py`** (~271 LOC) — orphan/in-watch reconcile, follow-up TG delivery
+- **`cycle/_impl.py`**: ~3092 → **~2406 LOC** (`run_tick` / `run_loop` remain)
+- **Phase 6:** `replay_row.load_replay_rows()` — JSONL + lake parquet (`--parquet` CLI flag)
+
+## 2026-06-18 — Phase 8: lifecycle assess + cycle confirm split
+
+- **`regime/_lifecycle_assess.py`** (~1010 LOC) — `assess_hunt_lifecycle`, `htf_bias_override`, `effective_support_break`, guards
+- **`leg_fsm.py`**: ~1297 → **~310 LOC** (types + promote/attach + re-exports)
+- **`runtime/cycle/_cycle_confirm.py`** (~179 LOC) — confirm suppression, blocked telemetry, bias-wait gate
+- **`cycle/_impl.py`**: ~3241 → **~3092 LOC**
+
+## 2026-06-18 — Phase 8: followups + leg_fsm split
+
+- **`track/_followups.py`** (~495 LOC) — `evaluate_followups`, level-test tracking, armed→triggered, bias-flip
+- **`tracker.py`**: ~1455 → **~995 LOC**
+- **`regime/_delivery_fsm.py`** (~202 LOC) — `DeliveryStage`, `advance_delivery_fsm`, `record_delivery_fsm`
+- **`regime/_lifecycle_sticky.py`** (~208 LOC) — `stabilize`, `reset_symbol`, sticky debounce
+- **`leg_fsm.py`**: ~1654 → **~1297 LOC** (re-exports unchanged public API)
+
+## 2026-06-18 — Phase 8: tracker levels engine split
+
+- **`track/_trailing.py`** (~205 LOC) — MFE, ATR trail ratchet, TP1 management
+- **`track/_evaluate_levels.py`** (~567 LOC) — `_bar_extremes`, `_stale_lifecycle_invalidate`, `evaluate_levels`
+- **`tracker.py`**: ~2145 → **~1455 LOC**
+- **`replay_row.batch_delivery_replay`** — `ev_shadow_mean` / `ev_shadow_negative` in summary
+
+## 2026-06-18 — Phase 1 brief + Phase 8 tracker cooldowns
+
+- **`deliver/_brief.py`** — `format_signal_brief_telegram` + scenario helpers (~349 LOC)
+- **`telegram.py`**: ~1250 → **~910 LOC** (transport + re-exports only)
+- **`track/_cooldowns.py`** — post-SL, burst cap, daily TG cap, repeat-loser policy (~280 LOC)
+- **`tracker.py`**: ~2386 → **~2145 LOC** (re-exports cooldowns; lifecycle/evaluate_levels unchanged)
+- **Watch startup:** `rebuild_calibration()` + `invalidate_calibration_cache()` on each `watch` boot
+
+## 2026-06-18 — Phase 1 followup + Phase 6 EV delivery
+
+- **`deliver/_followup.py`** — `format_followup_telegram` (+ PnL/duration helpers)
+- **`deliver/_sections.py`** — MTF, volume profile, book walls, cross-micro, cross-exchange sections
+- **`telegram.py`**: 1956 → **~1250 LOC** (re-exports from `_followup` / `_sections`)
+- **Phase 6:** `HUNT_EV_DELIVERY=1` + `HUNT_EV_MIN` production gate in `policy._decl_check_ev_shadow`
+- **`rebuild_calibration.py`** — tracker closed outcomes + `export_phase_calibration()` → `hunt_calibration.json`
+- **`intrabar_ignition`** counts as structural hard confirm in `_rr.structural_hard_count`
+
+## 2026-06-18 — Phase 1: telegram formatters → dispatch
+
+- **`deliver/_labels.py`** — `fmt_price`, `phase_human`, `trigger_human`, ratings
+- **`deliver/_context_lines.py`** — POC/liq/walls context, structured thesis
+- **`format_delivery_card`** enriched: thesis, context, rating, TP labels, pump history
+- **`format_entry_telegram`** → thin alias of `format_delivery_telegram`
+- **`telegram.py`**: −~600 LOC formatter duplicates removed
+
+## 2026-06-18 — Gate facade <150 LOC (Phase 5 target met)
+
+- **`gate/_phase_matrix.py`** — `PhaseStats`, `disabled_phase_pairs`, `phase_matrix_gate`
+- **`gate/_freshness.py`** — entry zone, tier, stale hard blocks, `tp1_progress_block`
+- **`gate/_lifecycle.py`** — `lifecycle_dict`, core lifecycle vetoes
+- **`gate/_report.py`** — `collect_report_blockers`, `evaluate_alert_gate`, formation/stale helpers
+- **`delivery.py`**: 926 → **142 LOC** (re-export facade only)
+
+## 2026-06-18 — Gate module split (Phase 5 continued)
+
+- **`gate/_types.py`** — `GateResult`, `REPORT_BLOCK_PRIORITY`
+- **`gate/_wash.py`** — wash + kinematic (A8–A10)
+- **`gate/_rr.py`** — min R:R, TP2 room, short dump timing, structural hard count
+- **`gate/_filters.py`** — `directional_filters`, phase-aware `hard_filter_blocks`
+- **`delivery.py`**: 1710 → **926 LOC** (facade + phase-matrix + freshness/tier + report stack)
+
+## 2026-06-18 — Gate split + NEW DESIGN primary confirms
+
+- **Phase 5:** `gate/_registry.py` (pipeline pre-blockers, `register_gate`, `run_gate_pipeline`); `delivery.py` 1988→1710 LOC
+- **Phase 4B:** `gate/_prokol.py`; tf_trap prokol → `prokol_reclaim_{dir}` confirm_hard + `sweep_reclaim` setup_type
+- **Phase 3:** `bos_retest_{dir}` confirm_hard via `apply_setup_type_primary_confirm` on tick assembly
+- **Phase 0:** scoring fail-loud `data_quality.violations` when 15m ATR missing
+
+## 2026-06-18 — Full phases plan (0–8, no live/smoke)
+
+- **Phase 0:** JSONL rotation on prep_shadow + setup_candidates; `record_data_quality_violation`; T1 liq docs in `CCXT.md`
+- **Phase 1:** telegram worst-entry TP%; dispatch conviction line + phantom liq filter; MLIVE-7 route_tick single-dir delivery
+- **Phase 2:** `domain/snapshot.py` MarketSnapshot; `stamp_market_derivatives_provenance` wired; tick `snapshot` block
+- **Phase 3–5:** `collect_lifecycle_blockers` wired; dump_continuation TG waivers removed; RR floor → `_DELIVERY_MIN_RR_FLOOR`; declarative `setup_type` / `meme_anomaly` / `ev_shadow` gates
+- **Phase 6:** `batch_delivery_replay` summary; `data/calibration.json`; `ev/model_shadow.py`; `HUNT_EV_FLIP` gate
+- **Phase 7:** `give_back_analysis.py`; `sniper_hold` vs `lifecycle_stale` hold_reason
+- **Phase 8:** `_lifecycle_gates` integrated into `collect_report_blockers`
+
+## 2026-06-18 — Full rollout (zesty-drifting-cosmos Phases 2–8)
+
+- **Phase 2:** kline-first CVD in `resolve_flow_cvd_px`; `stamp_market_field_provenance`; freshness gate wired
+- **Phase 3:** structure-primary bias (`_resolve_recommended_bias`); `classify_structural_setup_type`; lifecycle context veto (MLIVE-8)
+- **Phase 4:** `route_tick` single-direction + early_armed priority; `dump_continuation` → watch-only (predump/scoring)
+- **Phase 5:** declarative `lifecycle_context` gate; `watch_only` delivery block; templates → `format_delivery_card`
+- **Phase 6:** `compute_rule_based_ev` shadow on tick row; `batch_delivery_replay` harness
+- **Phase 7:** ATR-relative trailing confirmed in tracker (`atr_trail_risk_fraction`)
+- **Phase 8:** extracted `gate/_lifecycle_gates.py`
+
 ## 2026-06-15 — Legacy purge (post-CCXT)
 
 - Removed orphan modules: `domain/limit_entry.py`, `domain/setup_registry.py`, `config_defaults.py`, `runtime/settings.py`, `features/levels.py`

@@ -115,5 +115,42 @@ def try_binance_id_from_ccxt(symbol: str, *, exchange: Any) -> str | None:
     try:
         return from_ccxt_symbol(raw, exchange=exchange)
     except (SymbolResolutionError, ccxt.BadSymbol, ccxt.ExchangeError) as exc:
-        LOG.warning("ccxt_symbol_to_binance_skipped | raw=%s error=%s", raw, exc)
+        LOG.debug("ccxt_symbol_to_binance_skipped | raw=%s error=%s", raw, exc)
         return None
+
+
+def is_tradable_linear_usdt(symbol: str, *, exchange: Any) -> bool:
+    """True when symbol resolves to an active USDⓈ-M linear perp in loaded CCXT markets."""
+    sym = to_binance_symbol(symbol)
+    if not sym:
+        return False
+    return try_resolve_linear_usdt_swap(sym, exchange=exchange) is not None
+
+
+def filter_tradable_symbols(
+    symbols: list[str] | tuple[str, ...] | set[str],
+    *,
+    exchange: Any,
+    label: str = "universe",
+) -> list[str]:
+    """Drop delisted / unknown ids before watch, WS, or REST analysis."""
+    out: list[str] = []
+    dropped: list[str] = []
+    seen: set[str] = set()
+    for raw in symbols:
+        sym = to_binance_symbol(str(raw or ""))
+        if not sym or sym in seen:
+            continue
+        if is_tradable_linear_usdt(sym, exchange=exchange):
+            seen.add(sym)
+            out.append(sym)
+        else:
+            dropped.append(sym)
+    if dropped:
+        LOG.info(
+            "symbol_gate_dropped | label=%s dropped=%s kept=%d",
+            label,
+            dropped[:12],
+            len(out),
+        )
+    return out

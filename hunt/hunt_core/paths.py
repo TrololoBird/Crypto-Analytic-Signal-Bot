@@ -31,6 +31,7 @@ SETUP_CANDIDATES_EVENTS = DATA / "setup_candidates.jsonl"
 MARKET_REGIME = DATA / "market_regime.json"
 # Persistent closed signal archive — append-only, never wiped, used for backtest/autotune
 SIGNAL_HISTORY = DATA / "signal_history.jsonl"
+SENT_MESSAGES = DATA / "sent_messages.jsonl"
 BACKTEST_OUTCOMES = DATA / "backtest_outcomes.jsonl"
 # ATR-enriched grade (realistic vol-based levels) — preferred truth source when present
 BACKTEST_OUTCOMES_ENRICHED = DATA / "backtest_outcomes_enriched.jsonl"
@@ -46,6 +47,7 @@ DUMP_HUNT_ALERT_STATE = DATA / "dump_hunt_alert_state.json"
 LAKE = DATA / "lake"
 LAKE_DB = LAKE / "hunt_lake.sqlite"
 LAKE_PARQUET = LAKE / "parquet"
+MAPS_LAKE_JSONL = LAKE / "maps_bundles.jsonl"
 UNIFIED_LABELS = DATA / "unified_labels.jsonl"
 BASELINE_DIR = DATA / "baseline"
 
@@ -67,6 +69,7 @@ __all__ = [
     "LAKE",
     "LAKE_DB",
     "LAKE_PARQUET",
+    "MAPS_LAKE_JSONL",
     "MARKET_REGIME",
     "PREP_SHADOW_EVENTS",
     "PREP_SHADOW_STATE",
@@ -77,6 +80,7 @@ __all__ = [
     "SESSION_DIR",
     "SIGNAL_EVENTS",
     "SIGNAL_HISTORY",
+    "SENT_MESSAGES",
     "SIGNAL_STATE",
     "SNAPSHOTS",
     "TELEGRAM_COOLDOWN",

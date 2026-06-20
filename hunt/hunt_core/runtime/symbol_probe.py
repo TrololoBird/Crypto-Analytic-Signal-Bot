@@ -24,7 +24,7 @@ from hunt_core.market import HuntCcxtClient
 from hunt_core.deliver.telegram import TelegramBroadcaster
 
 from hunt_core.gate.delivery import evaluate_alert_gate, evaluate_formation
-from hunt_core.analysis.deep_signal import (
+from hunt_core.detect.probe_compat import (
     btc_market_context,
     forming_confirm_gaps,
     probe_header,
@@ -264,12 +264,14 @@ def format_signal_probe_telegram(
             lines.append(f"⛔ Алерт заблокирован: <i>{html.escape(gate.message)}</i>")
     if added_watch:
         lines.append(
-            f"✅ Добавлен в watchlist (<code>{watch_bias}</code>) — пришлю сигнал при confirm."
+            f"✅ Добавлен в watchlist (<code>{watch_bias}</code>) — "
+            "уведомлю при pre-setup (<code>dump_imminent</code> / "
+            "<code>long_imminent</code>)."
         )
     else:
         lines.append(
-            "ℹ️ Уже в watchlist — уведомлю при confirm (<code>dump_confirmed</code> / "
-            "<code>long_confirmed</code>)."
+            "ℹ️ Уже в watchlist — уведомлю при pre-setup (<code>dump_imminent</code> / "
+            "<code>long_imminent</code>)."
         )
     lines.append("<i>On-demand probe · staggered REST · не прерывает hunt loop</i>")
     return "\n".join(lines)
@@ -298,6 +300,18 @@ async def probe_symbol_signal(
 
     catalog_probe = probe_kind == "catalog"
     delivery_probe = probe_kind == "delivery"
+    if probe_kind == "signal" and not delivery_probe:
+        from hunt_core.runtime.query_service import STORE_STALE_S, row_age_seconds
+        from hunt_core.runtime.tick_state import last_tick_store
+
+        cached = last_tick_store().resolve(sym)
+        if isinstance(cached, dict) and not cached.get("error"):
+            age = row_age_seconds(cached)
+            if age is not None and age <= STORE_STALE_S:
+                out = dict(cached)
+                out["_query_source"] = "tick_store"
+                return out
+
     if catalog_probe:
         auto_watchlist = False
 
@@ -312,10 +326,23 @@ async def probe_symbol_signal(
         min_bars_1h=settings.filters.min_bars_1h,
         min_bars_4h=settings.filters.min_bars_4h,
     )
-    owned_client = client is None
+    settings = load_settings()
+    owned_plane = None
     if client is None:
-        client = HuntCcxtClient.from_settings(settings)
-    await client.load_markets()
+        from hunt_core.market.factory import create_hunt_market_plane_from_settings
+
+        owned_plane = await create_hunt_market_plane_from_settings(settings)
+        client = owned_plane.client
+    if not getattr(client, "_markets_loaded", False):
+        await client.load_markets()
+    from hunt_core.market.symbol_gate import is_allowed_for_analysis
+
+    if not is_allowed_for_analysis(sym, exchange=client.exchange):
+        return {
+            "symbol": sym,
+            "error": "symbol_not_tradable",
+            "detail": "delisted or not in Binance USD-M CCXT markets",
+        }
     probe_timeout = (
         _FAST_PROBE_TIMEOUT_S
         if lite_probe
@@ -338,6 +365,7 @@ async def probe_symbol_signal(
             funding_info_all = cache.funding_info_all
             exchange_by_sym = cache.exchange_by_sym
             btc_work_1h = cache.btc_work_1h
+            btc_work_1m = cache.btc_work_1m
         else:
             premium_all = await safe_fetch(
                 client.fetch_premium_index_all(), context="premium_index_all"
@@ -353,12 +381,19 @@ async def probe_symbol_signal(
             exchange_by_sym = {r.symbol: r for r in exchange_list}
             await asyncio.sleep(stagger_ms / 1000.0)
             btc_work_1h = None
+            btc_work_1m = None
             btc_df = await safe_fetch(
                 client.fetch_klines_cached("BTCUSDT", "1h", limit=500),
                 context="btc_klines_1h",
             )
             if btc_df is not None and not btc_df.is_empty():
                 btc_work_1h = _prepare_frame(btc_df)
+            btc_1m = await safe_fetch(
+                client.fetch_klines_cached("BTCUSDT", "1m", limit=999),
+                context="btc_klines_1m",
+            )
+            if btc_1m is not None and not btc_1m.is_empty():
+                btc_work_1m = _prepare_frame(btc_1m)
 
         if ticker_by_sym is None:
             ticker_raw = await safe_fetch(client.fetch_ticker_24h(), context="ticker_24h") or []
@@ -376,6 +411,7 @@ async def probe_symbol_signal(
                 premium_all=premium_all,
                 funding_info_all=funding_info_all,
                 btc_work_1h=btc_work_1h,
+                btc_work_1m=btc_work_1m,
                 exchange_by_sym=exchange_by_sym,
                 ticker_by_sym=ticker_by_sym,
                 ws_feed=None,
@@ -434,6 +470,60 @@ async def probe_symbol_signal(
                             row["book_walls"] = cross_walls
                     except Exception as _cm_exc:
                         LOG.warning("cross_microstructure_failed | sym=%s error=%s", sym, _cm_exc)
+                    try:
+                        from hunt_core.maps.engine import apply_map_bundle_to_row, build_map_bundle, get_map_store
+
+                        store = get_map_store()
+                        oi_bars = store.get_cached_oi_bars(sym)
+                        cx = row.get("cross_microstructure") or {}
+                        liq_est = cx.get("liquidation_estimate") if isinstance(cx, dict) else None
+                        if oi_bars is None and isinstance(liq_est, dict):
+                            oi_bars = liq_est.get("oi_bars")
+                        prepared = row.get("_prepared")
+                        frame_map: dict[str, Any] = {}
+                        if prepared is not None:
+                            for tf_key, frame_key in (
+                                ("1h", "work_1h"),
+                                ("4h", "work_4h"),
+                                ("15m", "work_15m"),
+                                ("1d", "work_1d"),
+                            ):
+                                w = getattr(prepared, frame_key, None)
+                                if w is not None and hasattr(w, "is_empty") and not w.is_empty():
+                                    frame_map[tf_key] = w
+                        book_walls = row.get("book_walls") if isinstance(row.get("book_walls"), dict) else None
+                        deep_bids: list[tuple[float, float]] | None = None
+                        deep_asks: list[tuple[float, float]] | None = None
+                        if isinstance(book_walls, dict):
+                            per_ex = book_walls.get("per_exchange") or {}
+                            primary = per_ex.get("binance") if isinstance(per_ex, dict) else None
+                            if isinstance(primary, dict):
+                                if isinstance(primary.get("bids"), list):
+                                    deep_bids = [
+                                        (float(x[0]), float(x[1])) for x in primary["bids"] if len(x) >= 2
+                                    ]
+                                if isinstance(primary.get("asks"), list):
+                                    deep_asks = [
+                                        (float(x[0]), float(x[1])) for x in primary["asks"] if len(x) >= 2
+                                    ]
+                        market = row.get("market") or {}
+                        bundle = build_map_bundle(
+                            symbol=sym,
+                            current_price=float(row.get("price") or 0),
+                            book_walls=book_walls,
+                            frames=frame_map or None,
+                            cross_vp=(cx.get("volume_profile_1h") if isinstance(cx, dict) else None),
+                            oi_bars=oi_bars if isinstance(oi_bars, list) else None,
+                            oi_usd=float(market.get("oi_usd") or 0) or None,
+                            global_ls_ratio=float(market.get("top_ls_1h") or market.get("global_ls_1h") or 0)
+                            or None,
+                            deep_bids=deep_bids,
+                            deep_asks=deep_asks,
+                            store=store,
+                        )
+                        apply_map_bundle_to_row(row, bundle)
+                    except Exception as _map_exc:
+                        LOG.debug("symbol_probe_maps_failed | sym=%s error=%s", sym, _map_exc)
         audit_source = (
             "delivery_probe"
             if delivery_probe
@@ -470,17 +560,20 @@ async def probe_symbol_signal(
             )
             direction, _, _, _ = resolve_trade_direction(row)
             setup = dump if direction == "short" else long_setup
-            notify_phase = str(setup.get("phase") or "dump_confirmed" if direction == "short" else "long_confirmed")
+            notify_phase = (
+                "dump_imminent" if direction == "short" else "long_imminent"
+            )
             register_signal_notify(
                 sym,
                 direction=direction,
                 phase=notify_phase,
+                notify_on_forming=True,
             )
             row["_watchlist_added"] = added
         return row
     finally:
-        if owned_client:
-            await client.close()
+        if owned_plane is not None:
+            await owned_plane.aclose()
 
 
 async def probe_symbol_catalog(
@@ -502,6 +595,7 @@ async def probe_pinned_deep(
     *,
     stagger_ms: int = 200,
     auto_watchlist: bool = True,
+    client: HuntCcxtClient | None = None,
 ) -> dict[str, Any]:
     """Extended REST + full prepare + microstructure for pinned anchors."""
     import os
@@ -509,8 +603,19 @@ async def probe_pinned_deep(
     from hunt_core.analysis.pinned_deep import build_pinned_verdict
     from hunt_core.features.microstructure import build_microstructure_context
     from hunt_core.data.universe import cache_is_fresh, load_pinned_cache
+    from hunt_core.runtime.query_service import STORE_STALE_S, row_age_seconds
+    from hunt_core.runtime.tick_state import last_tick_store
 
     sym = normalize_symbol(symbol)
+    cached = last_tick_store().resolve(sym)
+    if isinstance(cached, dict) and not cached.get("error") and cached.get("pinned_verdict"):
+        age = row_age_seconds(cached)
+        if age is not None and age <= STORE_STALE_S:
+            out = dict(cached)
+            out["_query_source"] = "tick_store"
+            if cache_is_fresh(sym):
+                out["_pinned_cache"] = load_pinned_cache(sym)
+            return out
     old_full = os.environ.get("HUNT_FULL_PREPARE")
     os.environ["HUNT_FULL_PREPARE"] = "1"
     try:
@@ -518,6 +623,7 @@ async def probe_pinned_deep(
             sym,
             stagger_ms=stagger_ms,
             auto_watchlist=auto_watchlist,
+            client=client,
         )
         if row.get("error"):
             return row
@@ -566,6 +672,36 @@ async def probe_pinned_deep(
             os.environ["HUNT_FULL_PREPARE"] = old_full
 
 
+async def probe_deep_only(
+    symbol: str,
+    *,
+    stagger_ms: int = 200,
+    client: HuntCcxtClient | None = None,
+) -> dict[str, Any]:
+    """Deep product probe — enrich pinned/MTF without watchlist side effects."""
+    sym = normalize_symbol(symbol)
+    if sym in PINNED_SYMBOLS:
+        row = await probe_pinned_deep(
+            sym, stagger_ms=max(stagger_ms, 200), auto_watchlist=False, client=client
+        )
+    else:
+        row = await probe_symbol_signal(
+            sym,
+            stagger_ms=stagger_ms,
+            auto_watchlist=False,
+            client=client,
+        )
+        row["_deep_analysis"] = True
+    if row.get("error"):
+        return row
+    from hunt_core.analysis.deep.build import build_deep_report
+
+    deep = build_deep_report(row, include_watch_appendix=False)
+    row["_deep_verdicts"] = deep.verdicts
+    row["pinned_verdict"] = deep.pinned_verdict or row.get("pinned_verdict")
+    return row
+
+
 async def _tracker_levels_backtest(client: Any, sym: str) -> dict[str, Any] | None:
     """Mini forward backtest: replay latched levels of the active tracker signal
     over closed 5m bars since open; lets /signal audit compare outcome vs tracker."""
@@ -607,22 +743,35 @@ async def _tracker_levels_backtest(client: Any, sym: str) -> dict[str, Any] | No
     return None
 
 
+_SIGNAL_STORE_FRESH_S = 180.0  # re-export compat; canonical: query_service.STORE_FRESH_S
+
+
+def _row_age_seconds(row: dict[str, Any]) -> float | None:
+    from hunt_core.runtime.query_service import row_age_seconds
+
+    return row_age_seconds(row)
+
+
 async def deliver_signal_probe(
     broadcaster: TelegramBroadcaster,
     symbol: str,
     *,
     stagger_ms: int = _STAGGER_MS,
+    live: bool = False,
+    client: HuntCcxtClient | None = None,
 ) -> dict[str, Any]:
-    """Run probe and send a brief Telegram reply (two scenarios + short note)."""
-    sym = normalize_symbol(symbol)
-    if sym in PINNED_SYMBOLS:
-        row = await probe_pinned_deep(sym, stagger_ms=max(stagger_ms, 200), auto_watchlist=True)
-    else:
-        row = await probe_symbol_signal(sym, stagger_ms=stagger_ms, auto_watchlist=True)
-        row["_deep_analysis"] = True
-        from hunt_core.analysis.deep_signal import build_poc_level_scenarios
+    """Reply with query result for ``symbol`` (store-first, full blocker explain)."""
+    from hunt_core.runtime.query_service import (
+        build_query_result,
+        format_query_telegram,
+        resolve_query_row,
+        spawn_background_refresh,
+    )
 
-        build_poc_level_scenarios(row)
+    sym = normalize_symbol(symbol)
+    row, _source, from_store, age_s = await resolve_query_row(
+        sym, live=live, stagger_ms=stagger_ms, client=client
+    )
     audit = row.get("_signal_audit") or {}
     if row.get("error"):
         extra = ""
@@ -634,60 +783,22 @@ async def deliver_signal_probe(
         )
         return row
 
-    dump = row.get("dump") or {}
-    long_setup = row.get("long") or {}
-    lc = row.get("lifecycle") or {}
-
-    if dump.get("confirmed"):
-        show_dir, conf_setup = "short", dump
-    elif long_setup.get("confirmed"):
-        show_dir, conf_setup = "long", long_setup
-    else:
-        show_dir, conf_setup = "", {}
-
-    delivery_tier = None
-    if show_dir:
-        from hunt_core.deliver.dispatch import evaluate_delivery
-        from hunt_core.runtime.state import SNIPER_CONFIG
-
-        gate, delivery_tier = evaluate_delivery(
-            row,
-            direction=show_dir,
-            setup=conf_setup,
-            lifecycle=lc if isinstance(lc, dict) else None,
-            symbol=sym,
-            sniper_config=SNIPER_CONFIG,
-            refresh_live_price=True,
-        )
-        if not gate.ok:
-            await broadcaster.send_html(
-                f"🚫 <b>/signal blocked</b> {html.escape(sym.replace('USDT', '-USDT'))}\n"
-                f"<code>{html.escape(gate.code or 'gate')}</code>\n"
-                f"<i>{html.escape(gate.message or '')}</i>",
-                no_split=True,
-            )
-            return row
-        if delivery_tier is None:
-            await broadcaster.send_html(
-                f"⏭ <b>/signal stale</b> {html.escape(sym.replace('USDT', '-USDT'))}\n"
-                "<i>Цена уже за TP1 или геометрия входа недействительна</i>",
-                no_split=True,
-            )
-            return row
-
-    from hunt_core.deliver.telegram import format_signal_brief_telegram
-
-    brief = format_signal_brief_telegram(
-        row,
-        confirmed_direction=show_dir or None,
-        added_watch=bool(row.get("_watchlist_added")),
-        delivery_tier=delivery_tier,
+    query = build_query_result(
+        row, sym, source=_source, from_store=from_store, age_s=age_s
     )
-    if brief:
-        from hunt_core.analysis.confluence_grid import build_confluence_grid, format_grid_telegram
+    text = format_query_telegram(
+        query, added_watch=bool(row.get("_watchlist_added"))
+    )
+    from hunt_core.analysis.confluence_grid import build_confluence_grid, format_grid_telegram
+    from hunt_core.deliver._sections import format_intraday_maps_telegram
 
-        grid = build_confluence_grid(row)
-        if grid:
-            brief = f"{brief}\n\n{format_grid_telegram(grid)}"
-        await broadcaster.send_html(brief, no_split=True)
+    grid = build_confluence_grid(row)
+    if grid:
+        text = f"{text}\n\n{format_grid_telegram(grid)}"
+    maps_block = format_intraday_maps_telegram(row)
+    if maps_block:
+        text = f"{text}\n\n{maps_block}"
+    await broadcaster.send_html(text, no_split=True)
+    if from_store and row.get("_stale_store"):
+        spawn_background_refresh(sym, client=client, stagger_ms=stagger_ms)
     return row

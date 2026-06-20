@@ -21,6 +21,7 @@ from hunt_core.market.network import (
     filter_working_proxies_ccxt,
     mask_proxy_url,
     probe_ccxt_direct,
+    resolve_proxy_url,
 )
 from hunt_core.market.symbols import to_ccxt_symbol
 
@@ -389,6 +390,82 @@ def _drop_incomplete_ohlcv_tail(
     return df
 
 
+_RESAMPLE_FROM_1M_INTERVALS = frozenset({"5m", "15m", "1h", "4h", "1d"})
+
+
+def min_1m_bars_for_resample(interval: str, target_limit: int, *, exchange: Any) -> int:
+    """How many 1m bars are needed to derive ``target_limit`` bars at ``interval``."""
+    if interval == "1m":
+        return max(1, int(target_limit))
+    step_s = interval_to_seconds(interval, exchange)
+    bars_per_bucket = max(1, step_s // 60)
+    return min(1500, int(target_limit) * bars_per_bucket + bars_per_bucket)
+
+
+def resample_ohlcv_from_1m(
+    df_1m: pl.DataFrame,
+    interval: str,
+    *,
+    exchange: Any,
+    limit: int | None = None,
+) -> pl.DataFrame:
+    """U3: derive higher TF OHLCV from 1m via Polars ``group_by_dynamic`` (MTF-consistent)."""
+    if df_1m.is_empty() or interval == "1m" or interval not in _RESAMPLE_FROM_1M_INTERVALS:
+        return df_1m
+    work = df_1m
+    if "open_time" not in work.columns and "time" in work.columns:
+        work = work.with_columns(pl.col("time").alias("open_time"))
+    if "open_time" not in work.columns:
+        return pl.DataFrame(schema=_KLINE_FRAME_SCHEMA)
+    if "close_time" in work.columns:
+        now = clock.now_utc()
+        work = work.filter(pl.col("close_time") < pl.lit(now))
+    if work.height < 2:
+        return pl.DataFrame(schema=_KLINE_FRAME_SCHEMA)
+    step_s = interval_to_seconds(interval, exchange)
+    every = f"{step_s}s"
+    agg_exprs: list[pl.Expr] = [
+        pl.col("open").first().alias("open"),
+        pl.col("high").max().alias("high"),
+        pl.col("low").min().alias("low"),
+        pl.col("close").last().alias("close"),
+        pl.col("volume").sum().alias("volume"),
+    ]
+    if "quote_volume" in work.columns:
+        agg_exprs.append(pl.col("quote_volume").sum().alias("quote_volume"))
+    else:
+        agg_exprs.append(pl.lit(0.0).alias("quote_volume"))
+    if "num_trades" in work.columns:
+        agg_exprs.append(pl.col("num_trades").sum().alias("num_trades"))
+    else:
+        agg_exprs.append(pl.lit(0).alias("num_trades"))
+    if "taker_buy_base_volume" in work.columns:
+        agg_exprs.append(pl.col("taker_buy_base_volume").sum().alias("taker_buy_base_volume"))
+    else:
+        agg_exprs.append(pl.lit(0.0).alias("taker_buy_base_volume"))
+    if "taker_buy_quote_volume" in work.columns:
+        agg_exprs.append(pl.col("taker_buy_quote_volume").sum().alias("taker_buy_quote_volume"))
+    else:
+        agg_exprs.append(pl.lit(0.0).alias("taker_buy_quote_volume"))
+    resampled = (
+        work.sort("open_time")
+        .group_by_dynamic("open_time", every=every, closed="left")
+        .agg(agg_exprs)
+    )
+    if resampled.is_empty():
+        return pl.DataFrame(schema=_KLINE_FRAME_SCHEMA)
+    resampled = resampled.with_columns(
+        pl.col("open_time").dt.epoch(time_unit="ms").alias("time"),
+        (
+            pl.col("open_time").dt.epoch(time_unit="ms")
+            + pl.lit(step_s * 1000 - 1)
+        ).alias("close_time"),
+    )
+    if limit is not None and resampled.height > int(limit):
+        resampled = resampled.tail(int(limit))
+    return finalize_kline_frame(resampled, interval, exchange=exchange)
+
+
 def finalize_kline_frame(frame: pl.DataFrame, interval: str, *, exchange: Any) -> pl.DataFrame:
     return _drop_incomplete_ohlcv_tail(frame, interval, exchange=exchange)
 
@@ -421,6 +498,8 @@ class HuntMarketPlane:
             await self.spot.close()
         except Exception:
             pass
+        # Brief yield so aiohttp/CCXT Pro sessions finish teardown (avoids Unclosed client session).
+        await asyncio.sleep(0.5)
 
     async def close(self) -> None:
         """Alias for ``aclose()`` — matches probe/smoke call sites."""
@@ -464,7 +543,9 @@ async def _create_plane_once(
 async def _discover_and_refresh_proxies(config_path: Path) -> list[str]:
     from hunt_core.market.network import auto_discover_proxies, write_proxies_to_config
 
-    urls = await auto_discover_proxies()
+    urls = await auto_discover_proxies(include_public=False)
+    if not urls:
+        urls = await auto_discover_proxies(include_public=True)
     if urls and config_path.is_file():
         try:
             await asyncio.to_thread(write_proxies_to_config, config_path, urls)
@@ -479,6 +560,8 @@ async def _attempt_with_pool(
     trust_env: bool,
 ) -> HuntMarketPlane:
     if pool is None:
+        if not await probe_ccxt_direct():
+            raise RuntimeError("hunt_market_plane_proxy_pool_exhausted")
         return await _create_plane_once(proxy_url=None, trust_env=trust_env, proxy_pool=None)
 
     last_exc: BaseException | None = None
@@ -531,8 +614,31 @@ async def create_hunt_market_plane_from_settings(settings: Any) -> HuntMarketPla
         urls = list(effective())
 
     config_path = Path(getattr(settings, "config_path", "config.toml"))
+    # Seed standard proxy env vars (HTTPS_PROXY/ALL_PROXY/WSS_PROXY/BINANCE_PROXY_URL) into the
+    # primary pool so a user-supplied proxy is tried first — not only on the discovery fallback.
+    env_proxy = resolve_proxy_url(config_url=None, trust_env=True)
+    if env_proxy and env_proxy not in urls:
+        urls.insert(0, env_proxy)
+    raw_urls = list(urls)
     if urls:
-        urls = await filter_working_proxies_ccxt(urls)
+        filtered = await filter_working_proxies_ccxt(urls)
+        if filtered:
+            urls = filtered
+            # Self-heal: persist the surviving working set so dead proxies are not
+            # re-probed every start (round-trips through [bot.network]).
+            if len(filtered) < len(raw_urls) and config_path.is_file():
+                from hunt_core.market.network import write_proxies_to_config
+
+                try:
+                    await asyncio.to_thread(write_proxies_to_config, config_path, filtered)
+                except Exception as exc:  # noqa: BLE001
+                    LOG.warning("hunt_proxy_prune_persist_failed | error=%s", exc)
+        else:
+            LOG.warning(
+                "hunt_proxy_filter_empty_keep_config | configured=%d",
+                len(raw_urls),
+            )
+            urls = raw_urls
 
     pool = ProxyPool.from_urls(urls, cooldown_seconds=120.0) if urls else None
 

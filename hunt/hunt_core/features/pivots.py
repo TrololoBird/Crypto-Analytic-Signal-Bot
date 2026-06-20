@@ -291,7 +291,7 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
     ]
     work = work.with_columns(pass1)
 
-    bb_std = pl.col("close").rolling_std(window_size=20, ddof=0)
+    bb_std = pl.col("close").rolling_std(window_size=20, ddof=1)
     if "kc_upper_15" in work.columns and "kc_lower_15" in work.columns:
         kc15_upper_value = pl.col("kc_upper_15").cast(pl.Float64, strict=False)
         kc15_lower_value = pl.col("kc_lower_15").cast(pl.Float64, strict=False)

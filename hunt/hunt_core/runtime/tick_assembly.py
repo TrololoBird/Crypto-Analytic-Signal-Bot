@@ -18,34 +18,19 @@ from hunt_core.data.collect import (
 from hunt_core.data.completeness import (
     REQUIRED_SIGNAL_KLINE_TFS,
     audit_kline_integrity,
+    audit_market_derivatives,
     repair_kline_map_gaps,
+    stamp_market_freshness,
 )
-from hunt_core.scan.scoring import (
-    confirm_dump as _confirm_dump,
-    confirm_long as _confirm_long,
-    dump_analysis as _dump_analysis,
-    long_analysis as _long_analysis,
-    phase_dump as _phase,
-    phase_long as _phase_long,
-)
-from hunt_core.analysis.pinned_deep import prepare_htf_frame
-from hunt_core.analysis.deep_signal import build_liquidity_scenarios
-from hunt_core.scan.predump import enrich_dump_setup
-from hunt_core.scan.prepump import enrich_long_setup
-from hunt_core.regime.leg_fsm import (
-    apply_short_invalidation,
-    assess_hunt_lifecycle,
-    attach_regime,
-    effective_support_break,
-    lifecycle_to_dict,
-    stabilize as stabilize_lifecycle,
-)
+from hunt_core.contract import stamp_market_derivatives_provenance
 from hunt_core.features.prepare import _prepare_frame, prepare_symbol
 from hunt_core.features.prepare_columns import (
     book_walls_from_depth,
     patch_work_4h,
     resolve_prepare_groups_for_symbol,
+    should_bypass_kline_integrity,
     should_use_young_lite_path,
+    violations_are_partial_history_only,
 )
 from hunt_core.features import snapshot as _snapshot_mod
 from hunt_core.features.snapshot import (
@@ -80,20 +65,40 @@ from hunt_core.data.universe import PINNED_SYMBOLS
 _CONFIRM_STICKY_MAX_TICKS = 6
 
 
+def _stamp_setup_risk_reward(setup: dict[str, Any], *, direction: str) -> None:
+    """Worst-edge R:R on the tick row so gates/cards never see risk_reward=None (G3)."""
+    from hunt_core.contract import compute_setup_risk_reward
+
+    ez = setup.get("entry_zone") or []
+    if len(ez) < 2 or setup.get("stop_loss") is None or setup.get("tp1") is None:
+        return
+    rr = compute_setup_risk_reward(setup, direction=direction)
+    if rr is not None:
+        setup["risk_reward"] = round(float(rr), 4)
+
+
 def _apply_dump_confirm_sticky(
     symbol: str,
     *,
     confirmed: bool,
     confirm_hard: list[str],
     lifecycle: Any,
+    dump: dict[str, Any] | None = None,
 ) -> tuple[bool, list[str]]:
     """Hold dump confirm across 1–2 transient demote ticks (orderflow / bar gap)."""
     store = current_symbol_state()
     sym = symbol.upper()
+    setup = dump if isinstance(dump, dict) else {}
+    if setup.get("levels_viable") is False or setup.get("levels_veto"):
+        store.confirm_sticky.pop(sym, None)
+        if not confirmed:
+            return confirmed, confirm_hard
     if getattr(lifecycle, "invalidate_short", False):
         store.confirm_sticky.pop(sym, None)
         return confirmed, confirm_hard
     if confirmed:
+        if setup.get("levels_viable") is False or setup.get("levels_veto"):
+            return False, ["veto_levels:" + ",".join(setup.get("levels_veto") or ["not_viable"])]
         store.confirm_sticky[sym] = {
             "confirmed": True,
             "hard": list(confirm_hard),
@@ -122,6 +127,44 @@ from hunt_core.market.live_price import resolve_live_price
 from hunt_core.runtime.state import SymbolStateStore, merge_hunt_extremes
 
 LOG = logging.getLogger("hunt_core.runtime.tick_assembly")
+
+
+def _update_rolling_quote_vol_baseline(
+    market: dict[str, Any],
+    *,
+    tf: dict[str, Any],
+    session: dict[str, Any],
+) -> None:
+    """#28: rolling quote-volume baseline for wash gate (no fabrication)."""
+    if not isinstance(market, dict):
+        return
+    tf15 = (tf or {}).get("15m") if isinstance(tf, dict) else {}
+    quote_vol = (
+        market.get("quote_volume_24h")
+        or session.get("quote_volume")
+        or (tf15 or {}).get("quote_volume")
+    )
+    try:
+        qv = float(quote_vol)
+    except (TypeError, ValueError):
+        return
+    if qv <= 0:
+        return
+    hist_raw = market.get("quote_vol_history")
+    hist: list[float] = []
+    if isinstance(hist_raw, list):
+        for item in hist_raw:
+            try:
+                hist.append(float(item))
+            except (TypeError, ValueError):
+                continue
+    hist = (hist + [qv])[-24:]
+    market["quote_vol_history"] = hist
+    if len(hist) >= 5:
+        baseline = sum(hist[:-1]) / max(len(hist) - 1, 1)
+        if baseline > 0:
+            market["quote_vol_baseline"] = round(baseline, 4)
+
 
 # Backward-compat re-exports
 kline_limits = kline_limits
@@ -153,15 +196,42 @@ def _patch_market_live(
         market["ask_price"] = book.get("ask_price")
     if isinstance(pack.get("oi"), (int, float)):
         market["oi"] = pack["oi"]
+    if getattr(prepared, "basis_pct", None) is not None:
+        market["basis_pct"] = prepared.basis_pct
+        if market.get("basis_bps") is None:
+            market["basis_bps"] = round(float(prepared.basis_pct) * 100.0, 2)
+    if getattr(prepared, "premium_zscore_5m", None) is not None:
+        market["premium_zscore_5m"] = prepared.premium_zscore_5m
+    if getattr(prepared, "premium_slope_5m", None) is not None:
+        market["premium_slope_5m"] = prepared.premium_slope_5m
+    if getattr(prepared, "mark_index_spread_bps", None) is not None:
+        market["mark_index_spread_bps"] = prepared.mark_index_spread_bps
     if ws_snap:
         for key in (
             "liquidation_score_5m",
             "liquidation_long_notional_5m",
             "liquidation_short_notional_5m",
             "agg_trade_delta_60s",
+            "agg_trade_delta_30s",
+            "ws_cvd_1m",
+            "ws_cvd_5m",
+            "ws_price_chg_1m",
+            "ws_price_chg_5m",
+            "depth_imbalance",
+            "basis_ap_bps",
+            "basis_bps_live",
+            "mark_live",
+            "live_mark_price",
+            "live_funding_rate",
         ):
             val = ws_snap.get(key)
             if val is not None:
+                if key.startswith("liquidation_score"):
+                    from hunt_core.contract import parse_liquidation_score
+
+                    val = parse_liquidation_score(val)
+                    if val is None:
+                        continue
                 market[key] = val
 
 
@@ -178,6 +248,35 @@ def _refresh_tf_stale_flags(tf: dict[str, Any]) -> None:
             interval = TF_MS.get(_stf, 300_000)
             age = int(datetime.now(UTC).timestamp() * 1000) - int(close_ms)
             tf[f"stale_{_stf}"] = age > int(interval * 2.5)
+
+
+def _ensure_kinematic_row_fields(
+    result: dict[str, Any],
+    ticker: dict[str, Any] | None,
+) -> None:
+    """Backfill chg fields so kinematic gate is not blocked on hot/carry ticks."""
+    if result.get("chg_24h_pct") is None and isinstance(ticker, dict):
+        try:
+            result["chg_24h_pct"] = round(float(ticker.get("price_change_percent") or 0), 2)
+        except (TypeError, ValueError):
+            pass
+    tf = result.get("timeframes")
+    if not isinstance(tf, dict):
+        return
+    for key in ("1h", "1h_closed"):
+        block = tf.get(key)
+        if not isinstance(block, dict):
+            continue
+        if block.get("change_pct") is not None or block.get("price_change_pct") is not None:
+            continue
+        try:
+            candle = block.get("candle") if isinstance(block.get("candle"), dict) else {}
+            o = float(candle.get("open") or block.get("open") or 0)
+            c = float(candle.get("close") or block.get("close") or 0)
+            if o > 0:
+                block["change_pct"] = round((c - o) / o * 100.0, 2)
+        except (TypeError, ValueError):
+            continue
 
 
 async def snapshot_symbol(
@@ -202,6 +301,7 @@ async def snapshot_symbol(
     kline_limits_override: dict[str, int] | None = None,
     kline_map_override: dict[str, Any] | None = None,
     enrichment_pack_override: dict[str, Any] | None = None,
+    btc_work_1m: Any | None = None,
 ) -> dict[str, Any]:
     meta = exchange_by_sym.get(symbol)
     ticker = ticker_by_sym.get(symbol)
@@ -264,7 +364,12 @@ async def snapshot_symbol(
         kline_map, fetch_errors = await resolve_kline_map(
             client, symbol, limits, tier=snap_tier, safe_fetch=safe_fetch
         )
-    if not hot_tier:
+    cache_delta_ready = False
+    if hot_tier:
+        from hunt_core.data.frame_cache import get_frame_cache
+
+        cache_delta_ready = get_frame_cache().has_delta_ready(symbol)
+    if not hot_tier or not cache_delta_ready:
         kline_map, fetch_errors = await repair_kline_map_gaps(
             client,
             symbol,
@@ -272,6 +377,37 @@ async def snapshot_symbol(
             fetch_errors,
             required_tfs=REQUIRED_SIGNAL_KLINE_TFS,
         )
+
+    def _bar_count(tf: str) -> int:
+        raw = kline_map.get(tf)
+        if raw is None or getattr(raw, "is_empty", lambda: True)():
+            return 0
+        return int(raw.height)
+
+    if hot_tier or cache_delta_ready:
+        from hunt_core.data.frame_cache import get_frame_cache
+
+        cached = get_frame_cache().kline_map(symbol)
+        if cached:
+            restored_errors = dict(fetch_errors)
+            for tf in REQUIRED_SIGNAL_KLINE_TFS:
+                df = kline_map.get(tf)
+                cdf = cached.get(tf)
+                thin = df is None or getattr(df, "is_empty", lambda: True)() or (
+                    tf == "1m" and df.height < 100
+                )
+                if thin and cdf is not None and not getattr(cdf, "is_empty", lambda: True)():
+                    if cdf.height > (0 if df is None else int(df.height)):
+                        kline_map[tf] = cdf
+                        restored_errors.pop(tf, None)
+            fetch_errors = restored_errors
+
+    young_listing_bypass = should_bypass_kline_integrity(
+        bars_4h=_bar_count("4h"),
+        bars_1h=_bar_count("1h"),
+        bars_15m=_bar_count("15m"),
+    )
+
     integrity = audit_kline_integrity(
         kline_map,
         symbol=symbol,
@@ -279,7 +415,13 @@ async def snapshot_symbol(
         required_tfs=REQUIRED_SIGNAL_KLINE_TFS,
         fetch_errors=fetch_errors,
     )
-    if not integrity.complete:
+    partial_history_ok = violations_are_partial_history_only(integrity.violations)
+    if (
+        not integrity.complete
+        and not cache_delta_ready
+        and not young_listing_bypass
+        and not partial_history_ok
+    ):
         return kline_integrity_reject(
             symbol=symbol,
             report=integrity,
@@ -344,10 +486,10 @@ async def snapshot_symbol(
 
     if hot_delta and cached_prep is not None:
         prepared = cached_prep
-        young_listing = False
+        young_listing = young_listing_bypass or partial_history_ok
     else:
         prepared = prepare_symbol(item, frames, minimums=minimums, settings=settings)
-        young_listing = False
+        young_listing = young_listing_bypass or partial_history_ok
         if prepared is None:
             young_listing = True
             if should_use_young_lite_path(bars_4h=bars_4h, bars_1h=bars_1h):
@@ -375,6 +517,7 @@ async def snapshot_symbol(
             )
     else:
         work_1m = _prepare_frame(df_1m, active_groups=prep_groups)
+    prepared.work_1m = work_1m
     delta_raw = None
     if prepared.work_15m is not None and not prepared.work_15m.is_empty():
         delta_raw = _col(prepared.work_15m, "delta_ratio", None)
@@ -440,11 +583,7 @@ async def snapshot_symbol(
         _refresh_tf_stale_flags(tf)
     else:
         if kline_map.get("1d") is not None:
-            work_1d_snap = (
-                prepare_htf_frame(kline_map["1d"], symbol)
-                if symbol in PINNED_SYMBOLS
-                else _prepare_frame(kline_map["1d"], active_groups=prep_groups)
-            )
+            work_1d_snap = _prepare_frame(kline_map["1d"], active_groups=prep_groups)
             if work_1d_snap is not None and not work_1d_snap.is_empty():
                 probe = tf_snapshot_for_symbol(work_1d_snap, symbol)
                 tf_1d = (
@@ -511,11 +650,7 @@ async def snapshot_symbol(
             "1d": tf_1d,
         }
         if "1w" in limits and kline_map.get("1w") is not None:
-            work_1w = (
-                prepare_htf_frame(kline_map["1w"], symbol)
-                if symbol in PINNED_SYMBOLS
-                else _prepare_frame(kline_map["1w"], active_groups=prep_groups)
-            )
+            work_1w = _prepare_frame(kline_map["1w"], active_groups=prep_groups)
             tf["1w"] = (
                 tf_snapshot_for_symbol(work_1w, symbol)
                 if work_1w is not None and not work_1w.is_empty()
@@ -563,7 +698,7 @@ async def snapshot_symbol(
             ws_snap=ws_snap,
             price=price,
         )
-        if hot_tier and ws_feed is not None and ws_feed.cross_ws_connected:
+        if hot_tier and ws_feed is not None:
             await attach_cross_market_fields(
                 market,
                 client=client,
@@ -589,7 +724,7 @@ async def snapshot_symbol(
             ws_snap=ws_snap,
             spot_extra=spot_extra,
         )
-        if hot_tier and ws_feed is not None and ws_feed.cross_ws_connected:
+        if hot_tier and ws_feed is not None:
             await attach_cross_market_fields(
                 market,
                 client=client,
@@ -606,6 +741,36 @@ async def snapshot_symbol(
         regime = regime_snapshot(prepared)
         if prepared.work_15m is not None and not prepared.work_15m.is_empty():
             regime.update(symbol_regime_features(prepared.work_15m))
+    if getattr(prepared, "btc_decoupled_pump", None):
+        market["btc_decoupled_pump"] = True
+    if getattr(prepared, "btc_decoupled_dump", None):
+        market["btc_decoupled_dump"] = True
+    pc = getattr(prepared, "pump_cycle", None)
+    if isinstance(pc, dict):
+        market["pump_cycle"] = pc
+    _update_rolling_quote_vol_baseline(market, tf=tf, session=session)
+    from hunt_core.features.snapshot import stamp_derivative_zscores
+
+    stamp_derivative_zscores(
+        market,
+        pack=pack,
+        client=client,
+        symbol=symbol,
+        prepared=prepared,
+        ws_snap=ws_snap,
+    )
+    stamp_market_freshness(market, ws_snap, pack)
+    stamp_market_derivatives_provenance(market)
+    from hunt_core.domain.snapshot import MarketSnapshot
+
+    _market_snapshot = MarketSnapshot.from_market(market)
+    market["_snapshot"] = _market_snapshot.to_dict()
+    from hunt_core.features.structure import assess_market_structure
+
+    structure_ctx: dict[str, Any] = {**(market or {}), **(regime or {})}
+    if hot_carry and isinstance(carry_cross, dict):
+        structure_ctx["cross_microstructure"] = carry_cross
+    structure = assess_market_structure(tf, price=price, market=structure_ctx)
     hunt_h, hunt_l, session_mem = merge_hunt_extremes(
         symbol,
         price=price,
@@ -616,6 +781,21 @@ async def snapshot_symbol(
     )
     fib_hunt = leg_fib_levels(hunt_h, hunt_l, direction="down")
     fib = {**fib_4h, "hunt": fib_hunt}
+    dq = (
+        carry_data_quality
+        if hot_carry and carry_data_quality is not None
+        else data_quality_report(
+            prepared,
+            frames=frames,
+            df_1m=df_1m,
+            pack=pack,
+            book=book,
+            tf=tf,
+        )
+    )
+    if isinstance(dq, dict):
+        dq = dict(dq)
+        dq["delivery_derivatives_missing"] = audit_market_derivatives(market, tier=tier)
     result: dict[str, Any] = {
         "ts": datetime.now(UTC).isoformat(),
         "snapshot_tier": tier,
@@ -652,20 +832,13 @@ async def snapshot_symbol(
         "session_memory": session_mem,
         "fib": fib,
         "kline_limits": limits,
-        "data_quality": carry_data_quality
-        if hot_carry and carry_data_quality is not None
-        else data_quality_report(
-            prepared,
-            frames=frames,
-            df_1m=df_1m,
-            pack=pack,
-            book=book,
-            tf=tf,
-        ),
+        "data_quality": dq,
         "book_walls": carry_book_walls
         if hot_carry and carry_book_walls is not None
         else book_walls_from_depth(pack.get("book_depth")),
         "cross_microstructure": carry_cross if hot_carry else None,
+        "structure": structure,
+        "snapshot": _market_snapshot.to_dict(),
         "_prepared": prepared,
     }
     if hot_carry and carry_liq is not None:
@@ -718,177 +891,201 @@ async def snapshot_symbol(
                 result["book_walls"] = cx_walls
         except Exception as exc:
             LOG.warning("cross_microstructure_snapshot_failed | symbol=%s error=%s", symbol, exc)
-    if not hot_tier and not hot_carry:
-        try:
-            result["liquidity_scenarios"] = build_liquidity_scenarios(result).to_dict()
-        except Exception as exc:
-            LOG.warning("liquidity_scenarios_failed | symbol=%s error=%s", symbol, exc)
+
+    try:
+        from hunt_core.maps.engine import apply_map_bundle_to_row, build_map_bundle, get_map_store
+
+        cx = result.get("cross_microstructure") or {}
+        vp_cross = cx.get("volume_profile_1h") if isinstance(cx, dict) else None
+        liq_est = cx.get("liquidation_estimate") if isinstance(cx, dict) else None
+        frame_map: dict[str, Any] = {}
+        for tf_key, frame_key in (
+            ("1h", "work_1h"),
+            ("4h", "work_4h"),
+            ("15m", "work_15m"),
+            ("1d", "work_1d"),
+            ("1w", "work_1w"),
+        ):
+            w = getattr(prepared, frame_key, None)
+            if w is not None and hasattr(w, "is_empty") and not w.is_empty():
+                frame_map[tf_key] = w
+        store = get_map_store()
+        oi_bars = store.get_cached_oi_bars(symbol)
+        allow_oi_fetch = (not hot_tier) or (symbol in PINNED_SYMBOLS) or hot_carry
+        if oi_bars is None and allow_oi_fetch and hasattr(client, "fetch_oi_bars_for_maps"):
+            try:
+                oi_bars = await client.fetch_oi_bars_for_maps(symbol, period="1h", limit=48)
+                if oi_bars:
+                    store.cache_oi_bars(symbol, oi_bars)
+            except Exception:
+                oi_bars = None
+        if oi_bars is None and isinstance(liq_est, dict):
+            cached = liq_est.get("oi_bars")
+            if isinstance(cached, list):
+                oi_bars = cached
+        deep_bids: list[tuple[float, float]] | None = None
+        deep_asks: list[tuple[float, float]] | None = None
+        book_walls = result.get("book_walls") if isinstance(result.get("book_walls"), dict) else None
+        if isinstance(book_walls, dict):
+            per_ex = book_walls.get("per_exchange") or {}
+            primary = per_ex.get("binance") if isinstance(per_ex, dict) else None
+            if isinstance(primary, dict):
+                if isinstance(primary.get("bids"), list):
+                    deep_bids = [(float(x[0]), float(x[1])) for x in primary["bids"] if len(x) >= 2]
+                if isinstance(primary.get("asks"), list):
+                    deep_asks = [(float(x[0]), float(x[1])) for x in primary["asks"] if len(x) >= 2]
+        px_chg = None
+        if isinstance(ws_snap, dict):
+            px_chg = ws_snap.get("ws_price_chg_1m")
+        bundle = build_map_bundle(
+            symbol=symbol,
+            current_price=price,
+            ws_snap=ws_snap,
+            book_walls=result.get("book_walls"),
+            live_book=ws_feed.live_book(symbol) if ws_feed is not None else None,
+            trades=ws_feed.trade_buffer(symbol) if ws_feed is not None else None,
+            liq_buffers=ws_feed.liquidation_buffers() if ws_feed is not None else store.liq_buffers(symbol),
+            frames=frame_map or None,
+            cross_vp=vp_cross if isinstance(vp_cross, dict) else None,
+            bracket_tiers=client.get_cached_leverage_tiers(symbol) if hasattr(client, "get_cached_leverage_tiers") else None,
+            oi_bars=oi_bars,
+            oi_usd=float(market.get("oi_usd") or 0) or None,
+            global_ls_ratio=float(market.get("top_ls_1h") or market.get("global_ls_1h") or 0) or None,
+            daily_volume=float(market.get("quote_volume_24h") or market.get("vol_24h_m") or 0) * 1_000_000,
+            price_change_pct=float(px_chg) if px_chg is not None else None,
+            deep_bids=deep_bids,
+            deep_asks=deep_asks,
+            funding_rate=float(market.get("funding_rate") or market.get("live_funding_rate") or 0) or None,
+            top_ls_ratio=float(market.get("top_ls_1h") or 0) or None,
+            basis_pct=float(market.get("basis_pct") or 0) or None,
+            oi_z=float(market.get("oi_z") or 0) or None,
+            ws_cvd=float((ws_snap or {}).get("ws_cvd_5m") or 0) or None,
+            store=store,
+        )
+        apply_map_bundle_to_row(result, bundle)
+    except Exception as exc:
+        LOG.warning("map_bundle_failed | symbol=%s error=%s", symbol, exc)
 
     apply_cross_exchange_flat(result)
 
-    lifecycle = stabilize_lifecycle(
-        symbol,
-        assess_hunt_lifecycle(
-            price=price,
-            hunt_high=hunt_h,
-            hunt_low=hunt_l,
-            session=session,
-            tf=tf,
-            market=market,
-            symbol=symbol,
-            state=symbol_state,
-        ),
-        state=symbol_state,
+    # --- Fusion detection engine (replaces scan/* + regime FSM + gate scoring) ---
+    leg_gain_pct = round((hunt_h - hunt_l) / hunt_l * 100.0, 1) if hunt_l > 0 else 0.0
+    fall_from_high_pct = round((hunt_h - price) / hunt_h * 100.0, 2) if hunt_h > 0 else 0.0
+    structure_bias = str(structure.get("structure_bias") or "")
+    from hunt_core.detect.delivery_bridge import build_delivery_setup
+    from hunt_core.detect.live import build_live_detection
+    from hunt_core.features.feature_engine import build_feature_vector
+
+    detection = None
+    try:
+        _vector = build_feature_vector(prepared, result, symbol=symbol, tf="15m")
+        detection = build_live_detection(symbol, _vector.to_dict())
+    except Exception as exc:  # data gaps must not crash the tick
+        LOG.debug("fusion_detection_skipped | symbol=%s error=%s", symbol, exc)
+
+    side = detection.side if detection is not None else "none"
+    phase_val = detection.phase if detection is not None else "neutral"
+    from hunt_core.gate._phase_compat import fusion_lifecycle_dict
+
+    lifecycle_dict = fusion_lifecycle_dict(
+        detection,
+        structure_bias=structure_bias,
+        fall_from_high_pct=fall_from_high_pct,
+        leg_gain_pct=leg_gain_pct,
     )
-    leg_gain_pct = (
-        round((hunt_h - hunt_l) / hunt_l * 100.0, 1) if hunt_l > 0 else 0.0
-    )
-    lifecycle = attach_regime(
-        lifecycle,
-        prepared={"symbol": symbol, "price": price, "timeframes": tf, "session": session},
-        market=market,
-        symbol=symbol,
-        state=symbol_state,
-    )
-    lifecycle_dict = lifecycle_to_dict(lifecycle, leg_gain_pct=leg_gain_pct)
+    from hunt_core.runtime.tick_jsonl import ensure_fusion_lifecycle_fields
+
+    lifecycle_dict = ensure_fusion_lifecycle_fields(lifecycle_dict)
     result["lifecycle"] = lifecycle_dict
+
+    def _stub_setup(direction: str) -> dict[str, Any]:
+        return {
+            "symbol": symbol,
+            "direction": direction,
+            "confirmed": False,
+            "phase": phase_val,
+            "lifecycle_phase": phase_val,
+            "lifecycle": lifecycle_dict,
+        }
+
+    if detection is not None and side in {"long", "short"}:
+        active = build_delivery_setup(detection, result)
+        active["lifecycle"] = lifecycle_dict
+        if side == "short":
+            dump, long_setup = active, _stub_setup("long")
+        else:
+            long_setup, dump = active, _stub_setup("short")
+    else:
+        dump, long_setup = _stub_setup("short"), _stub_setup("long")
+
+    dump["young_listing"] = young_listing
+    dump["bars_1h"] = bars_1h
+    long_setup["young_listing"] = young_listing
+    long_setup["bars_1h"] = bars_1h
+    result["dump"] = dump
+    result["long"] = long_setup
+    try:
+        from hunt_core.confluence.mtf import build_mtf_confluence
+
+        mtf_obj = build_mtf_confluence(
+            symbol,
+            result.get("timeframes") if isinstance(result.get("timeframes"), dict) else {},
+            float(result.get("price") or 0),
+            market=market if isinstance(market, dict) else None,
+            row=result,
+        )
+        if mtf_obj is not None:
+            result["mtf"] = mtf_obj
+            from hunt_core.runtime.tick_jsonl import mtf_to_json_dict
+
+            summary = mtf_to_json_dict(mtf_obj)
+            if isinstance(summary, dict):
+                result["mtf_summary"] = {
+                    "dominant": summary.get("dominant"),
+                    "long_htf_count": summary.get("long_htf_count"),
+                    "short_htf_count": summary.get("short_htf_count"),
+                }
+    except Exception as exc:
+        LOG.debug("mtf_confluence_skipped | symbol=%s error=%s", symbol, exc)
     merge_hunt_extremes(
         symbol,
         price=price,
         rest_hunt_high=rest_h,
         rest_hunt_low=rest_l,
-        lifecycle_phase=lifecycle.phase.value,
+        lifecycle_phase=phase_val,
         market=market,
     )
 
-    # Both sides are always analyzed; watch_mode gates Telegram only (VELVET dump_active
-    # was invisible because pinned mode=long skipped _dump_analysis entirely).
-    pos_in_range = float(session.get("pos_in_range") or 0.5)
-    support_level = effective_support_break(
-        impulse_high=hunt_h,
-        lifecycle=lifecycle,
-        pos_in_range=pos_in_range,
-    )
-    range_pct_24h = float(session.get("range_pct_24h") or 0)
-    dump = _dump_analysis(
-        symbol=symbol,
-        price=price,
-        tf=tf,
-        market=market,
-        regime=regime,
-        impulse_high=hunt_h,
-        impulse_low=hunt_l,
-        support_break_level=support_level,
-        fib=fib_hunt,
-        prev_oi=prev_oi,
-        cur_oi=prepared.oi_current,
-        local_support=lifecycle.local_support,
-        local_resistance=lifecycle.local_resistance,
-        lifecycle_phase=lifecycle.phase.value,
-        fall_from_high_pct=lifecycle.fall_from_high_pct,
-        pos_in_range=pos_in_range,
-        range_pct_24h=range_pct_24h,
-        leg_gain_pct=leg_gain_pct,
-        pump_stats=pump_stats,
-        book_walls=result.get("book_walls"),
-        cross_microstructure=result.get("cross_microstructure"),
-    )
-    dump = enrich_dump_setup(dump, price=price, tf=tf, market=market)
-    attach_research_setup_fields(dump, tf=tf, regime=regime)
-    dump["lifecycle_phase"] = lifecycle.phase.value
-    dump["lifecycle_4h"] = lifecycle.phase_4h.value
-    dump["lifecycle"] = lifecycle_dict
-    dump["fall_from_high_pct"] = lifecycle.fall_from_high_pct
-    dump["young_listing"] = young_listing
-    dump["bars_1h"] = bars_1h
-    confirmed, confirm_hard = _confirm_dump(
-        dump,
-        tf,
-        symbol=symbol,
-        price=price,
-        market=market,
-        lifecycle_bias=str(lifecycle.recommended_bias or ""),
-    )
-    confirmed, confirm_hard, lifecycle_note = apply_short_invalidation(
-        confirmed,
-        confirm_hard,
-        lifecycle,
-        dump=dump,
-    )
-    if not lifecycle.invalidate_short:
-        sticky_conf, sticky_hard = _apply_dump_confirm_sticky(
-            symbol,
-            confirmed=confirmed,
-            confirm_hard=list(confirm_hard),
-            lifecycle=lifecycle,
-        )
-        if sticky_conf and not confirmed:
-            lifecycle_note = None
-        confirmed, confirm_hard = sticky_conf, sticky_hard
-    dump["confirm_hard"] = confirm_hard
-    dump["phase"] = _phase(dump, confirmed, symbol=symbol, lifecycle_note=lifecycle_note)
-    dump["confirmed"] = confirmed
-    dump["monitor_ok"] = lifecycle.short_confirm_ok
-    dump["lifecycle"] = lifecycle_dict
-    if lifecycle_note:
-        dump["lifecycle_note"] = lifecycle_note
-    if lifecycle.invalidate_short:
-        from hunt_core.regime.leg_fsm import apply_invalidate_short_fuel_cap
-
-        had_high_fuel = float(dump.get("dump_fuel") or 0) > 32.0
-        apply_invalidate_short_fuel_cap(dump)
-        if had_high_fuel:
-            dump["phase"] = _phase(
-                dump, confirmed=False, symbol=symbol, lifecycle_note="lifecycle_invalidate_short"
-            )
-    result["dump"] = dump
-
-    chg24 = float(result.get("chg_24h_pct") or 0)
-    long_setup = _long_analysis(
-        symbol=symbol,
-        price=price,
-        tf=tf,
-        market=market,
-        regime=regime,
-        impulse_low=hunt_l,
-        impulse_high=hunt_h,
-        fib=fib_hunt,
-        prev_oi=prev_oi,
-        cur_oi=prepared.oi_current,
-        lifecycle_phase=lifecycle.phase.value,
-        fall_from_high_pct=lifecycle.fall_from_high_pct,
-        pos_in_range=pos_in_range,
-        range_pct_24h=range_pct_24h,
-        leg_gain_pct=leg_gain_pct,
-        pump_stats=pump_stats,
-        chg_24h_pct=chg24,
-        book_walls=result.get("book_walls"),
-        cross_microstructure=result.get("cross_microstructure"),
-    )
-    long_setup = enrich_long_setup(long_setup, price=price, tf=tf, market=market)
-    attach_research_setup_fields(long_setup, tf=tf, regime=regime)
-    long_setup["young_listing"] = young_listing
-    long_setup["bars_1h"] = bars_1h
-    long_setup["lifecycle_4h"] = lifecycle.phase_4h.value
-    long_setup["lifecycle"] = lifecycle_dict
-    long_confirmed, long_hard = _confirm_long(
-        long_setup,
-        tf,
-        symbol=symbol,
-        price=price,
-        market=market,
-        lifecycle_bias=str(lifecycle.recommended_bias or ""),
-        lifecycle_phase=lifecycle.phase.value,
-    )
-    long_setup["confirm_hard"] = long_hard
-    long_setup["lifecycle_phase"] = lifecycle.phase.value
-    long_setup["phase"] = _phase_long(long_setup, long_confirmed, symbol=symbol)
-    long_setup["confirmed"] = long_confirmed
-    result["long"] = long_setup
 
     from hunt_core.features.factors import build_factor_panel
 
     result["factor_panel"] = build_factor_panel(result)
+
+    try:
+        from hunt_core.domain.structure_state import structure_state_from_row
+
+        result["structure_state"] = structure_state_from_row(result).to_dict()
+    except Exception:
+        pass
+
+    try:
+        from hunt_core.maps.forecast import stamp_forecasts_on_row
+
+        if ws_feed is not None:
+            from hunt_core.market.live_price import apply_live_price_to_row
+
+            apply_live_price_to_row(result, ws_feed=ws_feed)
+        stamp_forecasts_on_row(result)
+        arch = result.get("entry_archetype")
+        if arch:
+            for setup_key in ("dump", "long"):
+                setup_block = result.get(setup_key)
+                if isinstance(setup_block, dict):
+                    setup_block["entry_archetype"] = arch
+    except Exception as exc:
+        LOG.warning("fusion_forecast_stamp_failed | symbol=%s error=%s", symbol, exc)
+
+    _ensure_kinematic_row_fields(result, ticker)
 
     if not result.get("error") and tier in ("full", "fast", "hot"):
         from hunt_core.data.frame_cache import get_frame_cache
@@ -899,6 +1096,12 @@ async def snapshot_symbol(
         if prepared is not None and (tier in ("full", "fast") or hot_delta):
             cache.seed_prepared(symbol, prepared)
         if tier in ("full", "fast") and not hot_carry:
+            cache.seed_carry_row(symbol, result)
+        elif (
+            not hot_carry
+            and tier == "hot"
+            and str(result.get("tick_path") or "") in {"hot_ws", "hot_delta", "hot_bootstrap"}
+        ):
             cache.seed_carry_row(symbol, result)
 
     return result
@@ -921,6 +1124,7 @@ async def hot_tick_symbol(
     spot_companion: HuntCcxtSpotCompanion | None = None,
     pump_stats: dict[str, Any] | None = None,
     symbol_state: SymbolStateStore | None = None,
+    btc_work_1m: Any | None = None,
 ) -> dict[str, Any]:
     """WS-first tick: cached klines + TTL enrichment — no REST klines on hot path."""
     from hunt_core.data.frame_cache import get_frame_cache
@@ -939,6 +1143,7 @@ async def hot_tick_symbol(
             premium_all=premium_all,
             funding_info_all=funding_info_all,
             btc_work_1h=btc_work_1h,
+            btc_work_1m=btc_work_1m,
             exchange_by_sym=exchange_by_sym,
             ticker_by_sym=ticker_by_sym,
             ws_feed=ws_feed,
@@ -960,6 +1165,7 @@ async def hot_tick_symbol(
             premium_all=premium_all,
             funding_info_all=funding_info_all,
             btc_work_1h=btc_work_1h,
+            btc_work_1m=btc_work_1m,
             exchange_by_sym=exchange_by_sym,
             ticker_by_sym=ticker_by_sym,
             ws_feed=ws_feed,
@@ -970,6 +1176,8 @@ async def hot_tick_symbol(
             stagger_klines_ms=0,
         )
         row["tick_path"] = "hot_bootstrap"
+        if not row.get("error"):
+            get_frame_cache().seed_carry_row(symbol, row)
         return row
     kline_map = cache.kline_map(symbol)
     enrich = cache.enrichment_pack(symbol) or {}
@@ -983,6 +1191,7 @@ async def hot_tick_symbol(
         premium_all=premium_all,
         funding_info_all=funding_info_all,
         btc_work_1h=btc_work_1h,
+        btc_work_1m=btc_work_1m,
         exchange_by_sym=exchange_by_sym,
         ticker_by_sym=ticker_by_sym,
         ws_feed=ws_feed,

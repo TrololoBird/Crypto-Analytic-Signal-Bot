@@ -21,9 +21,24 @@ from hunt_core.bootstrap import bootstrap
 bootstrap()
 
 
-def _evaluate_from_row(row: dict[str, Any], sym: str, *, live: bool) -> dict[str, Any]:
-    from hunt_core.deliver.dispatch import evaluate_delivery, evaluate_delivery_fast
-    from hunt_core.gate.delivery import collect_report_blockers
+def _evaluate_from_row(
+    row: dict[str, Any],
+    sym: str,
+    *,
+    live: bool,
+    recompute: bool = False,
+    direction: str = "short",
+) -> dict[str, Any]:
+    if recompute:
+        from hunt_core._dev.replay_row import delivery_replay_report, recompute_tick_row
+
+        if not row.get("recomputed"):
+            row = recompute_tick_row(row)
+        report = delivery_replay_report(row, direction=direction, recompute=False)
+        report["source"] = "recomputed_tick"
+        return report
+
+    from hunt_core.runtime.query_service import build_query_result
     from hunt_core.track.tracker import (
         load_tracker_state,
         recent_stop_hit_cooldown,
@@ -36,16 +51,33 @@ def _evaluate_from_row(row: dict[str, Any], sym: str, *, live: bool) -> dict[str
     lc = row.get("lifecycle") or {}
     st = load_tracker_state()
     now = clock.now_utc()
+    from_store = not live and str(row.get("tick_path") or "") not in {"", "live_rest"}
+    query = build_query_result(
+        row,
+        sym,
+        source="live_rest" if live else str(row.get("tick_path") or "tick_store"),
+        from_store=from_store or row.get("tick_path") in {
+            "hot_ws",
+            "hot_bootstrap",
+            "hot_delta",
+            "hot_carry",
+        },
+        age_s=None,
+    )
+    focus = query.focus()
     out: dict[str, Any] = {
         "symbol": sym.upper(),
-        "source": "live_rest" if live else str(row.get("tick_path") or "tick_store"),
-        "confirmed": bool(dump.get("confirmed")),
-        "phase": dump.get("phase"),
+        "source": query.source,
+        "confirmed": focus.confirmed,
+        "phase": (row.get("dump") or {}).get("phase"),
         "lc_phase": lc.get("phase"),
         "score": dump.get("dump_score"),
         "fuel": dump.get("dump_fuel"),
         "fall_pct": lc.get("fall_from_high_pct"),
         "confirm_hard": (dump.get("confirm_hard") or [])[:8],
+        "focus_direction": query.focus_direction,
+        "formation_code": focus.formation.code,
+        "would_deliver": focus.would_deliver,
         "tg_announced": signal_confirm_announced(st, symbol=sym, direction="short"),
         "post_sl_cooldown": recent_stop_hit_cooldown(
             st, symbol=sym, direction="short", now=now
@@ -55,27 +87,14 @@ def _evaluate_from_row(row: dict[str, Any], sym: str, *, live: bool) -> dict[str
         out["error"] = row["error"]
         return out
     out["repeat_loser"] = symbol_repeat_loser_blocked(st, symbol=sym, now=now)
-    if not dump.get("confirmed"):
-        return out
-    use_fast = row.get("tick_path") in {
-        "hot_ws",
-        "hot_bootstrap",
-        "hot_delta",
-        "hot_carry",
-    } or not live
-    eval_fn = evaluate_delivery_fast if use_fast else evaluate_delivery
-    gate, tier = eval_fn(
-        row, direction="short", setup=dump, lifecycle=lc, symbol=sym
-    )
-    blockers = collect_report_blockers(
-        dump, direction="short", symbol=sym, lifecycle=lc, row=row
-    )
-    out["delivery_ok"] = gate.ok
-    out["gate_code"] = gate.code
-    out["gate_message"] = gate.message
-    out["tier"] = tier
-    out["delivery_lane"] = "fast" if use_fast else "full"
-    out["blocker_codes"] = [b.code for b in blockers if not b.ok]
+    if focus.confirmed:
+        gate = focus.delivery_gate
+        out["delivery_ok"] = focus.would_deliver
+        out["gate_code"] = gate.code if gate else None
+        out["gate_message"] = gate.message if gate else None
+        out["tier"] = focus.delivery_tier
+        out["delivery_lane"] = "fast" if query.from_store else "full"
+    out["blocker_codes"] = [b.code for b in focus.blockers if not b.ok]
     return out
 
 
@@ -114,21 +133,31 @@ async def _probe_one(
     ticker_by_sym: dict[str, dict[str, Any]] | None,
     fast: bool,
     stagger_ms: int,
+    recompute: bool = False,
+    jsonl_path: Any | None = None,
+    direction: str = "short",
 ) -> dict[str, Any]:
     if not live:
         from hunt_core.runtime.tick_state import last_tick_store
 
         t0 = time.monotonic()
-        row = last_tick_store().resolve(sym)
+        store = last_tick_store()
+        row = store.get(sym)
+        if row is None and jsonl_path is not None:
+            row = store.tail_jsonl(sym, path=jsonl_path)
+        if row is None:
+            row = store.resolve(sym)
         elapsed = round(time.monotonic() - t0, 4)
         if row is None:
             return {
                 "symbol": sym.upper(),
                 "source": "missing",
-                "error": "no_tick_row — run watch or use --live",
+                "error": "no_tick_row — run watch or use --live / --jsonl",
                 "probe_s": elapsed,
             }
-        out = _evaluate_from_row(row, sym, live=False)
+        out = _evaluate_from_row(
+            row, sym, live=False, recompute=recompute, direction=direction
+        )
         out["probe_s"] = elapsed
         out["row_ts"] = row.get("ts")
         return out
@@ -142,22 +171,32 @@ async def _probe_one(
         fast=fast,
         stagger_ms=stagger_ms,
     )
-    out = _evaluate_from_row(row, sym, live=True)
+    out = _evaluate_from_row(row, sym, live=True, recompute=recompute, direction=direction)
     out["probe_s"] = elapsed
     return out
 
 
-async def _run(symbols: list[str], *, stagger_ms: int, fast: bool, live: bool) -> int:
+async def _run(
+    symbols: list[str],
+    *,
+    stagger_ms: int,
+    fast: bool,
+    live: bool,
+    recompute: bool = False,
+    jsonl_path: Any | None = None,
+    direction: str = "short",
+) -> int:
     client: Any | None = None
     batch_cache: Any = None
     ticker_by_sym: dict[str, dict[str, Any]] | None = None
     if live:
         from hunt_core.data.collect import TickBatchCache, safe_fetch
         from hunt_core.domain.config import load_settings
-        from hunt_core.market import HuntCcxtClient
+        from hunt_core.market.factory import create_hunt_market_plane_from_settings
 
         settings = load_settings()
-        client = HuntCcxtClient.from_settings(settings)
+        plane = await create_hunt_market_plane_from_settings(settings)
+        client = plane.client
         batch_cache = TickBatchCache()
         await client.load_markets()
         ticker_raw = await safe_fetch(client.fetch_ticker_24h(), context="ticker_24h") or []
@@ -173,6 +212,9 @@ async def _run(symbols: list[str], *, stagger_ms: int, fast: bool, live: bool) -
                     ticker_by_sym=ticker_by_sym,
                     fast=fast,
                     stagger_ms=stagger_ms,
+                    recompute=recompute,
+                    jsonl_path=jsonl_path,
+                    direction=direction,
                 )
             except Exception as exc:
                 print(f"{sym}: ERROR {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -183,7 +225,10 @@ async def _run(symbols: list[str], *, stagger_ms: int, fast: bool, live: bool) -
                     print(f"  {k}: {v}")
     finally:
         if client is not None:
-            await client.close()
+            try:
+                await client.close()
+            except Exception:
+                pass
     return 0
 
 
@@ -200,11 +245,41 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Full /signal-depth probe with --live (slow)",
     )
+    parser.add_argument(
+        "--recompute",
+        action="store_true",
+        help="Re-score dump/long from stored tick using current code",
+    )
+    parser.add_argument(
+        "--jsonl",
+        type=str,
+        default="",
+        help="Tick JSONL path (default: hunt/data/dump_minute_watch.jsonl)",
+    )
+    parser.add_argument(
+        "--direction",
+        choices=("short", "long"),
+        default="short",
+        help="Delivery direction to probe (default: short)",
+    )
     parser.add_argument("--stagger-ms", type=int, default=0, help="Kline stagger (full live only)")
     args = parser.parse_args(argv)
     syms = [s.upper() for s in args.symbols]
+    jsonl_path = None
+    if args.jsonl:
+        from pathlib import Path
+
+        jsonl_path = Path(args.jsonl)
     return asyncio.run(
-        _run(syms, stagger_ms=args.stagger_ms, fast=not args.full, live=args.live)
+        _run(
+            syms,
+            stagger_ms=args.stagger_ms,
+            fast=not args.full,
+            live=args.live,
+            recompute=args.recompute,
+            jsonl_path=jsonl_path,
+            direction=args.direction,
+        )
     )
 
 

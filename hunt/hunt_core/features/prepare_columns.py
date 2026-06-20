@@ -53,7 +53,6 @@ LIVE_SKIPPABLE_GROUPS: frozenset[str] = frozenset(
         "psar",
         "aroon",
         "hma",
-        "volume_profile",
         "stoch_rsi",
         "ichimoku",
         "kama",
@@ -256,6 +255,29 @@ def attach_metric_series(
     return base.with_columns(metric)
 
 
+def join_derivative_series_asof(
+    klines: pl.DataFrame,
+    values: list[float] | None,
+    *,
+    timestamps: list[int] | None = None,
+    value_name: str = "oi",
+) -> pl.DataFrame:
+    """Align OI/GLS 5m series to klines — join_asof when timestamps present."""
+    if klines.is_empty() or not values:
+        return klines
+    on = "open_time" if "open_time" in klines.columns else "time"
+    if timestamps and len(timestamps) == len(values) and on in klines.columns:
+        rdf = pl.DataFrame({on: timestamps, value_name: values})
+        keep = [c for c in klines.columns if c != on]
+        return align_series_to_klines(
+            klines.select([on, *keep]),
+            rdf,
+            on=on,
+            right_cols=(value_name,),
+        )
+    return attach_metric_series(klines, values, value_name=value_name)
+
+
 # ---------------------------------------------------------------------------
 # Structure indicators (ex structure.py)
 # ---------------------------------------------------------------------------
@@ -381,6 +403,28 @@ def should_use_young_lite_path(*, bars_4h: int, bars_1h: int) -> bool:
     return bars_1h >= MIN_1H_BARS_FOR_SYNTH and bars_4h < THIN_4H_RAW_BARS
 
 
+def should_bypass_kline_integrity(*, bars_4h: int, bars_1h: int, bars_15m: int = 0) -> bool:
+    """Young/partial listings — do not hard-reject before lite prepare path."""
+    if should_use_young_lite_path(bars_4h=bars_4h, bars_1h=bars_1h):
+        return True
+    if bars_1h >= MIN_1H_BARS_FOR_SYNTH and bars_15m >= 96 and bars_4h < THIN_4H_RAW_BARS * 2:
+        return True
+    return False
+
+
+def violations_are_partial_history_only(violations: list[str] | tuple[str, ...]) -> bool:
+    """Allow lite prepare when gaps are only ``min_raw`` / ``min_prepared`` shortfalls."""
+    if not violations:
+        return False
+    for raw in violations:
+        v = str(raw or "")
+        if "stale" in v or "fetch" in v or "unavailable" in v or "missing_column" in v:
+            return False
+        if "<min_raw=" not in v and "<min_prepared=" not in v:
+            return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Feature-vector latching (ex latch.py)
 # ---------------------------------------------------------------------------
@@ -489,7 +533,9 @@ __all__ = [
     "resolve_hunt_live_groups",
     "resolve_prepare_groups",
     "resolve_prepare_groups_for_symbol",
+    "should_bypass_kline_integrity",
     "should_use_young_lite_path",
+    "violations_are_partial_history_only",
     "synth_4h_from_1h",
     "weighted_moving_average",
 ]

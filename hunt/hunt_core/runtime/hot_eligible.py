@@ -13,10 +13,11 @@ _HOT_PHASES = frozenset(
 )
 _HOT_LC_PHASES = frozenset(
     {
-        "dump_active",
         "distribution",
         "exhaustion_at_high",
         "dump_initiating",
+        "dump_imminent",
+        "dump_setup_forming",
     }
 )
 
@@ -27,9 +28,11 @@ def filter_kline_hot_symbols(
     ignition_by_sym: dict[str, Any] | None,
     tracker_active: set[str] | frozenset[str],
     last_tick_get: Any,
-    min_fuel: float = 40.0,
+    min_conviction: float = 40.0,
 ) -> tuple[str, ...]:
     """Return symbols worth a hot tick on 1m close (skip cold universe tail)."""
+    from hunt_core.gate._ev import setup_conviction_pct
+
     ignited = set((ignition_by_sym or {}).keys())
     out: list[str] = []
     for raw in symbols:
@@ -41,11 +44,11 @@ def filter_kline_hot_symbols(
         if not isinstance(row, dict):
             continue
         dump = row.get("dump") or {}
-        fuel = float(dump.get("dump_fuel") or 0)
+        conviction = setup_conviction_pct(dump if isinstance(dump, dict) else {}, direction="short")
         phase = str(dump.get("phase") or "")
         lc = row.get("lifecycle") or {}
         lc_phase = str(lc.get("phase") or "")
-        if fuel >= min_fuel or phase in _HOT_PHASES or lc_phase in _HOT_LC_PHASES:
+        if conviction >= min_conviction or phase in _HOT_PHASES or lc_phase in _HOT_LC_PHASES:
             out.append(sym)
     return tuple(dict.fromkeys(out))
 

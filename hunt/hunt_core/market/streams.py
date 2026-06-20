@@ -11,15 +11,19 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+import ccxt
 
 from hunt_core.errors import defensive_exc_types
 from hunt_core.market.factory import close_exchange_async, create_pro_secondary_swap
 from hunt_core.market.client import HuntCcxtClient
-from hunt_core.market.cross import configured_secondary_exchanges
-from hunt_core.market.client import build_liquidation_heatmap, heatmap_to_market_dict
+from hunt_core.market.cross import configured_secondary_exchanges, funding_rest_poll_venues
+from hunt_core.maps.liquidation import build_liquidation_map, heatmap_to_market_dict
+from hunt_core.maps.config import load_maps_config
 from hunt_core.market.ccxt_guard import (
     ccxt_ws_method_available,
+    exchange_funding_ws_capable,
     is_ccxt_rate_limited,
+    liquidation_ws_mode,
 )
 from hunt_core.market.symbols import (
     from_ccxt_symbol,
@@ -166,6 +170,9 @@ class HuntCcxtStreams:
     _force_order_buffer: collections.deque[tuple[int, str, str, float, float]] = field(
         default_factory=lambda: collections.deque(maxlen=_LIQ_BUFFER_MAX)
     )
+    _liq_buffers_by_venue: dict[str, collections.deque[tuple[int, str, str, float, float]]] = field(
+        default_factory=dict
+    )
     _agg_points: dict[str, collections.deque[_AggPoint]] = field(default_factory=dict)
     _tasks: list[asyncio.Task[None]] = field(default_factory=list)
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
@@ -192,6 +199,7 @@ class HuntCcxtStreams:
     _live_tickers: dict[str, dict[str, float]] = field(default_factory=dict)
     _live_bbo: dict[str, dict[str, float]] = field(default_factory=dict)
     _live_funding: dict[str, dict[str, float]] = field(default_factory=dict)
+    _post_reconnect_quiet_until: float = 0.0
     # cross-exchange funding: {exchange_name: {binance_symbol: {rate, mark, index}}}
     _live_funding_by_exchange: dict[str, dict[str, dict[str, float]]] = field(default_factory=dict)
     _secondary_pro_clients: dict[str, Any] = field(default_factory=dict)
@@ -201,6 +209,27 @@ class HuntCcxtStreams:
     _reset_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _last_pro_reset: float = 0.0
     _reconnect_task: asyncio.Task[None] | None = field(default=None, repr=False)
+    _reconnect_count: int = 0
+
+    def ws_health_metrics(self) -> dict[str, Any]:
+        """Expose WS transport health for cycle heartbeat / integrity checks."""
+        import time
+
+        now_ms = int(time.time() * 1000)
+        age_s: float | None = None
+        if self._last_msg_ms > 0:
+            age_s = max(0.0, (now_ms - self._last_msg_ms) / 1000.0)
+        stale_symbols = 0
+        for sym, tick in self._live_tickers.items():
+            ts = int(tick.get("ts_ms") or 0)
+            if ts <= 0 or (now_ms - ts) / 1000.0 > 120.0:
+                stale_symbols += 1
+        return {
+            "reconnect_count": self._reconnect_count,
+            "last_msg_age_s": age_s,
+            "stale_symbol_count": stale_symbols,
+            "connected": bool(self._connected),
+        }
 
     def _schedule_pro_reconnect(self) -> None:
         """Schedule Pro reconnect off the failing watch task (never self-await)."""
@@ -235,8 +264,22 @@ class HuntCcxtStreams:
         ]
         return bool(active)
 
-    def set_symbols(self, symbols: list[str]) -> None:
-        trimmed = [to_binance_symbol(s) for s in symbols if s][:_MAX_SYMBOL_STREAMS]
+    def set_symbols(self, symbols: list[str], *, priority: list[str] | None = None) -> None:
+        from hunt_core.data.universe import PINNED_SYMBOLS
+        from hunt_core.market.symbol_gate import gate_symbol_list
+
+        ex = self.client.exchange
+        symbols = gate_symbol_list(symbols, exchange=ex, label="ws_active")
+        priority = gate_symbol_list(list(priority or []), exchange=ex, label="ws_priority")
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for raw in list(priority or []) + list(PINNED_SYMBOLS) + list(symbols):
+            sym = to_binance_symbol(raw)
+            if sym and sym not in seen:
+                seen.add(sym)
+                ordered.append(sym)
+        trimmed = ordered[:_MAX_SYMBOL_STREAMS]
         new_set = set(trimmed)
         if new_set != self._symbols:
             self._symbols = new_set
@@ -267,6 +310,7 @@ class HuntCcxtStreams:
             return True
         return (
             "1006" in text
+            or "4004" in text
             or name in {"NetworkError", "RequestTimeout", "ExchangeNotAvailable"}
             or "ConnectionClosed" in name
         )
@@ -278,6 +322,12 @@ class HuntCcxtStreams:
             _attach_task_guard(task)
             tasks.append(task)
         return tasks
+
+    @staticmethod
+    async def _dispose_secondary_pro_ex(ex: Any | None, *, label: str) -> None:
+        """Close a secondary Pro client that never reached ``_secondary_pro_clients``."""
+        if ex is not None:
+            await close_exchange_async(ex, label=label)
 
     async def _reconnect_binance_pro(self) -> None:
         """Cancel all Binance Pro watch tasks, reset client, respawn (CCXT wiki pattern)."""
@@ -301,6 +351,15 @@ class HuntCcxtStreams:
                 LOG.warning("hunt_ccxt_pro_reconnect_failed | error=%s", re_exc)
                 return
             self._tasks.extend(self._spawn_pro_tasks(self._pro_specs))
+            # Drain stale kline-close backlog; REST/cache need ~30s after transport reset.
+            self._kline_ready.clear()
+            self._kline_ready_5m.clear()
+            self._kline_ready_15m.clear()
+            self._kline_waiting.clear()
+            self._kline_waiting_5m.clear()
+            self._kline_waiting_15m.clear()
+            self._post_reconnect_quiet_until = time.monotonic() + 30.0
+            self._reconnect_count += 1
             LOG.info(
                 "hunt_ccxt_pro_reconnected | tasks=%s",
                 [t.get_name() for t in self._tasks if t.get_name() != "hunt_ccxt_funding_cross"],
@@ -424,9 +483,16 @@ class HuntCcxtStreams:
         """Latest L2 order book snapshot from watch_order_book_for_symbols."""
         return self._live_books.get(to_binance_symbol(symbol))
 
-    def live_ticker(self, symbol: str) -> dict[str, float] | None:
-        """Latest 24h ticker from watch_tickers."""
-        return self._live_tickers.get(to_binance_symbol(symbol))
+    def live_ticker(self, symbol: str, *, max_age_s: float | None = None) -> dict[str, float] | None:
+        """Latest 24h ticker from watch_tickers; None if missing or stale."""
+        entry = self._live_tickers.get(to_binance_symbol(symbol))
+        if not entry:
+            return None
+        if max_age_s is not None:
+            ts_ms = float(entry.get("ts_ms") or 0)
+            if ts_ms <= 0 or (time.time() * 1000 - ts_ms) > max_age_s * 1000:
+                return None
+        return entry
 
     def live_bbo(self, symbol: str) -> dict[str, float] | None:
         """Top-of-book bid/ask from watch_bids_asks (lower CPU than full tickers)."""
@@ -445,6 +511,13 @@ class HuntCcxtStreams:
             if sym in data
         }
 
+    def liquidation_buffers(self) -> dict[str, collections.deque[tuple[int, str, str, float, float]]]:
+        """Per-venue liquidation ring buffers (binance + cross WS when enabled)."""
+        return {"binance": self._force_order_buffer, **self._liq_buffers_by_venue}
+
+    def trade_buffer(self, symbol: str) -> collections.deque[_AggPoint]:
+        return self._agg_points.get(to_binance_symbol(symbol), collections.deque())
+
     def snapshot(self, symbol: str) -> dict[str, Any]:
         sym = to_binance_symbol(symbol)
         liq = self.liquidation_rollups(sym, window_seconds=300)
@@ -453,24 +526,37 @@ class HuntCcxtStreams:
         book = self._live_books.get(sym) or {}
         ticker = self._live_tickers.get(sym) or {}
         funding = self._live_funding.get(sym) or {}
-        mark_px = funding.get("markPrice") or ticker.get("last")
+        mark_px = funding.get("markPrice")
+        last_px = ticker.get("last")
         if mark_px is None and book.get("bid") and book.get("ask"):
             mark_px = (float(book["bid"]) + float(book["ask"])) / 2.0
+        elif mark_px is None and last_px:
+            mark_px = last_px
         heatmap = None
+        liq_map = None
         bracket_tiers = None
+        maps_cfg = load_maps_config()
         if mark_px is not None:
             try:
                 bracket_tiers = self.client.get_cached_leverage_tiers(sym)
-                heatmap = build_liquidation_heatmap(
-                    self._force_order_buffer,
+                liq_buffers = {"binance": self._force_order_buffer, **self._liq_buffers_by_venue}
+                liq_map = build_liquidation_map(
+                    liq_buffers,
                     symbol=sym,
                     current_price=float(mark_px),
+                    cfg=maps_cfg,
                     bracket_tiers=bracket_tiers,
                 )
+                heatmap = liq_map.heatmap if liq_map else None
             except (TypeError, ValueError):
                 heatmap = None
+                liq_map = None
                 bracket_tiers = None
         liq_source = "binance_brackets" if bracket_tiers else "default"
+        if liq_map:
+            liq_fields = liq_map.to_dict()
+        else:
+            liq_fields = heatmap_to_market_dict(heatmap, prospective_source=liq_source)
         ratio_60 = self.agg_trade_buy_ratio(sym, window_seconds=60)
         ratio_30 = self.agg_trade_buy_ratio(sym, window_seconds=30)
         return {
@@ -512,12 +598,13 @@ class HuntCcxtStreams:
             # live ticker
             "live_quote_volume": ticker.get("quoteVolume"),
             "live_price_change_pct": ticker.get("percentage"),
+            "live_last_price": last_px,
             # live funding
             "live_funding_rate": funding.get("fundingRate"),
             "live_mark_price": funding.get("markPrice"),
             "live_index_price": funding.get("indexPrice"),
             **(self.mark_snapshot(sym) or {}),
-            **heatmap_to_market_dict(heatmap, prospective_source=liq_source),
+            **liq_fields,
         }
 
     def _promote_kline_grace(self, *, interval: str = _KLINE_INTERVAL) -> None:
@@ -551,6 +638,13 @@ class HuntCcxtStreams:
             waiting.pop(sym, None)
 
     def pop_kline_close_triggers(self) -> set[str]:
+        if time.monotonic() < self._post_reconnect_quiet_until:
+            self._kline_ready.clear()
+            if self.kline_5m_enabled:
+                self._kline_ready_5m.clear()
+            if self.kline_15m_enabled:
+                self._kline_ready_15m.clear()
+            return set()
         self._promote_kline_grace()
         if self.kline_5m_enabled:
             self._promote_kline_grace(interval=_KLINE_5M_INTERVAL)
@@ -647,7 +741,7 @@ class HuntCcxtStreams:
     def _touch(self) -> None:
         self._last_msg_ms = int(time.time() * 1000)
 
-    def _record_liquidation(self, item: dict[str, Any], *, exchange: Any) -> None:
+    def _record_liquidation(self, item: dict[str, Any], *, exchange: Any, venue: str = "binance") -> None:
         info = item.get("info") if isinstance(item.get("info"), dict) else item
         sym = self._ws_binance_id(exchange, str(item.get("symbol") or info.get("s") or ""))
         side = str(item.get("side") or info.get("S") or "").upper()
@@ -655,7 +749,21 @@ class HuntCcxtStreams:
         price = float(item.get("price") or info.get("p") or 0)
         ts_ms = int(item.get("timestamp") or info.get("T") or time.time() * 1000)
         if sym and qty > 0:
-            self._force_order_buffer.append((ts_ms, sym, side, qty, price))
+            ev = (ts_ms, sym, side, qty, price)
+            self._force_order_buffer.append(ev)
+            buf = self._liq_buffers_by_venue.setdefault(
+                venue,
+                collections.deque(maxlen=_LIQ_BUFFER_MAX),
+            )
+            buf.append(ev)
+            try:
+                from hunt_core.maps.engine import get_map_store
+
+                get_map_store().record_liquidation(
+                    sym, venue=venue, ts_ms=ts_ms, side=side, qty=qty, price=price
+                )
+            except Exception:
+                pass
 
     def _record_trade(self, sym: str, trade: dict[str, Any]) -> None:
         info = trade.get("info") if isinstance(trade.get("info"), dict) else trade
@@ -746,9 +854,10 @@ class HuntCcxtStreams:
         self._pro_ex = await self.client.acquire_pro_exchange()
         ex = self._pro_ex
         specs: list[tuple[str, Any]] = []
-        if self._ws_has(ex, "watchLiquidationsForSymbols"):
+        liq_mode = liquidation_ws_mode(ex)
+        if liq_mode == "mux":
             specs.append(("hunt_ccxt_liq", self._watch_liquidations_mux))
-        elif self._ws_has(ex, "watchLiquidations"):
+        elif liq_mode == "per_symbol":
             specs.append(("hunt_ccxt_liq", self._watch_liquidations_symbol))
         if self.mark_price_enabled and self._ws_has(ex, "watchMarkPrices"):
             specs.append(("hunt_ccxt_mark", self._watch_mark_prices))
@@ -776,6 +885,10 @@ class HuntCcxtStreams:
         cross_ws = os.getenv("HUNT_CROSS_WS", "").strip().lower() in {"1", "true", "yes"}
         if cross_ws:
             specs.append(("hunt_ccxt_funding_cross", self._watch_secondary_funding_mux))
+            if funding_rest_poll_venues():
+                specs.append(("hunt_ccxt_funding_rest", self._watch_secondary_funding_rest_mux))
+            if os.getenv("HUNT_MAPS_LIQ_CROSS", "1").strip().lower() in {"1", "true", "yes"}:
+                specs.append(("hunt_ccxt_liq_cross", self._watch_secondary_liquidations_mux))
         else:
             LOG.info("hunt_cross_ws_disabled | hint=set HUNT_CROSS_WS=1 for Bybit/OKX WS")
         if not specs:
@@ -794,11 +907,15 @@ class HuntCcxtStreams:
         for task in self._tasks:
             await _join_cancelled_task(task)
         self._tasks.clear()
-        for name, ex in self._secondary_pro_clients.items():
+        # Let cancelled mux tasks finish disposing in-flight secondary clients.
+        await asyncio.sleep(0.25)
+        for name, ex in list(self._secondary_pro_clients.items()):
             await close_exchange_async(ex, label=f"secondary_pro:{name}")
         self._secondary_pro_clients.clear()
+        # Pro client owned by HuntCcxtClient — closed in plane.aclose → client.close().
         self._pro_ex = None
         self._connected = False
+        await asyncio.sleep(0.35)
 
     async def _watch_liquidations_mux(self) -> None:
         """All-symbol liquidations via watch_liquidations_for_symbols."""
@@ -852,14 +969,14 @@ class HuntCcxtStreams:
                 prices = await ex.watch_mark_prices()
                 self._touch()
                 now_ms = int(time.time() * 1000)
-                items = prices.values() if isinstance(prices, dict) else prices
-                for item in items if isinstance(items, list) else []:
+                items = list(prices.values()) if isinstance(prices, dict) else (prices or [])
+                for item in items:
                     if not isinstance(item, dict):
                         continue
                     sym = self._ws_binance_id(ex, str(item.get("symbol") or ""))
                     if not sym or sym not in self._symbols:
                         continue
-                    mark = float(item.get("markPrice") or item.get("last") or 0)
+                    mark = float(item.get("markPrice") or 0)
                     index = float(item.get("indexPrice") or 0)
                     funding = float(item.get("fundingRate") or 0)
                     info = item.get("info") if isinstance(item.get("info"), dict) else {}
@@ -867,14 +984,19 @@ class HuntCcxtStreams:
                     ap = float(ap_raw) if ap_raw is not None else 0.0
                     if mark > 0:
                         self._mark_state[sym] = (now_ms, mark, index, funding, ap)
-                        self._live_funding[sym] = {
-                            "markPrice": mark,
-                            "indexPrice": index,
-                            "fundingRate": funding,
-                        }
+                        prev = dict(self._live_funding.get(sym) or {})
+                        prev["markPrice"] = mark
+                        if index > 0:
+                            prev["indexPrice"] = index
+                        if funding != 0:
+                            prev["fundingRate"] = funding
+                        self._live_funding[sym] = prev
                         self.client.update_basis_from_websocket(sym, mark, index if index > 0 else None)
             except asyncio.CancelledError:
                 break
+            except ccxt.BadSymbol as exc:
+                LOG.debug("hunt_ccxt_mark_skip | delisted=%s", exc)
+                await asyncio.sleep(1.0)
             except defensive_exc_types(Exception) as exc:
                 await self._on_ws_loop_error("mark", exc)
 
@@ -1048,6 +1170,8 @@ class HuntCcxtStreams:
                     "ask": ask_p,
                     "bid_qty": bid_q,
                     "ask_qty": ask_q,
+                    "bids": bids,
+                    "asks": asks,
                     "depth_imbalance": di_l1,
                     "ws_depth_imbalance": di_top20,
                     "microprice_bias": mp,
@@ -1107,6 +1231,7 @@ class HuntCcxtStreams:
             try:
                 tickers = await ex.watch_tickers(syms)
                 self._touch()
+                now_ms = int(time.time() * 1000)
                 items = tickers.values() if isinstance(tickers, dict) else []
                 for item in items:
                     if not isinstance(item, dict):
@@ -1120,6 +1245,7 @@ class HuntCcxtStreams:
                         "percentage": float(item.get("percentage") or 0),
                         "high": float(item.get("high") or 0),
                         "low": float(item.get("low") or 0),
+                        "ts_ms": now_ms,
                     }
             except asyncio.CancelledError:
                 break
@@ -1147,11 +1273,15 @@ class HuntCcxtStreams:
                     mark = float(item.get("markPrice") or 0)
                     index = float(item.get("indexPrice") or 0)
                     funding = float(item.get("fundingRate") or 0)
-                    self._live_funding[sym] = {
-                        "markPrice": mark,
-                        "indexPrice": index,
-                        "fundingRate": funding,
-                    }
+                    prev = dict(self._live_funding.get(sym) or {})
+                    if mark > 0:
+                        prev["markPrice"] = mark
+                    if index > 0:
+                        prev["indexPrice"] = index
+                    if funding != 0:
+                        prev["fundingRate"] = funding
+                    if prev:
+                        self._live_funding[sym] = prev
                     if mark > 0 and index > 0:
                         self.client.update_basis_from_websocket(sym, mark, index)
             except asyncio.CancelledError:
@@ -1192,7 +1322,7 @@ class HuntCcxtStreams:
         """Continuous watch_funding_rates loop for one secondary exchange."""
         ex = self._secondary_pro_clients.get(name)
         if ex is None or not self._ws_has(ex, "watchFundingRates"):
-            LOG.info(
+            LOG.debug(
                 "secondary_funding_ws_skipped | exchange=%s reason=watchFundingRates_unsupported",
                 name,
             )
@@ -1252,9 +1382,15 @@ class HuntCcxtStreams:
                 backoff_s = min(60.0, backoff_s * 1.5)
 
     async def _watch_secondary_funding_mux(self) -> None:
-        """Spawn per-exchange WS funding tasks for Bybit / OKX / Bitget."""
+        """Spawn per-exchange WS funding tasks for secondary venues with CCXT support."""
         tasks: list[asyncio.Task[None]] = []
         for name in configured_secondary_exchanges():
+            if not exchange_funding_ws_capable(name):
+                LOG.info(
+                    "secondary_funding_rest_plane | exchange=%s ws=skip rest_poll=ok",
+                    name,
+                )
+                continue
             ex_id = name
             ex: Any | None = None
             try:
@@ -1275,16 +1411,19 @@ class HuntCcxtStreams:
                 )
                 if usdt_swap <= 0:
                     LOG.warning("secondary_no_usdt_swap_markets | exchange=%s", name)
-                    await close_exchange_async(ex, label=f"secondary_pro_skip:{name}")
+                    await self._dispose_secondary_pro_ex(ex, label=f"secondary_pro_skip:{name}")
+                    ex = None
                     continue
                 if not self._ws_has(ex, "watchFundingRates"):
-                    LOG.info(
+                    LOG.debug(
                         "secondary_funding_ws_skipped | exchange=%s reason=watchFundingRates_unsupported",
                         name,
                     )
-                    await close_exchange_async(ex, label=f"secondary_pro_skip:{name}")
+                    await self._dispose_secondary_pro_ex(ex, label=f"secondary_pro_skip:{name}")
+                    ex = None
                     continue
                 self._secondary_pro_clients[name] = ex
+                ex = None
                 task = asyncio.create_task(
                     self._watch_one_secondary_funding(name),
                     name=f"hunt_ccxt_funding_{name}",
@@ -1292,10 +1431,164 @@ class HuntCcxtStreams:
                 _attach_task_guard(task)
                 tasks.append(task)
                 LOG.info("secondary_funding_ws_started | exchange=%s", name)
+            except asyncio.CancelledError:
+                await self._dispose_secondary_pro_ex(ex, label=f"secondary_pro_cancel:{name}")
+                for t in tasks:
+                    t.cancel()
+                raise
             except Exception as exc:
                 LOG.warning("secondary_funding_ws_init_failed | exchange=%s error=%s", name, exc)
-                if ex is not None:
-                    await close_exchange_async(ex, label=f"secondary_pro_init:{name}")
+                await self._dispose_secondary_pro_ex(ex, label=f"secondary_pro_init:{name}")
+                ex = None
+        if not tasks:
+            return
+        try:
+            await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            for t in tasks:
+                t.cancel()
+            raise
+
+    async def _watch_secondary_funding_rest_mux(self) -> None:
+        """REST funding poll for venues without Pro ``watchFundingRates`` (Bybit/Bitget)."""
+        venues = funding_rest_poll_venues()
+        if not venues:
+            return
+        interval_s = max(30.0, float(os.getenv("HUNT_CROSS_FUNDING_REST_S", "60")))
+        LOG.info(
+            "secondary_funding_rest_started | exchanges=%s interval_s=%s",
+            ",".join(venues),
+            interval_s,
+        )
+        while not self._stop.is_set():
+            syms_bin = list(self._symbols)
+            if not syms_bin:
+                await asyncio.sleep(2.0)
+                continue
+            for name in venues:
+                bucket = self._live_funding_by_exchange.setdefault(name, {})
+                for sym in syms_bin[:_MAX_SYMBOL_STREAMS]:
+                    if self._stop.is_set():
+                        return
+                    try:
+                        rate = await self.client.fetch_secondary_funding_rate(name, sym)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        LOG.debug(
+                            "secondary_funding_rest_error | exchange=%s symbol=%s error=%s",
+                            name,
+                            sym,
+                            exc,
+                        )
+                        continue
+                    if rate is None:
+                        continue
+                    bucket[sym] = {
+                        "fundingRate": float(rate),
+                        "markPrice": 0.0,
+                        "indexPrice": 0.0,
+                    }
+            await asyncio.sleep(interval_s)
+
+    async def _watch_one_secondary_liquidations(self, name: str) -> None:
+        """Real liquidation events from Bybit / OKX — same mode taxonomy as primary."""
+        ex = self._secondary_pro_clients.get(name)
+        if ex is None:
+            return
+        mode = liquidation_ws_mode(ex)
+        if mode == "skip":
+            LOG.info(
+                "secondary_liq_ws_skipped | exchange=%s reason=no_watchLiquidations",
+                name,
+            )
+            return
+        sym_idx = 0
+        label = f"liq_{name}"
+        while not self._stop.is_set():
+            ex = self._secondary_pro_clients.get(name)
+            if ex is None:
+                return
+            syms_bin = list(self._symbols)
+            if not syms_bin:
+                await asyncio.sleep(2.0)
+                continue
+            ccxt_syms = [
+                resolved
+                for s in syms_bin
+                if (resolved := try_resolve_linear_usdt_swap(s, exchange=ex))
+            ]
+            if not ccxt_syms:
+                await asyncio.sleep(2.0)
+                continue
+            try:
+                if mode == "mux":
+                    items = await ex.watch_liquidations_for_symbols(ccxt_syms)
+                else:
+                    ccxt_sym = ccxt_syms[sym_idx % len(ccxt_syms)]
+                    sym_idx += 1
+                    items = await ex.watch_liquidations(ccxt_sym)
+                self._touch()
+                batch = items if isinstance(items, list) else [items]
+                for item in batch:
+                    if not isinstance(item, dict):
+                        continue
+                    sym = self._ws_binance_id(ex, str(item.get("symbol") or ""))
+                    if sym and sym in self._symbols:
+                        self._record_liquidation(item, exchange=ex, venue=name)
+            except asyncio.CancelledError:
+                return
+            except defensive_exc_types(Exception) as exc:
+                await self._on_ws_loop_error(label, exc)
+                if self._ws_transport_fatal(exc):
+                    await self._reset_secondary_pro(name)
+
+    async def _watch_secondary_liquidations_mux(self) -> None:
+        """Spawn per-exchange liquidation WS for Bybit / OKX."""
+        liq_venues = ("bybit", "okx")
+        tasks: list[asyncio.Task[None]] = []
+        for name in configured_secondary_exchanges():
+            if name not in liq_venues:
+                continue
+            ex = self._secondary_pro_clients.get(name)
+            if ex is None:
+                try:
+                    await asyncio.sleep(3.0)
+                    ex = self._secondary_pro_clients.get(name)
+                except asyncio.CancelledError:
+                    raise
+            created_local: Any | None = None
+            if ex is None:
+                try:
+                    created_local = create_pro_secondary_swap(
+                        name,
+                        proxy_url=self.client._proxy_url,
+                        trust_env=self.client._trust_env,
+                        timeout_ms=self.client._timeout_ms,
+                    )
+                    await created_local.load_markets()
+                    self._secondary_pro_clients[name] = created_local
+                    created_local = None
+                except asyncio.CancelledError:
+                    await self._dispose_secondary_pro_ex(
+                        created_local, label=f"secondary_liq_cancel:{name}"
+                    )
+                    for t in tasks:
+                        t.cancel()
+                    raise
+                except Exception as exc:
+                    LOG.warning("secondary_liq_ws_init_failed | exchange=%s error=%s", name, exc)
+                    await self._dispose_secondary_pro_ex(
+                        created_local, label=f"secondary_liq_init:{name}"
+                    )
+                    continue
+            task = asyncio.create_task(
+                self._watch_one_secondary_liquidations(name),
+                name=f"hunt_ccxt_liq_{name}",
+            )
+            _attach_task_guard(task)
+            tasks.append(task)
+            LOG.info("secondary_liq_ws_started | exchange=%s", name)
         if not tasks:
             return
         try:

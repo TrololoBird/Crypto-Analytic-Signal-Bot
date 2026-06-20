@@ -288,22 +288,40 @@ def _apply_rest_enrichments(
     funding_info: dict[str, float | int] | None,
     delta: float | None,
 ) -> None:
-    prepared.oi_current = pack.get("oi") or client.get_cached_open_interest(symbol)
-    prepared.oi_change_pct = pack.get("oi_chg_1h") or client.get_cached_oi_change(symbol, "1h")
-    prepared.ls_ratio = pack.get("ls_1h") or client.get_cached_ls_ratio(symbol, "1h")
+    prepared.oi_current = pack.get("oi") if pack.get("oi") is not None else client.get_cached_open_interest(symbol)
+    prepared.oi_change_pct = (
+        pack.get("oi_chg_1h")
+        if pack.get("oi_chg_1h") is not None
+        else client.get_cached_oi_change(symbol, "1h")
+    )
+    prepared.ls_ratio = (
+        pack.get("ls_1h") if pack.get("ls_1h") is not None else client.get_cached_ls_ratio(symbol, "1h")
+    )
     prepared.top_account_ls_ratio = prepared.ls_ratio
-    prepared.top_position_ls_ratio = pack.get(
-        "top_ls_1h"
-    ) or client.get_cached_top_position_ls_ratio(symbol, "1h")
+    prepared.top_position_ls_ratio = (
+        pack.get("top_ls_1h")
+        if pack.get("top_ls_1h") is not None
+        else client.get_cached_top_position_ls_ratio(symbol, "1h")
+    )
     prepared.top_trader_position_ratio = prepared.top_position_ls_ratio
-    prepared.global_ls_ratio = pack.get("global_ls_1h") or client.get_cached_global_ls_ratio(
-        symbol, "1h"
+    prepared.global_ls_ratio = (
+        pack.get("global_ls_1h")
+        if pack.get("global_ls_1h") is not None
+        else client.get_cached_global_ls_ratio(symbol, "1h")
     )
     prepared.global_account_ls_ratio = prepared.global_ls_ratio
     if prepared.ls_ratio is not None and prepared.global_ls_ratio is not None:
         prepared.top_vs_global_ls_gap = float(prepared.ls_ratio) - float(prepared.global_ls_ratio)
-    prepared.taker_ratio = pack.get("taker_1h") or client.get_cached_taker_ratio(symbol, "1h")
-    prepared.funding_rate = pack.get("funding") or client.get_cached_funding_rate(symbol)
+    prepared.taker_ratio = (
+        pack.get("taker_1h")
+        if pack.get("taker_1h") is not None
+        else client.get_cached_taker_ratio(symbol, "1h")
+    )
+    prepared.funding_rate = (
+        pack.get("funding")
+        if pack.get("funding") is not None
+        else client.get_cached_funding_rate(symbol)
+    )
     prepared.funding_trend = client.get_cached_funding_trend(symbol)
     funding_z = client.get_cached_funding_rate_zscore(symbol)
     if funding_z is not None:
@@ -368,7 +386,15 @@ def _apply_rest_enrichments(
     prepared.microprice_bias_source = prepared.depth_imbalance_source
     agg = pack.get("agg_trades")
     if agg is not None:
-        prepared.agg_trade_delta_30s = getattr(agg, "delta_ratio", None)
+        # The agg_trade_delta_* field is a buy-share in [0,1] (0.5 balanced) per the
+        # WS source + scoring/_orderflow_confirm thresholds (0.42/0.58). The REST
+        # snapshot exposes a SIGNED delta_ratio=(buy-sell)/total in [-1,1]; convert it
+        # to the same buy-share scale so the sell-side trigger (< 0.42) no longer fires
+        # on neutral/mild-buy flow (a systematic short bias).
+        rest_signed = getattr(agg, "delta_ratio", None)
+        prepared.agg_trade_delta_30s = (
+            (float(rest_signed) + 1.0) / 2.0 if rest_signed is not None else None
+        )
         prepared.orderflow_source = "agg_trade_rest"
     prepared.data_source_mix = "futures_rest_full"
 
@@ -460,55 +486,107 @@ async def resolve_kline_map(
     tier: SnapshotTier,
     safe_fetch: Any,
 ) -> tuple[dict[str, Any], dict[str, str]]:
-    """Fetch klines with tier-aware budget (fast = fresh 1m/5m + cached HTF).
+    """Fetch klines with tier-aware budget.
+
+    X8/U3: one fresh 1m REST pull + Polars resample for 5m→1d (all tiers).
+    Weekly (1w) still uses a direct cached fetch when requested.
 
     Returns (kline_map, fetch_errors) — never silent None without a reason key.
     """
     kline_map: dict[str, Any] = {}
     fetch_errors: dict[str, str] = {}
+
+    from hunt_core.data.frame_cache import get_frame_cache
+    from hunt_core.market.factory import min_1m_bars_for_resample, resample_ohlcv_from_1m
+
+    exchange = getattr(client, "_ex", None)
     if tier == "full":
-        for name in FULL_KLINE_ORDER:
-            if name not in limits:
-                continue
-            def factory(n: str = name, fresh: bool = name in _FAST_FRESH_KLINES) -> Any:
-                if fresh:
-                    return client.fetch_klines(symbol, n, limit=limits[n])
-                return client.fetch_klines_cached(symbol, n, limit=limits[n])
+        derive_names = tuple(
+            n for n in FULL_KLINE_ORDER if n in limits and n not in {"1m", "1w"}
+        )
+        direct_fetch = tuple(n for n in ("1w",) if n in limits)
+    else:
+        derive_names = tuple(
+            n for n in (*_FAST_FRESH_KLINES, *_FAST_CACHE_KLINES) if n in limits and n != "1m"
+        )
+        direct_fetch = ()
+    need_1m = int(limits.get("1m", 500))
+    if exchange is not None:
+        for name in derive_names:
+            need_1m = max(
+                need_1m,
+                min_1m_bars_for_resample(name, limits[name], exchange=exchange),
+            )
+        need_1m = min(1500, need_1m)
 
-            res = await safe_fetch(factory, context=f"klines.{name}", client=client)
-            kline_map[name] = res
-            if res is None:
+    res_1m = await safe_fetch(
+        lambda: client.fetch_klines(symbol, "1m", limit=need_1m),
+        context="klines.1m",
+        client=client,
+    )
+    if res_1m is None:
+        ws_df = get_frame_cache().get_kline_frame(symbol, "1m")
+        if ws_df is not None and not ws_df.is_empty():
+            res_1m = ws_df
+        else:
+            fetch_errors["1m"] = "fetch_failed"
+
+    df_1m = res_1m if isinstance(res_1m, pl.DataFrame) else None
+    if df_1m is not None and not df_1m.is_empty():
+        kline_map["1m"] = df_1m
+
+    derived_ok = (
+        df_1m is not None
+        and not df_1m.is_empty()
+        and exchange is not None
+    )
+
+    async def _fallback_kline(name: str) -> None:
+        if name in _FAST_FRESH_KLINES:
+            res = await safe_fetch(
+                lambda n=name: client.fetch_klines(symbol, n, limit=limits[n]),
+                context=f"klines.{name}",
+                client=client,
+            )
+        else:
+            cached = client.get_cached_klines(symbol, name, limit=limits[name])
+            if cached is not None and not cached.is_empty():
+                kline_map[name] = cached
+                return
+            res = await safe_fetch(
+                lambda n=name: client.fetch_klines_cached(symbol, n, limit=limits[n]),
+                context=f"klines.{name}",
+                client=client,
+            )
+        kline_map[name] = res
+        if res is None:
+            ws_df = get_frame_cache().get_kline_frame(symbol, name)
+            if ws_df is not None and not ws_df.is_empty():
+                kline_map[name] = ws_df
+            else:
                 fetch_errors[name] = "fetch_failed"
-        return kline_map, fetch_errors
 
-    for name in _FAST_FRESH_KLINES:
-        if name not in limits:
-            continue
-        # Fast tier bypasses kline cache (5m TTL up to 300s) — delivery must be fresh.
-        res = await safe_fetch(
-            lambda n=name: client.fetch_klines(symbol, n, limit=limits[n]),
-            context=f"klines.{name}",
-            client=client,
-        )
-        kline_map[name] = res
-        if res is None:
-            fetch_errors[name] = "fetch_failed"
+    for name in derive_names:
+        if derived_ok:
+            derived = resample_ohlcv_from_1m(
+                df_1m,
+                name,
+                exchange=exchange,
+                limit=limits[name],
+            )
+            # Require the full configured limit — 1m is capped at 1500 bars so 5m
+            # resample often tops out ~300; fall back to direct REST when short.
+            required_bars = int(limits[name])
+            if not derived.is_empty() and derived.height >= required_bars:
+                kline_map[name] = derived
+                continue
+        await _fallback_kline(name)
 
-    for name in _FAST_CACHE_KLINES:
-        if name not in limits:
-            continue
-        cached = client.get_cached_klines(symbol, name, limit=limits[name])
-        if cached is not None and not cached.is_empty():
-            kline_map[name] = cached
-            continue
-        res = await safe_fetch(
-            lambda n=name: client.fetch_klines_cached(symbol, n, limit=limits[n]),
-            context=f"klines.{name}",
-            client=client,
-        )
-        kline_map[name] = res
-        if res is None:
-            fetch_errors[name] = "fetch_failed"
+    for name in direct_fetch:
+        await _fallback_kline(name)
+
+    if "1m" in limits and "1m" not in kline_map:
+        await _fallback_kline("1m")
     return kline_map, fetch_errors
 
 
@@ -523,12 +601,27 @@ def rest_pack_specs(
     critical: list[tuple[str, Any]] = [
         ("oi", client.fetch_open_interest(symbol)),
         ("oi_chg_5m", client.fetch_open_interest_change(symbol, period="5m")),
+        ("ls_5m", client.fetch_long_short_ratio(symbol, period="5m")),
         ("top_ls_5m", client.fetch_top_position_ls_ratio(symbol, period="5m")),
         ("global_ls_5m", client.fetch_global_ls_ratio(symbol, period="5m")),
         ("taker_5m", client.fetch_taker_ratio(symbol, period="5m")),
         ("book_depth", client.fetch_order_book_depth_snapshot(symbol, limit=100)),
     ]
     if tier == "fast":
+        critical.extend(
+            [
+                ("oi_chg_1h", client.fetch_open_interest_change(symbol, period="1h")),
+                ("taker_1h", client.fetch_taker_ratio(symbol, period="1h")),
+                ("funding", client.fetch_funding_rate(symbol)),
+                # Z-score series — cached after first fetch; fast/hot parity with full tier.
+                ("funding_hist", client.fetch_funding_rate_history(symbol, limit=16)),
+                # OI/GLS series: scalar lists in pack; full-tier join_asof via
+        # prepare_columns.join_derivative_series_asof when timestamps land.
+        ("oi_series", client.fetch_open_interest_series(symbol, period="5m", limit=48)),
+                ("gls_series", client.fetch_global_ls_series(symbol, period="5m", limit=48)),
+                ("basis_5m", client.fetch_basis(symbol, period="5m", limit=3)),
+            ]
+        )
         if not ws_orderflow_fresh:
             critical.append(("agg_trades", client.fetch_agg_trade_snapshot(symbol, limit=100)))
         return critical
@@ -594,6 +687,7 @@ class TickBatchCache:
         "funding_info_all",
         "exchange_by_sym",
         "btc_work_1h",
+        "btc_work_1m",
         "premium_at",
         "funding_at",
         "exchange_at",
@@ -605,6 +699,7 @@ class TickBatchCache:
         self.funding_info_all: dict[str, dict[str, float | int]] = {}
         self.exchange_by_sym: dict[str, Any] = {}
         self.btc_work_1h: Any | None = None
+        self.btc_work_1m: Any | None = None
         self.premium_at = 0.0
         self.funding_at = 0.0
         self.exchange_at = 0.0
@@ -636,9 +731,20 @@ async def refresh_tick_batch_cache(
         cache.exchange_by_sym = {r.symbol: r for r in exchange_list}
         cache.exchange_at = now
     if need_btc and (tier == "full" or not cache._fresh(cache.btc_at, BTC_1H_TTL_S)):
-        btc_df = await safe_fetch(lambda: client.fetch_klines_cached("BTCUSDT", "1h", limit=500), context="btc_1h", client=client)
-        if btc_df is not None and not btc_df.is_empty():
-            cache.btc_work_1h = prepare_frame(btc_df)
+        btc_1h = await safe_fetch(
+            lambda: client.fetch_klines_cached("BTCUSDT", "1h", limit=500),
+            context="btc_1h",
+            client=client,
+        )
+        if btc_1h is not None and not btc_1h.is_empty():
+            cache.btc_work_1h = prepare_frame(btc_1h)
+        btc_1m = await safe_fetch(
+            lambda: client.fetch_klines_cached("BTCUSDT", "1m", limit=999),
+            context="btc_1m",
+            client=client,
+        )
+        if btc_1m is not None and not btc_1m.is_empty():
+            cache.btc_work_1m = prepare_frame(btc_1m)
         cache.btc_at = now
 
 

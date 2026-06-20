@@ -18,6 +18,11 @@ LOG = logging.getLogger("hunt_core.market.cross")
 
 SECONDARY_EXCHANGES: tuple[str, ...] = ("bybit", "okx", "bitget")
 
+# Explicit cross-venue funding plane (Hunt-owned — not CCXT ``has=None`` semantics).
+# Binance primary: ``watchMarkPrices`` in :class:`HuntCcxtStreams` (not here).
+VENUE_FUNDING_WS: frozenset[str] = frozenset({"okx"})
+VENUE_FUNDING_REST_POLL: frozenset[str] = frozenset({"bybit", "bitget"})
+
 # Exchange ids hunt knows how to drive via the ccxt factory (linear USDT swap).
 SUPPORTED_SECONDARY_EXCHANGES: frozenset[str] = frozenset(
     {"bybit", "okx", "bitget", "gate", "gateio", "kucoinfutures", "mexc", "htx"}
@@ -51,6 +56,68 @@ def configured_secondary_exchanges() -> tuple[str, ...]:
         )
         return SECONDARY_EXCHANGES
     return tuple(out)
+
+
+def funding_ws_venues() -> tuple[str, ...]:
+    """Secondaries with live Pro ``watchFundingRates`` (when CCXT ``has`` is True)."""
+    return tuple(ex for ex in configured_secondary_exchanges() if ex in VENUE_FUNDING_WS)
+
+
+def funding_rest_poll_venues() -> tuple[str, ...]:
+    """Secondaries without funding WS — REST poll fills ``_live_funding_by_exchange``."""
+    return tuple(ex for ex in configured_secondary_exchanges() if ex in VENUE_FUNDING_REST_POLL)
+
+
+def sanitize_funding_map(raw: dict[str, Any] | None) -> dict[str, float]:
+    """Cross funding dict without JSON nulls — omit unknown venues instead."""
+    out: dict[str, float] = {}
+    for key, val in (raw or {}).items():
+        if val is None:
+            continue
+        try:
+            out[str(key)] = float(val)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def apply_cross_snapshot_to_market(
+    market: dict[str, Any],
+    snap: dict[str, Any],
+    *,
+    ws_cross: dict[str, dict[str, float]] | None = None,
+) -> None:
+    """Promote merged REST+WS cross intel onto ``market`` (no null funding rates)."""
+    merged = merge_ws_cross_into_snapshot(snap, ws_cross)
+    funding = sanitize_funding_map(merged.get("funding") if isinstance(merged.get("funding"), dict) else {})
+    oi_raw = merged.get("oi_usd") if isinstance(merged.get("oi_usd"), dict) else {}
+    oi_usd = {k: float(v) for k, v in oi_raw.items() if v is not None}
+    secondary_funding = {k: v for k, v in funding.items() if k != "binance"}
+    secondary_oi = dict(oi_usd)
+    has_ws = bool(ws_cross)
+    has_rest = bool(merged.get("symbol"))
+    if has_ws and secondary_funding:
+        source = "hybrid"
+    elif has_ws:
+        source = "ws"
+    elif secondary_funding or secondary_oi:
+        source = "rest"
+    else:
+        source = "unavailable"
+    market["cross_data_source"] = source
+    if secondary_funding:
+        market["cross_funding_secondary"] = secondary_funding
+    if secondary_oi:
+        market["cross_oi_usd_secondary"] = secondary_oi
+    if merged.get("funding_spread") is not None:
+        market["cross_funding_spread"] = merged.get("funding_spread")
+    if merged.get("oi_total") is not None:
+        market["cross_oi_total"] = merged.get("oi_total")
+    if merged.get("funding_consensus") is not None:
+        market["cross_funding_consensus"] = merged.get("funding_consensus")
+    listed = merged.get("listed")
+    if isinstance(listed, dict):
+        market["cross_listed"] = listed
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,14 +167,14 @@ def merge_ws_cross_into_snapshot(
     if not ws_live:
         return snapshot
     out = dict(snapshot)
-    funding: dict[str, float | None] = dict(out.get("funding") or {})
+    funding = sanitize_funding_map(out.get("funding") if isinstance(out.get("funding"), dict) else {})
     mark_price: dict[str, float | None] = dict(out.get("mark_price") or {})
     for ex_name, fields in ws_live.items():
         if not isinstance(fields, dict):
             continue
         fr = fields.get("fundingRate")
         if fr is not None:
-            funding[ex_name] = float(fr)
+            funding[str(ex_name)] = float(fr)
         mp = fields.get("markPrice")
         if mp is not None and float(mp) > 0:
             mark_price[ex_name] = float(mp)
@@ -167,7 +234,10 @@ async def fetch_secondary_ticker_overlay(
 
 
 def attach_cross_fields(row: dict[str, Any], cx: dict[str, Any]) -> None:
-    row["cross_exchange"] = cx
+    out = dict(cx)
+    if isinstance(out.get("funding"), dict):
+        out["funding"] = sanitize_funding_map(out["funding"])
+    row["cross_exchange"] = out
     row["cross_funding_spread"] = cx.get("funding_spread")
     row["cross_funding_consensus"] = cx.get("funding_consensus")
     row["cross_oi_total"] = cx.get("oi_total")
@@ -249,6 +319,8 @@ async def fetch_exchange_order_book(
             return None
         snap = depth_snapshot_from_book(bids, asks)
         snap["exchange"] = exchange
+        snap["bids"] = bids
+        snap["asks"] = asks
         return snap
     except Exception as exc:
         LOG.warning(
@@ -281,10 +353,32 @@ async def fetch_cross_exchange_book_walls(
     if not per_ex:
         return {"venues": [], "bid_levels": [], "ask_levels": [], "source": "cross_exchange"}
     merged = aggregate_cross_exchange_walls(per_ex)
+    try:
+        from hunt_core.maps.config import load_maps_config
+        from hunt_core.maps.orderbook import merge_full_depth_bins
+
+        maps_cfg = load_maps_config()
+        price = float(per_ex.get(_PRIMARY, {}).get("bid_price") or 0)
+        if price <= 0:
+            for snap in per_ex.values():
+                if isinstance(snap, dict) and snap.get("bid_price"):
+                    price = float(snap["bid_price"])
+                    break
+        if price > 0:
+            merged["depth_bins"] = merge_full_depth_bins(
+                per_ex,
+                current_price=price,
+                n_buckets=maps_cfg.n_buckets,
+                price_range_pct=maps_cfg.price_range_pct,
+            )
+    except Exception:
+        pass
     merged["per_exchange"] = {
         ex: {
             "bid_levels": snap.get("bid_levels") or [],
             "ask_levels": snap.get("ask_levels") or [],
+            "bids": snap.get("bids") or [],
+            "asks": snap.get("asks") or [],
             "depth_imbalance": snap.get("depth_imbalance"),
         }
         for ex, snap in per_ex.items()
@@ -438,6 +532,74 @@ async def fetch_cross_exchange_volume_profile(
     }
 
 
+async def fetch_cross_exchange_liquidation_estimate(
+    client: Any,
+    symbol: str,
+    *,
+    cfg: CrossExchangeConfig | None = None,
+    current_price: float | None = None,
+) -> dict[str, Any]:
+    """Slow-path forward liquidation overlay from cross-venue OI (no WS)."""
+    cfg = cfg or load_cross_exchange_config()
+    if current_price is None or current_price <= 0:
+        return {"source": "cross_exchange", "skipped": "no_price", "skip_reason": "no_price"}
+    bin_sym = client._bin_sym(symbol)  # noqa: SLF001
+    try:
+        oi_bars = await client.fetch_oi_bars_for_maps(bin_sym, period="1h", limit=48)
+    except Exception as exc:
+        LOG.debug("cross_liq_oi_failed | sym=%s err=%s", bin_sym, exc)
+        return {"source": "cross_exchange", "skipped": "oi_fetch_failed", "skip_reason": str(exc)}
+    if not oi_bars:
+        return {"source": "cross_exchange", "skipped": "no_oi_history", "skip_reason": "no_oi_bars"}
+    from hunt_core.maps.liquidation import (
+        entry_anchored_forward_zones,
+        leverage_tiers_from_brackets,
+        maintenance_rates_from_tiers,
+    )
+    from hunt_core.maps.config import load_maps_config
+
+    maps_cfg = load_maps_config()
+    tiers = client.get_cached_leverage_tiers(bin_sym) if hasattr(client, "get_cached_leverage_tiers") else None
+    mmr = maintenance_rates_from_tiers(tiers or []) or None
+    lev = leverage_tiers_from_brackets(tiers or [])
+    gls = None
+    try:
+        gls = await client.fetch_global_ls_ratio(bin_sym, period="1h")
+    except Exception:
+        gls = None
+    fwd = entry_anchored_forward_zones(
+        oi_bars,
+        current_price=current_price,
+        n_buckets=maps_cfg.n_buckets,
+        price_range_pct=maps_cfg.price_range_pct,
+        leverage_tiers=lev,
+        maintenance_margin_rates=mmr,
+        leverage_weights=maps_cfg.leverage_weights,
+        global_ls_ratio=float(gls) if gls is not None else None,
+    )
+    zones: list[dict[str, Any]] = []
+    span = current_price * maps_cfg.price_range_pct / 100.0
+    price_min = current_price - span
+    bucket_size = (2.0 * span) / max(1, maps_cfg.n_buckets)
+    max_f = max((r["total"] for r in fwd.values()), default=1.0) or 1.0
+    for b, row in sorted(fwd.items(), key=lambda kv: kv[1]["total"], reverse=True)[:8]:
+        center = price_min + (b + 0.5) * bucket_size
+        zones.append(
+            {
+                "price_center": round(center, 6),
+                "intensity": round(row["total"] / max_f, 4),
+                "source": "entry_anchored_cross",
+            }
+        )
+    return {
+        "source": "cross_exchange",
+        "forward_zones": zones,
+        "oi_bars_used": len(oi_bars),
+        "oi_bars": oi_bars,
+        "venues": [_PRIMARY, *cfg.exchanges] if cfg.enabled else [_PRIMARY],
+    }
+
+
 async def attach_cross_microstructure(
     client: Any,
     row: dict[str, Any],
@@ -449,21 +611,38 @@ async def attach_cross_microstructure(
     if not sym:
         return
     cfg = cfg or load_cross_exchange_config()
-    book, taker5, vp1h, vp15 = await asyncio.gather(
-        fetch_cross_exchange_book_walls(client, sym, cfg=cfg),
+    from hunt_core.maps.config import load_maps_config
+
+    maps_cfg = load_maps_config()
+    price = float(row.get("price") or 0)
+    book, taker5, vp1h, vp15, liq_est = await asyncio.gather(
+        fetch_cross_exchange_book_walls(client, sym, cfg=cfg, limit=maps_cfg.book_deep_top_n),
         fetch_cross_exchange_taker_flow(client, sym, cfg=cfg, period="5m"),
         fetch_cross_exchange_volume_profile(client, sym, "1h", cfg=cfg, lookback=48),
         fetch_cross_exchange_volume_profile(client, sym, "15m", cfg=cfg, lookback=96),
+        fetch_cross_exchange_liquidation_estimate(client, sym, cfg=cfg, current_price=price),
     )
     row["cross_microstructure"] = {
         "book_walls": book,
         "taker_flow": taker5,
         "volume_profile_1h": vp1h,
         "volume_profile_15m": vp15,
+        "liquidation_estimate": liq_est,
         "liquidation_note": (
-            "Liquidations: Binance forceOrder WS (primary); secondaries have no unified liq feed"
+            "Liquidations: Binance+Bybit+OKX WS (real events); forward OID from aligned OI/OHLCV"
         ),
     }
+    try:
+        from hunt_core.maps.engine import get_map_store
+
+        store = get_map_store(maps_cfg)
+        oi_bars = liq_est.get("oi_bars") if isinstance(liq_est, dict) else None
+        if isinstance(oi_bars, list) and oi_bars:
+            store.cache_oi_bars(sym, oi_bars)
+        if isinstance(liq_est, dict):
+            store.cache_liq_estimate(sym, liq_est)
+    except Exception:
+        pass
     if book.get("depth_imbalance") is not None:
         row.setdefault("market", {})["cross_depth_imbalance"] = book["depth_imbalance"]
     if taker5.get("consensus") is not None:
@@ -472,6 +651,7 @@ async def attach_cross_microstructure(
 __all__ = [
     "attach_cross_microstructure",
     "fetch_cross_exchange_book_walls",
+    "fetch_cross_exchange_liquidation_estimate",
     "fetch_cross_exchange_taker_flow",
     "fetch_cross_exchange_volume_profile",
 ]

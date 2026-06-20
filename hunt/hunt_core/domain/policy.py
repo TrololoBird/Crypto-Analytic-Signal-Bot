@@ -5,12 +5,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from hunt_core.setups.catalog import (
-    HUNT_SETUP_META,
-    resolve_setup_order_type as _catalog_order,
-    resolve_setup_pattern_tf as _catalog_pattern,
-    resolve_setup_ttl_minutes as _catalog_ttl,
-)
+# Strategy catalog removed with the legacy detection stack; resolvers fall back to
+# sensible fixed defaults (the fusion engine is direction-only, not per-strategy).
+HUNT_SETUP_META: dict[str, Any] = {}
 
 _VALID_TIMEFRAMES = {"5m", "15m", "1h", "4h"}
 
@@ -93,15 +90,15 @@ def resolve_setup_entry_tf(setup_id: str, *, default: str = "15m") -> str:
 
 
 def resolve_setup_order_type(setup_id: str, *, default: str = "limit") -> str:
-    return _catalog_order(setup_id, default=default)
+    return default
 
 
 def resolve_setup_ttl_minutes(setup_id: str, *, default: int = 120) -> int:
-    return _catalog_ttl(setup_id, default=default)
+    return default
 
 
 def resolve_setup_pattern_tf(setup_id: str, *, default: str = "15m") -> str:
-    return _catalog_pattern(setup_id, default=default)
+    return default
 
 
 def effective_shortlist_unified_routing(

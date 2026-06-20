@@ -1,0 +1,717 @@
+"""Telegram analysis sections — MTF, volume profile, walls, cross-exchange."""
+from __future__ import annotations
+
+import html
+from typing import Any
+
+from hunt_core.deliver._labels import fmt_price
+
+
+
+def _pct_str(a: float, b: float, direction: str) -> str:
+    from hunt_core.deliver.dispatch import _pct_str as _p
+    return _p(a, b, direction)
+
+
+def _risk_pct_str(entry: float, stop: float | None, direction: str) -> str:
+    from hunt_core.deliver.dispatch import _risk_pct_str as _r
+    return _r(entry, stop, direction)
+
+
+def _worst_entry_edge(entry_lo: float, entry_hi: float, *, direction: str, price: float) -> float:
+    from hunt_core.deliver.dispatch import _worst_entry_from_setup
+    return _worst_entry_from_setup({"entry_zone": [entry_lo, entry_hi]}, direction=direction, price=price)
+
+
+_fmt_price = fmt_price
+
+
+def plain_delivery_reasons(
+    row: dict[str, Any],
+    setup: dict[str, Any],
+    *,
+    direction: str,
+    confirm_reasons: list[str] | None = None,
+    max_items: int = 5,
+) -> list[str]:
+    """3–5 plain-language reasons for message v2 cards."""
+    from hunt_core.deliver._context_lines import humanize_trigger
+    from hunt_core.deliver._labels import phase_human, trigger_human
+
+    reasons: list[str] = []
+    lc = row.get("lifecycle") or {}
+    phase = str(lc.get("phase") or "")
+    if phase:
+        reasons.append(f"Фаза: {phase_human(phase)}")
+    struct = row.get("structure") if isinstance(row.get("structure"), dict) else {}
+    sb = str(struct.get("structure_bias") or lc.get("structure_bias") or "")
+    if sb in {"long", "short"}:
+        reasons.append(f"Structure bias: {sb}")
+    raw = confirm_reasons if confirm_reasons is not None else list(setup.get("confirm_hard") or [])
+    for item in raw[: max_items - len(reasons)]:
+        label = humanize_trigger(str(item)) or trigger_human(str(item))
+        if label and label not in reasons:
+            reasons.append(label)
+    fuel = float(
+        setup.get("dump_fuel" if direction == "short" else "long_fuel")
+        or setup.get("dump_score" if direction == "short" else "long_score")
+        or 0
+    )
+    if fuel >= 70 and len(reasons) < max_items:
+        reasons.append(f"Fuel {fuel:.0f}")
+    return reasons[:max_items]
+
+
+def format_mtf_section(
+    mtf: Any, *, row: dict[str, Any] | None = None, include_scenarios: bool = True
+) -> str:
+    """
+    Format MTF structure table + two scenarios for a PINNED /signal reply.
+
+    ``mtf`` is a ``MTFConfluence`` dataclass from ``hunt_core.analysis.deep_signal``.
+    """
+    from hunt_core.deliver.dispatch import geometry_block_reason
+
+    def _geometry_blocked(direction: str) -> bool:
+        if not row:
+            return False
+        setup = (row.get("dump") if direction == "short" else row.get("long")) or {}
+        if not isinstance(setup, dict):
+            return False
+        return geometry_block_reason(setup, row=row, direction=direction) is not None
+
+    _TREND_EMOJI = {"bull": "🟢", "bear": "🔴", "neutral": "🟡"}
+    _TREND_RU = {"bull": "Bull", "bear": "Bear", "neutral": "Нейт"}
+    _TF_NAME = {"1w": "1W ", "1d": "1D ", "4h": "4H ", "15m": "15M"}
+
+    sym = html.escape(str(getattr(mtf, "symbol", "?")).replace("USDT", "-USDT"))
+    lines: list[str] = [
+        f"🔭 <b>АНАЛИЗ · {sym}</b>",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+        "",
+        "📊 <b>МТФ СТРУКТУРА</b>",
+    ]
+    for tf_key in ("1w", "1d", "4h", "15m"):
+        sig = (mtf.tf_signals or {}).get(tf_key)
+        if sig is None:
+            continue
+        emoji = _TREND_EMOJI.get(sig.trend, "🟡")
+        tlabel = _TREND_RU.get(sig.trend, "Нейт")
+        name = _TF_NAME.get(tf_key, tf_key.upper())
+        lines.append(
+            f"<code>{name}</code> {emoji} {tlabel:4s} | RSI {sig.rsi14:5.1f} | {html.escape(sig.label)}"
+        )
+
+    dominant = getattr(mtf, "dominant", "neutral")
+    dom_ru = {"long": "ЛОНГ", "short": "ШОРТ", "neutral": "БОКОВИК"}.get(dominant, "—")
+    lines.append("")
+    lines.append(f"🎯 <b>MTF bias:</b> {dom_ru} <i>(контекст)</i>")
+
+    from hunt_core.detect.probe_compat import hunt_confirmed_direction
+
+    hunt_conf = hunt_confirmed_direction(row or {})
+    if hunt_conf == "short":
+        lines.append("✅ <b>Hunt confirm:</b> ШОРТ · closed-bar")
+    elif hunt_conf == "long":
+        lines.append("✅ <b>Hunt confirm:</b> ЛОНГ · closed-bar")
+
+    lc_phase = str(((row or {}).get("lifecycle") or {}).get("phase") or "")
+    if not include_scenarios or lc_phase in {"no_setup", "accumulation_watch", "exhaustion_watch"}:
+        lines.append("")
+        lines.append(
+            "<i>⚠️ Сценарии входа скрыты — lifecycle без confirm; MTF bias справочно.</i>"
+        )
+        return "\n".join(lines)
+
+    scenarios = [mtf.long_scenario, mtf.short_scenario]
+    if not hunt_conf and dominant in {"long", "short"}:
+        scenarios = [
+            s for s in scenarios if getattr(s, "direction", "") == dominant
+        ] or scenarios
+
+    for sc in scenarios:
+        dir_str = getattr(sc, "direction", "long")
+        geo_block = _geometry_blocked(dir_str)
+        is_confirmed = hunt_conf == dir_str
+        is_main = is_confirmed or (dir_str == dominant and dominant != "neutral")
+        if is_confirmed:
+            star = " ★ HUNT CONFIRM"
+        elif is_main and geo_block:
+            star = " · ⚠️ watch-only (уровни)"
+        elif is_main:
+            star = " ★ ОСНОВНОЙ"
+        else:
+            star = ""
+        dir_emoji = "📈" if dir_str == "long" else "📉"
+        dir_ru = "ЛОНГ" if dir_str == "long" else "ШОРТ"
+        score = float(getattr(sc, "score", 0))
+        htf_aligned = int(getattr(sc, "htf_count", 0))
+        htf_total = int(getattr(sc, "htf_total", 0))
+        evidence: list[str] = list(getattr(sc, "evidence", []))
+
+        entry_lo = float(getattr(sc, "entry_lo", 0))
+        entry_hi = float(getattr(sc, "entry_hi", 0))
+        tp1 = float(getattr(sc, "tp1", 0))
+        tp2 = float(getattr(sc, "tp2", 0))
+        stop = float(getattr(sc, "stop", 0))
+
+        price_ref = float((row or {}).get("price") or 0)
+        edge = _worst_entry_edge(entry_lo, entry_hi, direction=dir_str, price=price_ref)
+        if edge <= 0:
+            edge = entry_hi if dir_str == "long" else entry_lo
+        tp1_pct = _pct_str(edge, tp1, dir_str) if tp1 > 0 else ""
+        tp2_pct = _pct_str(edge, tp2, dir_str) if tp2 > 0 else ""
+        sl_pct = _risk_pct_str(edge, stop, dir_str) if stop > 0 else ""
+
+        lines.append("")
+        lines.append(
+            f"{dir_emoji} <b>СЦЕНАРИЙ {dir_ru}</b>  [Score: {score:.2f}]{html.escape(star)}"
+        )
+        if htf_total:
+            ev_str = ", ".join(evidence[1:4]) if len(evidence) > 1 else ""
+            lines.append(
+                f"HTF {htf_aligned}/{htf_total}"
+                + (f" · {html.escape(ev_str)}" if ev_str else "")
+            )
+        lines.append(f"Зона входа:  <code>{_fmt_price(entry_lo)} – {_fmt_price(entry_hi)}</code>")
+        lines.append(
+            f"TP1:         <code>{_fmt_price(tp1)}</code>"
+            + (f"  ({tp1_pct})" if tp1_pct else "")
+        )
+        lines.append(
+            f"TP2:         <code>{_fmt_price(tp2)}</code>"
+            + (f"  ({tp2_pct})" if tp2_pct else "")
+        )
+        lines.append(
+            f"Стоп:        <code>{_fmt_price(stop)}</code>"
+            + (f"  ({sl_pct})" if sl_pct else "")
+        )
+
+    lines.append("")
+    lines.append("<i>⚠️ Watch-only — вход только по confirmed-сигналу системы.</i>")
+    return "\n".join(lines)
+
+
+def format_volume_profile_section(row: dict[str, Any]) -> str:
+    """POC/VAH/VAL from maps VP, cross merge, or regime fallback."""
+    maps = row.get("maps") or {}
+    vp_map = maps.get("volume_profile") if isinstance(maps, dict) else None
+    if isinstance(vp_map, dict):
+        poc = vp_map.get("poc")
+        profiles = vp_map.get("profiles") or []
+        prof_1h = next((p for p in profiles if isinstance(p, dict) and p.get("period") == "1h"), None)
+        vah = prof_1h.get("vah") if prof_1h else None
+        val = prof_1h.get("val") if prof_1h else None
+        src = "maps"
+    else:
+        cx = row.get("cross_microstructure") or {}
+        vp1h = cx.get("volume_profile_1h") or {}
+        regime = row.get("regime") or {}
+        poc = vp1h.get("poc") or regime.get("poc_1h")
+        vah = vp1h.get("vah") or regime.get("vah_1h")
+        val = vp1h.get("val") or regime.get("val_1h")
+        src = "cross" if vp1h.get("poc") is not None else "BNC"
+    if poc is None:
+        return ""
+    lines = [
+        f"📊 <b>Volume profile 1h</b> ({src}): POC <code>{_fmt_price(float(poc))}</code>",
+    ]
+    if vah is not None:
+        lines[-1] += f" · VAH <code>{_fmt_price(float(vah))}</code>"
+    if val is not None:
+        lines[-1] += f" · VAL <code>{_fmt_price(float(val))}</code>"
+    cx = row.get("cross_microstructure") or {}
+    if isinstance(vp_map, dict):
+        prof_15 = next((p for p in (vp_map.get("profiles") or []) if isinstance(p, dict) and p.get("period") == "15m"), None)
+        if prof_15 and prof_15.get("poc") is not None:
+            lines.append(f"15m POC <code>{_fmt_price(float(prof_15['poc']))}</code>")
+    vp15 = cx.get("volume_profile_15m") or {}
+    if vp15.get("poc") is not None:
+        lines.append(
+            f"15m POC <code>{_fmt_price(float(vp15['poc']))}</code>"
+            + (f" · VAH <code>{_fmt_price(float(vp15['vah']))}</code>" if vp15.get("vah") else "")
+        )
+    return "\n".join(lines)
+
+
+def format_forecast_section(
+    row: dict[str, Any],
+    *,
+    primary_direction: str | None = None,
+    archetype: str | None = None,
+) -> str:
+    """Generalized forecast section for predump / coil / ignition."""
+    fusion = row.get("manipulation_fusion") if isinstance(row.get("manipulation_fusion"), dict) else {}
+    arch = archetype or str(fusion.get("archetype") or "")
+    forecasts = row.get("forecasts") if isinstance(row.get("forecasts"), dict) else {}
+    fc = row.get("maps_forecast")
+    if arch == "predump_short":
+        fc = forecasts.get("predump_short") or fc
+        title = "Pre-dump forecast"
+        hint = "цели markdown ↓"
+    elif arch == "ignition_long":
+        fc = forecasts.get("ignition_long") or fc
+        title = "Ignition forecast"
+        hint = "squeeze magnet ↑"
+    else:
+        return format_accumulation_forecast_section(
+            row, primary_direction=primary_direction
+        )
+    if not isinstance(fc, dict) or not fc.get("target_primary"):
+        return ""
+    if primary_direction == "short" and arch != "predump_short":
+        return ""
+    conf = float(fc.get("confidence") or 0)
+    direction = str(fc.get("direction") or "long").upper()
+    target_lo = fc.get("target_lo")
+    target_hi = fc.get("target_hi")
+    lines = [f"🎯 <b>{title}</b> <i>({hint})</i>"]
+    if target_lo is not None and target_hi is not None:
+        if float(target_lo) == float(target_hi):
+            lines.append(
+                f"{direction} → target <code>{_fmt_price(float(target_lo))}</code> "
+                f"({conf:.0%} conf)"
+            )
+        else:
+            lines.append(
+                f"{direction} → band <code>{_fmt_price(float(target_lo))}</code>–"
+                f"<code>{_fmt_price(float(target_hi))}</code> ({conf:.0%} conf)"
+            )
+    factors = fc.get("factors") or []
+    if factors:
+        lines.append("Factors: " + ", ".join(html.escape(str(f)) for f in factors[:4]))
+    window = fc.get("window_minutes")
+    if window:
+        lines.append(f"Window: ~{int(window)}m")
+    return "\n".join(lines)
+
+
+def format_accumulation_forecast_section(
+    row: dict[str, Any],
+    *,
+    primary_direction: str | None = None,
+) -> str:
+    """Pre-pump forecast — long-only accumulation breakout; hide during dump lifecycle."""
+    lc = row.get("lifecycle") if isinstance(row.get("lifecycle"), dict) else {}
+    lc_phase = str(lc.get("phase") or "")
+    if lc_phase in {
+        "dump_initiating",
+        "dump_active",
+        "exhaustion_at_high",
+        "post_dump_bounce",
+    }:
+        return ""
+    if primary_direction == "short":
+        return ""
+    fc = row.get("maps_forecast")
+    if not isinstance(fc, dict) or not fc.get("target_primary"):
+        return ""
+    market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    lines = ["🎯 <b>Pre-pump forecast</b> <i>(цели ликвидаций ↑, не вход)</i>"]
+    direction = str(fc.get("direction") or "long").upper()
+    conf = float(fc.get("confidence") or 0)
+    move = fc.get("expected_move_pct")
+    target_lo = fc.get("target_lo")
+    target_hi = fc.get("target_hi")
+    if target_lo is not None and target_hi is not None:
+        if float(target_lo) == float(target_hi):
+            lines.append(
+                f"{direction} → target <code>{_fmt_price(float(target_lo))}</code> "
+                f"({conf:.0%} conf)"
+            )
+        else:
+            lines.append(
+                f"{direction} → band <code>{_fmt_price(float(target_lo))}</code>–"
+                f"<code>{_fmt_price(float(target_hi))}</code> ({conf:.0%} conf)"
+            )
+    if move is not None:
+        mv = float(move)
+        if abs(mv) >= 0.05:
+            sign = "+" if mv >= 0 else ""
+            lines.append(f"Expected move: <code>{sign}{mv:.2f}%</code>")
+    factors = fc.get("factors") or []
+    if factors:
+        lines.append("Fuel: " + ", ".join(html.escape(str(f)) for f in factors[:4]))
+    acc = market.get("map_vp_accumulation")
+    if acc is not None:
+        lines.append(f"VP accumulation: <code>{float(acc):.2f}</code>")
+    if market.get("map_accum_bid_absorption"):
+        lines.append("Bid absorption + sticky support")
+    if market.get("map_void_above"):
+        lines.append(f"Void path ↑ <code>{_fmt_price(float(market['map_void_above']))}</code>")
+    return "\n".join(lines)
+
+
+def format_liquidation_map_section(row: dict[str, Any]) -> str:
+    """Liquidation squeeze zones — realized + forward magnets."""
+    market = row.get("market") or {}
+    maps = row.get("maps") or {}
+    liq = maps.get("liquidation") if isinstance(maps, dict) else None
+    if not market and not liq:
+        return ""
+    nearest_long = market.get("liq_heatmap_nearest_long")
+    nearest_short = market.get("liq_heatmap_nearest_short")
+    cascade = market.get("liq_cascade_risk")
+    conf = market.get("liq_forward_confidence")
+    events = market.get("liq_realized_events")
+    venues = market.get("liq_venues") or []
+    if nearest_long is None and nearest_short is None and not cascade:
+        return ""
+    lines = ["💥 <b>Карта ликвидаций</b> <i>(margin call pools · не стакан)</i>"]
+    if venues:
+        lines[0] += f" <i>({', '.join(str(v)[:3].upper() for v in venues)})</i>"
+    if nearest_long is not None:
+        pull = market.get("liq_magnet_pull_long_pct")
+        tail = f" ({pull:.2f}%)" if pull is not None else ""
+        lines.append(f"Long liq magnet ↓ <code>{_fmt_price(float(nearest_long))}</code>{tail}")
+    if nearest_short is not None:
+        pull = market.get("liq_magnet_pull_short_pct")
+        tail = f" ({pull:.2f}%)" if pull is not None else ""
+        lines.append(f"Short squeeze ↑ <code>{_fmt_price(float(nearest_short))}</code>{tail}")
+    if cascade:
+        label = "long flush" if cascade == "long_flush" else "short squeeze"
+        lines.append(f"Cascade risk: <b>{label}</b>")
+    if conf is not None:
+        lines.append(f"Forward confidence: <code>{float(conf):.2f}</code>")
+    if events is not None and int(events) > 0:
+        lines.append(f"Realized events (5m window): <code>{int(events)}</code>")
+    zones = market.get("liq_density_zones") or []
+    hot = [z for z in zones if isinstance(z, dict) and float(z.get("intensity") or 0) >= 0.5][:2]
+    if hot:
+        bits = [
+            f"{_fmt_price(float(z['price_center']))} ({float(z['intensity']):.0%})"
+            for z in hot
+            if z.get("price_center") is not None
+        ]
+        if bits:
+            lines.append("Hot zones: " + " · ".join(bits))
+    return "\n".join(lines)
+
+
+def format_liquidity_heatmap_section(row: dict[str, Any]) -> str:
+    """Liquidity heatmap — sticky walls, spoof flags, depth bands (time-weighted book)."""
+    maps = row.get("maps") or {}
+    ob = maps.get("orderbook") if isinstance(maps, dict) else None
+    market = row.get("market") or {}
+    if not isinstance(ob, dict) and not market.get("map_sticky_bid"):
+        return ""
+    sticky = (ob or {}).get("sticky_walls") or []
+    spoof = (ob or {}).get("spoof_flags") or []
+    matrix = (ob or {}).get("depth_heatmap_matrix") or []
+    voids = (ob or {}).get("liquidity_voids") or []
+    if not sticky and not spoof and not matrix and not voids:
+        return ""
+    lines = [
+        "🌡 <b>Тепловая карта ликвидности</b> "
+        "<i>(история стакана · sticky/spoof · не ликвидации)</i>"
+    ]
+    for s in sticky[:2]:
+        if not isinstance(s, dict):
+            continue
+        side = str(s.get("side") or "?")
+        px = s.get("price")
+        samples = s.get("samples")
+        if px is not None:
+            age = f" · {samples} samples" if samples else ""
+            lines.append(
+                f"Sticky {side} @ <code>{_fmt_price(float(px))}</code>{age}"
+            )
+    for sp in spoof[:2]:
+        if not isinstance(sp, dict):
+            continue
+        side = str(sp.get("side") or "?")
+        px = sp.get("price")
+        if px is not None:
+            lines.append(f"Spoof? {side} @ <code>{_fmt_price(float(px))}</code>")
+    hot = sorted(
+        [m for m in matrix if isinstance(m, dict) and m.get("price") is not None],
+        key=lambda m: float(m.get("intensity") or m.get("depth") or 0),
+        reverse=True,
+    )[:3]
+    if hot:
+        bits = [
+            f"{_fmt_price(float(m['price']))} ({float(m.get('intensity') or 0):.0%})"
+            for m in hot
+        ]
+        lines.append("Depth bands: " + " · ".join(bits))
+    for v in voids[:1]:
+        if isinstance(v, dict) and v.get("price_lo") is not None:
+            lines.append(
+                f"Void {v.get('direction', '?')}: "
+                f"<code>{_fmt_price(float(v['price_lo']))}</code>–"
+                f"<code>{_fmt_price(float(v.get('price_hi') or v['price_lo']))}</code>"
+            )
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def format_intraday_maps_telegram(row: dict[str, Any]) -> str:
+    """Three-map block for /signal: DOM · liquidity heatmap · liquidation map."""
+    blocks: list[str] = []
+    dom = format_book_walls_section(row)
+    if dom:
+        blocks.append(dom)
+    heat = format_liquidity_heatmap_section(row)
+    if heat:
+        blocks.append(heat)
+    liq = format_liquidation_map_section(row)
+    if liq:
+        blocks.append(liq)
+    if not blocks:
+        return ""
+    return "\n\n".join(blocks)
+
+
+def format_orderflow_section(row: dict[str, Any]) -> str:
+    """Footprint / stacked imbalance from maps orderbook."""
+    maps = row.get("maps") or {}
+    ob = maps.get("orderbook") if isinstance(maps, dict) else None
+    market = row.get("market") or {}
+    stacked = market.get("map_stacked_imbalance") or (ob or {}).get("stacked_imbalance")
+    if not stacked and not ob:
+        return ""
+    lines = ["📈 <b>Order flow (footprint)</b>"]
+    if stacked:
+        label = "buy stack" if stacked == "buy_stack" else "sell stack"
+        lines.append(f"Stacked imbalance: <b>{label}</b>")
+    bins = (ob or {}).get("footprint_bins") or []
+    if bins:
+        top = sorted(bins, key=lambda b: abs(float(b.get("delta") or 0)), reverse=True)[:2]
+        for b in top:
+            if not isinstance(b, dict):
+                continue
+            px = b.get("price")
+            delta = b.get("delta")
+            if px is None:
+                continue
+            sign = "+" if float(delta or 0) >= 0 else ""
+            lines.append(f"Δ @ <code>{_fmt_price(float(px))}</code>: {sign}{float(delta or 0):,.0f}")
+    sticky = (ob or {}).get("sticky_walls") or []
+    if sticky:
+        s = sticky[0]
+        if isinstance(s, dict):
+            lines.append(
+                f"Sticky {s.get('side', '?')} wall @ <code>{_fmt_price(float(s.get('price') or 0))}</code>"
+                f" ({s.get('samples')} samples)"
+            )
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def format_book_walls_section(row: dict[str, Any]) -> str:
+    """Top cross-venue or single-exchange limit clusters."""
+    cx = row.get("cross_microstructure") or {}
+    walls = cx.get("book_walls") or row.get("book_walls") or {}
+    if not isinstance(walls, dict):
+        return ""
+    bids = walls.get("bid_levels") or []
+    asks = walls.get("ask_levels") or []
+    if not bids and not asks:
+        return ""
+
+    def _wall_line(side: str, levels: list[Any], emoji: str) -> str:
+        parts: list[str] = []
+        for lvl in levels[:3]:
+            if isinstance(lvl, dict):
+                px = lvl.get("price")
+                notional = lvl.get("notional_usd")
+            elif isinstance(lvl, (list, tuple)) and len(lvl) >= 2:
+                px, qty = float(lvl[0]), float(lvl[1])
+                notional = round(px * qty, 0)
+            else:
+                continue
+            if px is None:
+                continue
+            src = lvl.get("exchange") if isinstance(lvl, dict) else None
+            ex_raw = src or walls.get("source") or walls.get("venue") or "BNC"
+            tag = str(ex_raw)[:3].upper()
+            if tag == "?" or tag == "NON":
+                tag = "BNC"
+            parts.append(f"{tag} {_fmt_price(float(px))} (${float(notional or 0)/1e3:.1f}k)")
+        if not parts:
+            return ""
+        return f"{emoji} {side}: " + " · ".join(parts)
+
+    lines = ["📋 <b>Карта ордеров (DOM · сейчас)</b>"]
+    venues = walls.get("venues")
+    if isinstance(venues, list) and len(venues) > 1:
+        lines[0] += f" <i>({len(venues)} бирж)</i>"
+    bid_line = _wall_line("Bid", bids, "🟢")
+    ask_line = _wall_line("Ask", asks, "🔴")
+    if bid_line:
+        lines.append(bid_line)
+    if ask_line:
+        lines.append(ask_line)
+    imb = walls.get("depth_imbalance")
+    if imb is not None:
+        lines.append(f"Imbalance: <code>{float(imb):+.3f}</code>")
+    maps = row.get("maps") or {}
+    ob = maps.get("orderbook") if isinstance(maps, dict) else None
+    if isinstance(ob, dict):
+        sticky = ob.get("sticky_walls") or []
+        if sticky and isinstance(sticky[0], dict):
+            s = sticky[0]
+            lines.append(
+                f"Sticky {s.get('side', '?')} @ <code>{_fmt_price(float(s.get('price') or 0))}</code>"
+                f" ({s.get('samples')} samples)"
+            )
+        ice = ob.get("iceberg_levels") or []
+        if ice and isinstance(ice[0], dict):
+            i0 = ice[0]
+            lines.append(
+                f"Iceberg {i0.get('side', '?')} @ <code>{_fmt_price(float(i0.get('price') or 0))}</code>"
+            )
+    return "\n".join(lines)
+
+
+def format_cross_microstructure_section(row: dict[str, Any]) -> str:
+    """Cross-exchange taker flow + liq estimate / forward confidence."""
+    cx = row.get("cross_microstructure") or {}
+    market = row.get("market") or {}
+    if not cx and not market.get("liq_forward_confidence"):
+        return ""
+    lines: list[str] = []
+    taker = cx.get("taker_flow") or {}
+    per = taker.get("per_exchange") or {}
+    if per:
+        bits = [f"{ex[:3].upper()} {float(v):.2f}" for ex, v in per.items()]
+        consensus = taker.get("consensus")
+        tail = f" → consensus <code>{consensus:.2f}</code>" if consensus is not None else ""
+        lines.append("Order flow (taker): " + " · ".join(bits) + tail)
+    note = cx.get("liquidation_note")
+    if note:
+        lines.append(f"<i>{html.escape(str(note))}</i>")
+    liq_est = cx.get("liquidation_estimate") or {}
+    if isinstance(liq_est, dict):
+        skip = liq_est.get("skip_reason")
+        if skip:
+            lines.append(f"<i>Forward liq: {html.escape(str(skip))}</i>")
+        elif liq_est.get("forward_confidence") is not None:
+            fc = float(liq_est["forward_confidence"])
+            lines.append(f"Forward liq confidence <code>{fc:.0%}</code>")
+    fc_mkt = market.get("liq_forward_confidence")
+    if fc_mkt is not None and not any("Forward liq confidence" in ln for ln in lines):
+        lines.append(f"Forward liq confidence <code>{float(fc_mkt):.0%}</code>")
+    return "\n".join(lines)
+
+
+_MICRO_TAG_RU = {
+    "book_against": "стакан против",
+    "book_for": "стакан за",
+    "microprice_against": "микроцена против",
+    "microprice_for": "микроцена за",
+    "backwardation": "бэквордация",
+    "contango": "контанго",
+    "mixed": "смешанная",
+    "bullish": "бычья",
+    "bearish": "медвежья",
+    "neutral": "нейтр.",
+}
+
+
+def _humanize_micro_bias(raw: str) -> str:
+    """Turn the raw 'microstructure=mixed score=-0.35; k=v:tag · …' debug string into
+    a short Russian phrase. Falls back to the raw text if the shape is unexpected."""
+    if not raw or "=" not in raw:
+        return html.escape(raw)
+    parts: list[str] = []
+    head = raw.split(";", 1)[0].strip()  # 'microstructure=mixed score=-0.35'
+    label = ""
+    score = ""
+    for tok in head.split():
+        if tok.startswith("microstructure="):
+            label = _MICRO_TAG_RU.get(tok.split("=", 1)[1], tok.split("=", 1)[1])
+        elif tok.startswith("score="):
+            score = tok.split("=", 1)[1]
+    if label:
+        parts.append(f"{label}{f' ({score})' if score else ''}")
+    tail = raw.split(";", 1)[1] if ";" in raw else ""
+    for seg in tail.split("·"):
+        seg = seg.strip()
+        if ":" not in seg:
+            continue
+        tag = seg.rsplit(":", 1)[1].strip()
+        ru = _MICRO_TAG_RU.get(tag)
+        if ru and ru != "нейтр.":
+            parts.append(ru)
+    return html.escape(" · ".join(parts)) if parts else html.escape(raw)
+
+
+def format_pinned_deep_analysis(row: dict[str, Any]) -> str:
+    """Deep /signal block via the fusion deep-analysis path (detect/deep)."""
+    sym = str(row.get("symbol") or "")
+    if not sym:
+        return ""
+    try:
+        from hunt_core.detect.deep import build_deep_report_from_lake
+
+        report = build_deep_report_from_lake(sym)
+        return report.text if report is not None else ""
+    except Exception:
+        return ""
+
+
+def format_cross_exchange_section(cx: dict[str, Any]) -> str:
+    """Format cross-exchange intel block for /signal reply."""
+    if not cx:
+        return ""
+    funding: dict[str, Any] = cx.get("funding") or {}
+    cx.get("oi_usd") or {}
+    mark_price: dict[str, Any] = cx.get("mark_price") or {}
+    float(cx.get("funding_spread") or 0)
+    consensus = str(cx.get("funding_consensus") or "neutral")
+    oi_total = float(cx.get("oi_total") or 0)
+    price_div = float(cx.get("price_divergence_pct") or 0)
+
+    _NAMES = {"binance": "BNC", "bybit": "BYB", "okx": "OKX", "bitget": "BGT"}
+
+    funding_parts: list[str] = []
+    for ex, rate in funding.items():
+        if rate is None:
+            continue
+        label = _NAMES.get(ex, ex.upper()[:3])
+        sign = "+" if rate >= 0 else ""
+        funding_parts.append(f"{label} {sign}{rate*100:.4f}%")
+
+    price_parts: list[str] = []
+    for ex, mp in mark_price.items():
+        if not mp:
+            continue
+        label = _NAMES.get(ex, ex.upper()[:3])
+        price_parts.append(f"{label} {_fmt_price(mp)}")
+
+    listed = cx.get("listed") or {}
+    listed_parts = [
+        f"{_NAMES.get(ex, ex.upper()[:3])}{'✓' if ok else '✗'}"
+        for ex, ok in listed.items()
+    ]
+    lines: list[str] = ["🌐 <b>КРОСС-БИРЖА</b> <i>(universe: Binance)</i>"]
+    if listed_parts:
+        lines.append("Листинг: " + " ".join(listed_parts))
+    if funding_parts:
+        lines.append("Funding:  " + "  |  ".join(funding_parts))
+        if consensus == "divergent":
+            lines.append("          ⚠️ Дивергенция — биржи не согласованы")
+        elif consensus == "bull":
+            lines.append("          🟢 Фандинг бычий на всех биржах")
+        elif consensus == "bear":
+            lines.append("          🔴 Фандинг медвежий на всех биржах")
+    if oi_total > 0:
+        oi_b = oi_total / 1e9
+        lines.append(f"OI Total: <code>${oi_b:.2f}B</code>")
+    if price_parts:
+        spread_str = f"  (spread {price_div:.3f}%)" if price_div > 0 else ""
+        lines.append("Цены:     " + "  |  ".join(price_parts) + html.escape(spread_str))
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+
+__all__ = [
+    "format_book_walls_section",
+    "format_cross_exchange_section",
+    "format_cross_microstructure_section",
+    "format_intraday_maps_telegram",
+    "format_liquidity_heatmap_section",
+    "format_liquidation_map_section",
+    "format_mtf_section",
+    "format_pinned_deep_analysis",
+    "format_volume_profile_section",
+]

@@ -8,12 +8,16 @@ import sys
 
 
 async def _run(symbols: tuple[str, ...], *, ws_seconds: float) -> int:
+    from hunt_core.bootstrap import bootstrap
+    from hunt_core.domain.config import load_settings
     from hunt_core.market.cross import apply_cross_exchange_env, load_cross_exchange_config
-    from hunt_core.market.factory import create_hunt_market_plane
+    from hunt_core.market.factory import create_hunt_market_plane_from_settings
 
+    bootstrap()
     logging.basicConfig(level=logging.INFO)
     apply_cross_exchange_env(load_cross_exchange_config())
-    plane = await create_hunt_market_plane()
+    settings = load_settings()
+    plane = await create_hunt_market_plane_from_settings(settings)
     try:
         await plane.client.load_markets()
         rows = await plane.client.fetch_ohlcv_list("BTCUSDT", "1m", limit=2)

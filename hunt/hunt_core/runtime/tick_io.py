@@ -6,10 +6,24 @@ from __future__ import annotations
 import gzip
 import shutil
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
-from hunt_core.paths import DATA, TICK_JSONL
+from hunt_core.paths import (
+    DATA,
+    PREP_SHADOW_EVENTS,
+    SETUP_CANDIDATES_EVENTS,
+    SENT_MESSAGES,
+    SIGNAL_EVENTS,
+    TICK_JSONL,
+)
 
 RETENTION_DAYS = 14
+_TELEMETRY_JSONL = (
+    SIGNAL_EVENTS,
+    SENT_MESSAGES,
+    PREP_SHADOW_EVENTS,
+    SETUP_CANDIDATES_EVENTS,
+)
 
 
 def rotate_hunt_ticks(*, retention_days: int = RETENTION_DAYS, dry_run: bool = False) -> dict[str, int]:
@@ -52,4 +66,30 @@ def rotate_hunt_ticks(*, retention_days: int = RETENTION_DAYS, dry_run: bool = F
                 path.unlink()
             stats["pruned"] += 1
 
+    return stats
+
+
+def rotate_telemetry_jsonl(
+    paths: tuple[Path, ...] = _TELEMETRY_JSONL,
+    *,
+    max_bytes: int = 50_000_000,
+    keep: int = 3,
+) -> dict[str, int]:
+    """Rotate oversized append-only telemetry JSONL (signal_events, prep_shadow, candidates)."""
+    from hunt_core.track.events import rotate_jsonl_if_needed
+
+    stats = {"checked": 0, "rotated": 0}
+    for path in paths:
+        stats["checked"] += 1
+        try:
+            size_before = path.stat().st_size if path.exists() else 0
+        except OSError:
+            continue
+        rotate_jsonl_if_needed(path, max_bytes=max_bytes, keep=keep)
+        try:
+            size_after = path.stat().st_size if path.exists() else 0
+        except OSError:
+            size_after = 0
+        if size_before >= max_bytes and size_after < size_before:
+            stats["rotated"] += 1
     return stats

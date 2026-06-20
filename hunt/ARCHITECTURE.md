@@ -1,7 +1,23 @@
 # Hunt Watch — Architecture & Strategy
 
+> **Deprecated (pre-fusion, 2026-06-20).** Canonical architecture: [`docs/HUNT_ARCHITECTURE.md`](docs/HUNT_ARCHITECTURE.md).
+> Sections 4–9 below describe the **removed** predump/prepump lifecycle (`screener.py`, `lifecycle.py`, `HuntPhase`).
+> Live detection is **`hunt_core/detect/*`** (fusion + CUSUM phase). Threshold matrix and missing-data policy: same canonical doc.
+
 Подсистема **memecoin pump/dump hunt**: REST minute poll + CCXT Pro WS (liq/trades/OHLCV/mark/book) + spot lead-lag, Telegram on confirm.  
 Отдельный пакет **`hunt_core`** в `hunt/` — **standalone**, market plane **100% CCXT** ([`docs/CCXT.md`](docs/CCXT.md)). Не импортирует `bot.*` / `engine.*`.
+
+### Professional maps (`hunt_core/maps/`)
+
+Три карты на **реальных** CCXT public данных (без matplotlib):
+
+| Map | Модуль | Данные |
+|-----|--------|--------|
+| Orderbook heatmap | `maps/orderbook.py` | WS L2 + cross merge, sticky walls, voids, footprint Δ-by-price |
+| Liquidation map | `maps/liquidation.py` | Real `watchLiquidations` (Binance+Bybit+OKX) + entry-anchored forward overlay с confidence |
+| Volume profile (Order map) | `maps/volume_profile.py` | POC/VAH/VAL multi-period, developing VP, HVN/LVN, naked POC |
+
+Оркестрация: `maps/engine.py` (`MapTimeSeriesStore`, `build_map_bundle`, `derive_map_features`) → `tick_assembly` → `row["market"]` + scoring/gate/delivery.
 
 ---
 
@@ -16,8 +32,19 @@
 
 ### Что не делает
 - Не ставит ордера, не использует private Binance API
-- Не заменяет main-bot delivery path (`validate_signal_contract` → `hard_confluence_gate` → deliver)
-- Для pinned hunt-символов TG идёт по hunt-heuristic даже при `htf_conflict` в main bot (advisory audit в сообщении)
+- **Standalone signal-only** — delivery path: `validate_signal_contract` → gates (mission → playbook → RR/EV → contract) → `deliver`
+- Не дублирует main-bot strategies (28 strategies) — Hunt uses **playbook N-of-M** + fusion rank (pass ratio) + three archetypes
+
+### TO-BE modules (Pass A)
+| Module | Path | Role |
+|--------|------|------|
+| Fusion | `analysis/manipulation_fusion.py` | Archetype scores + OI regime + playbook checks |
+| Playbook | `analysis/playbook_eval.py` | N-of-M boolean gates (default delivery path) |
+| Forecasts | `maps/forecast.py` | predump / prepump / ignition target bands |
+| Deep | `analysis/deep/` | `/signal` fusion + 3 verdicts + forecasts |
+| OI regime | `maps/oi.py` | Axel Adler 4-state from OI×price |
+| Ledger | `track/outcome_ledger.py` | deliver/block JSONL for calibration |
+| Price oracle | `market/live_price.py` | `PriceQuote` unified staleness |
 
 ### Уроки, заложенные в дизайн
 | Кейс | Урок | Fix |
@@ -48,16 +75,15 @@ flowchart TB
         M --> U[active symbols + watch_mode per symbol]
     end
 
-    subgraph tick [Minute tick — каждые 60s per symbol]
-        U --> R[CCXT REST klines + fapiData + depth]
-        R --> F[hunt_core.features.prepare_symbol]
-        F --> L[assess_hunt_lifecycle FSM]
-        L --> A[_dump_analysis / _long_analysis]
-        A --> C[_confirm_dump / _confirm_long]
-        C --> G[gates: premature_exhaustion / lifecycle]
+    subgraph tick [Minute tick — каждые 30–60s per symbol]
+        U --> R[CCXT REST/WS + maps bundle]
+        R --> F[hunt_core.features.prepare + lake append]
+        F --> D[hunt_core.detect.live.build_live_detection]
+        D --> B[hunt_core.detect.delivery_bridge → levels geometry]
+        B --> G[validate_signal_contract → gate/delivery → deliver]
         G --> TG{confirmed → evaluate_delivery?}
-        TG -->|yes| Send[Telegram entry + register_signal_open latch]
-        TG -->|no| Log[watch_tick / watch_alert_blocked / forming]
+        TG -->|yes| Send[Telegram entry + register_signal_open]
+        TG -->|no| Log[watch_tick / blocked / forming telemetry]
         Send --> TR[evaluate_followups structural invalidate / TP / SL warn]
     end
 
@@ -74,31 +100,31 @@ flowchart TB
    - Cap: `MAX_DYNAMIC_SYMBOLS + len(pinned)`
    - Mode: pinned table + scanner `watch_bias`; `effective_watch_mode` учитывает lifecycle
 
-3. **Symbol tick** (`watch._snapshot_symbol`, timeout 180s)
-   - REST: klines, OI, funding, taker, basis, depth, LS ratios
-   - Feature prep (Polars, Wilder RSI, ATR)
-   - Main bot engine: 28 strategies → delivery audit (advisory)
+3. **Symbol tick** (`tick_assembly.snapshot_symbol`, timeout 180s)
+   - REST/WS: klines, OI, funding, taker, basis, depth, maps bundle
+   - Feature prep (Polars, Wilder RSI, ATR) + parquet lake append
+   - Setup catalog EV audit (advisory, `setups/catalog.py`)
 
-4. **Lifecycle FSM** (`lifecycle.assess_hunt_lifecycle`)
-   - Фаза → `recommended_bias`, `short_entry_ok`, `invalidate_short`
+4. **Fusion detection** (`detect/live.py` + `detect/delivery_bridge.py`)
+   - Trailing window from lake + current bar → six self-calibrated factors
+   - `build_detection`: fuse → PRE/MID phase → single gate (`gate_open`)
+   - MID ⇒ watch gate closed by construction (`detect/phase.py`)
+   - Geometry from preserved `levels.py` (entry/SL/TP)
 
-5. **Analysis + Confirm**
-   - Short: `_dump_analysis` → score + triggers → `_confirm_dump` → `apply_short_invalidation`
-   - Long: `_long_analysis` → `_confirm_long`
-
-6. **Delivery gate** (`evaluate_delivery` confirm / `evaluate_forming_gate` forming)
-   - Confirm: contract → must_pass → family_vote → `run_gate_pipeline` (single path via dispatch)
+5. **Delivery gate** (`evaluate_delivery` confirm / `evaluate_forming_gate` forming)
+   - Confirm: declarative rules (`_rules_table.py`) — data → mission → playbook → RR → EV → structural triggers → contract
+   - Default path: `HUNT_PWIN_GATE=0` — playbook + EV floor; fuel/score legacy off (`HUNT_LEGACY_FUEL=0`)
    - Forming: telemetry only when gate blocks below forming min score
 
-7. **Telegram**
+6. **Telegram**
    - Cooldown 45 min per `symbol:direction`
    - On send: `register_signal_open(telegram_sent=True)` с support/invalidation levels
 
-8. **Follow-ups** (`signal_tracker.evaluate_followups`)
+7. **Follow-ups** (`signal_tracker.evaluate_followups`)
    - Только для `telegram_sent` active signals
    - Invalidate: lifecycle bounce, structural reclaim, SL hit — **не** `confirm_lost`
 
-9. **Persistence**
+8. **Persistence**
    - `dump_minute_watch.jsonl` — full tick rows
    - `hunt_signal_state.json` — active/closed signals
    - `dump_watch_telegram_state.json` — entry cooldown
@@ -429,9 +455,9 @@ Hunt **не имеет** полноценного event-driven backtest как `
 ### Рекомендуемый offline pipeline
 
 ```bash
-cd hunt && PYTHONPATH=.
+# repo root, after pip install -e "./hunt"
 python -m hunt_core._dev.check_logic
-python -m hunt_core._dev.smoke_signals --baseline data/baseline/hunt_baseline.json BTCUSDT
+python -m hunt_core._dev.smoke_signals --baseline hunt/data/baseline/hunt_baseline.json BTCUSDT
 python -m hunt_core._dev.ccxt_plane_smoke BTCUSDT --ws-seconds 3
 ```
 
@@ -496,7 +522,15 @@ Tracker/outcome tooling lives in `hunt_core/track/` (no `hunt/scripts/` tree).
 | `hunt/data/ewma_thresholds.json` | EWMA tick stats |
 | `hunt/data/signal_events.jsonl` | Lifecycle event log |
 | `hunt/data/signal_audit.jsonl` | /signal audit |
-| `hunt/data/session/*.json` | Session hunt_high/low |
+| `hunt/data/prep_shadow_events.jsonl` | Prep shadow paper trades |
+| `hunt/data/setup_candidates.jsonl` | Setup candidate funnel |
+
+### JSONL rotation (#44)
+
+All append-only telemetry writers call `rotate_jsonl_if_needed` before write (`track/events.py`):
+`signal_events.jsonl`, `sent_messages.jsonl`, `prep_shadow_events.jsonl`, `setup_candidates.jsonl`, tick lake via `runtime/tick_io.py`.
+
+Retention: default **50 MB** per file (`JSONL_ROTATE_MAX_BYTES`); archived suffix `.1` in same directory.
 | `hunt/data/dump_watch_telegram_state.json` | TG cooldown |
 | `hunt/data/snapshots/` | Independent batch |
 

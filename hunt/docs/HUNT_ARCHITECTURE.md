@@ -1,61 +1,60 @@
 # Hunt architecture (canonical)
 
-Standalone **crypto-hunter** package (`hunt/`, import `hunt_core`). No `engine.*`, no `bot.*`, no `hunt/scripts/`.
+Standalone **crypto-hunter** package (`hunt/`, import `hunt_core`). No `engine.*`, no `bot.*`, no `hunt/scripts/` on hot path.
 
 ## Product — three runtime modes
 
 | Mode | Trigger | Pipeline branch | Telegram |
 |------|---------|-----------------|----------|
-| **Hunt scan** | `python -m hunt_core watch` every N sec | fuel → lifecycle → confirm short/long | ARMED / TRIGGERED confirm |
-| **Deep analysis** | pinned tick + `/signal SYM` | Prizrak POC, PP, MTF panel, liquidity | Brief + 2 scenarios |
+| **Hunt scan** | `python -m hunt_core watch` every N sec | fusion detect → delivery bridge → gates | ARMED / TRIGGERED confirm |
+| **Deep analysis** | pinned tick + `/signal SYM` | `detect/deep` + maps forecasts | Brief + 2 scenarios |
 | **Catalog** | `/signals [SYMS]` | 7 setup detectors + probability | Setup list + tracker block |
 
 **North star (short):** gate_edge hold-to-target SL ≤30%, TP1+ ≥50% (n≥30). Long TG off by default until n≥30.
 
-## Metrics (wave 2, 2026-06-14)
+## Metrics (fusion cutover, 2026-06-20)
 
 | Metric | Value |
 |--------|-------|
-| `hunt_core/` `.py` files | **~113** (was 137) |
-| hot path LOC | **~44k** (budget gate 44k; stretch 32k) |
-| offline verify | `_dev/check_*` + CI live-smoke |
+| `hunt_core/` `.py` files | **~105** (legacy scan/regime removed) |
+| hot path LOC | **~36k** (budget gate 44k; stretch 32k) |
+| offline verify | `_dev/check_*` + `replay_fusion` + CI live-smoke |
 
 ## Package layout
 
 ```
 hunt/
-├── hunt_core/              # production hot path (~88 .py)
+├── hunt_core/              # production hot path
 │   ├── __main__.py         # python -m hunt_core watch
 │   ├── contract.py         # trade plan + feature payload + delivery contract
-│   ├── market/             # factory, client, streams, cross, symbols, … (13 files — CCXT.md)
-│   ├── data/               # collect, universe, lake, completeness (5 files)
-│   ├── features/           # prepare, prepare_frame, prepare_columns, levels (~14 files)
-│   ├── regime/             # leg_fsm (canonical lifecycle), regime.py
-│   ├── levels/             # levels.py (canonical SL/TP builder)
-│   ├── confluence/         # MTF family-vote + must-pass
-│   ├── scan/               # routing, predump/prepump/presqueeze/early, scanner (wave 3C done)
-│   ├── gate/               # delivery, policy (3 files)
-│   ├── deliver/            # dispatch, telegram, digest (4 files)
+│   ├── market/             # factory, client, streams, cross, symbols, … (CCXT.md)
+│   ├── data/               # collect, universe, lake, completeness
+│   ├── features/           # prepare, snapshot, lake append
+│   ├── detect/             # fusion engine (calibrate, factors, fusion, live, delivery_bridge, deep)
+│   ├── scan/               # scanner.py shim → detect/routing only
+│   ├── gate/               # delivery, policy, _delivery_helpers
+│   ├── deliver/            # dispatch, telegram, digest
 │   ├── track/              # tracker, events, outcomes, …
-│   ├── analysis/           # pinned_deep, deep_signal, adx_thresholds, trend_engine
+│   ├── analysis/           # pinned_deep, deep_signal (query plane)
 │   ├── setups/             # detectors, catalog
-│   ├── runtime/            # cycle/_impl, state, telegram_commands
+│   ├── runtime/            # cycle/_impl, tick_assembly, telegram_commands
 │   ├── domain/             # config, schemas, policy
-│   └── _dev/               # budget, check_*, smoke_signals, watch_once_smoke
+│   └── _dev/               # budget, check_*, replay_fusion, watch_once_smoke
 ├── docs/
 └── data/baseline/          # smoke regression snapshots
 ```
 
-Wave 3C scanner split **done** (2026-06-15): logic in `predump`/`prepump`/`early`/`_confirm_shared`/`predump_dump_hunt`/`scoring`; `presqueeze` owns squeeze detection.
+Fusion migration **done** (2026-06-20): legacy `scan/{predump,prepump,…}` and `regime/leg_fsm` deleted; detection is `detect/*` only.
 
 ## Hot path (one watch tick)
 
 ```
 run_loop → market.factory → data.collect.snapshot_symbol
-  → features.prepare → scan (routing + predump/prepump/early) + regime.leg_fsm
+  → features.prepare + lake append
+  → detect.live.build_live_detection → detect.delivery_bridge
   → track (prep_shadow, candidates, reconcile)
-  → [confirmed] gate.delivery → deliver.dispatch → deliver.telegram
-  → [pinned] analysis.pinned_deep + deep_signal
+  → [confirmed] validate_signal_contract → gate.delivery → deliver.dispatch → deliver.telegram
+  → [pinned] detect/deep or analysis.pinned_deep
 ```
 
 ### Delivery invariant
@@ -70,22 +69,23 @@ validate_signal_contract(setup) → must_pass → family_vote → evaluate_deliv
 python -m hunt_core watch --interval 60
 python -m hunt_core watch --once --no-telegram
 python -m hunt_core._dev.budget
+python -m hunt_core._dev.replay_fusion --all --q-gate 0.92
 python -m hunt_core._dev.smoke_signals --baseline data/baseline/hunt_baseline.json BTCUSDT
+scripts/supervised_session.py --hours 8 --watch-interval 30
 ```
 
-## Merge policy (post-redesign 2026-06-15)
+## Merge policy (post-fusion 2026-06-20)
 
 | File | LOC | Policy |
 |------|-----|--------|
 | `runtime/cycle/_impl.py` | ~2500 | watch loop |
-| `scan/scoring.py` | ~600 | dump/long scoring wrappers |
-| `scan/predump.py` + `early.py` | ~1300 | dump confirm + adaptive |
-| `scan/presqueeze.py` | ~50 | squeeze detection (canonical) |
-| `regime/leg_fsm.py` | ~1600 | lifecycle FSM |
-| `levels/levels.py` | ~1200 | SL/TP geometry |
+| `runtime/tick_assembly.py` | ~1200 | tick orchestration + fusion wiring |
+| `detect/fusion.py` + `factors.py` | ~800 | statistical fusion core |
 | `gate/delivery.py` | ~2100 | delivery gates |
+| `gate/_delivery_helpers.py` | ~400 | evidence/maps helpers (extracted from legacy scan) |
 | `deliver/telegram.py` | ~1800 | transport + formatters |
 | `track/tracker.py` | ~1800 | FSM |
+| `levels/levels.py` | ~1200 | SL/TP geometry |
 
 Merge small modules into fewer files; never split these.
 
@@ -113,6 +113,129 @@ hunt_core/market/
 
 **Funding WS:** Binance primary = `watchMarkPrices` only; `watchFundingRates` on secondaries when `HUNT_CROSS_WS=1` (default on via `load_cross_exchange_config`).
 
+## Score hierarchy (post-fusion)
+
+Each stage owns a **different score namespace**. They do not override each other — conflicts resolve by stage order.
+
+```mermaid
+flowchart LR
+    S[Scanner hunt_score 0-100] --> U[Universe membership]
+    U --> F[Fusion fusion_score + q_gate]
+    F --> D[Delivery gate playbook RR EV]
+    D --> T[Telegram]
+    T --> TR[Tracker follow-ups]
+```
+
+| Stage | Module | Score / gate | Effect |
+|-------|--------|--------------|--------|
+| **Discovery** | `data/scanner.py` | `hunt_score` (0–100) | Candidacy ≥25; watchlist ≥45; priority minute watch ≥60 |
+| **Universe** | `data/universe.py` | scanner row + pinned table | Merge pinned → DEFAULT_SYMBOLS → watchlist; scanner `watch_bias` does **not** overwrite pinned modes |
+| **Detection** | `detect/fusion.py`, `detect/phase.py` | `fusion_score`, `q_gate`, `gate_open` | `gate_open = magnitude_quantile_pass AND phase.watch_ok` (MID closes gate) |
+| **Routing** | `detect/routing.py` | `setup.confirmed` | `confirmed := gate_open` from delivery_bridge — one direction per symbol |
+| **Delivery** | `gate/delivery.py` | playbook N-of-M, RR, EV, lifecycle | Blocks even when fusion confirmed; codes in `watch_alert_blocked` |
+| **Tracker** | `track/tracker.py` | — | Opens only after `telegram_sent=True`; structural invalidate / TP follow-ups |
+
+**Conflict example:** scanner bias = short, fusion = long confirmed → delivery evaluates **long** setup only (`route_tick` picks confirmed side). Short bias affects universe mode, not fusion direction.
+
+Fusion parameter detail: [FUSION_PARAMS.md](FUSION_PARAMS.md). Scanner/delivery thresholds: [config.defaults.toml](../config.defaults.toml).
+
+## Threshold matrix (owner per stage)
+
+| Threshold | Default | Owner module | Config key |
+|-----------|---------|--------------|------------|
+| Candidacy floor | 25 | `data/scanner.py` | hardcoded (`score < 25.0` filter) |
+| Watchlist | 45 | `data/scanner.py` | `[scanner] score_watch` (+ `HUNT_SCORE_WATCH_THRESHOLD`) |
+| Priority minute watch | 60 | `data/scanner.py` | `[scanner] score_priority` |
+| Fusion gate quantile | 0.92 | `detect/fusion.py` | `[fusion] q_gate` |
+| Fusion score scale | 25 | `detect/fusion.py` | `[fusion] fusion_score_scale` |
+| Confirm min (legacy path) | 60 | `params/store.py` | `[confirm.short] min_score` |
+| Forming telemetry floor | 45 | `params/store.py` | `[confirm.short] forming_min_score` |
+| Entry TG cooldown | 45 min | `deliver/dispatch.py` | `[watch] telegram_cooldown_min` |
+| Max dynamic symbols | 12 | `data/universe.py` | `[watch] max_dynamic_symbols` |
+
+**Drift risk:** scanner constants in `data/scanner.py` duplicate `config.defaults.toml`. When tuning, change both or migrate scanner to read `[scanner]` from settings (open debt).
+
+## Missing-data policy
+
+Policy is **layered** — not a single global switch.
+
+| Layer | Module | Missing OI/funding/book | Behavior |
+|-------|--------|-------------------------|----------|
+| Tick assembly | `data_readiness.py` | derivatives / orderbook columns | **Block tick** when `strict_data_quality=True` (default); fast tier skips derivatives REST |
+| Factors | `detect/factors.py` | per-factor inputs | **Abstain** (`active=False`); fusion needs ≥2 active directional factors |
+| Delivery completeness | `data/completeness.py` → `gate/_registry.py` | delivery market keys | **Block delivery** via `delivery_derivatives_complete` |
+| Quality gates | `gate/_quality.py` | ADX, pos_in_range, volume_ratio | **Block** with `data_missing_*` codes (ranked in `_types.py`) |
+| Wash / kinematic | `gate/_wash.py` | wash inputs | **Block** with `wash_data_missing` / `kinematic_data_missing` |
+
+Telemetry: `data_quality.fields_missing` on each tick row in `dump_minute_watch.jsonl`; health log `data_missing` in watch_tick.
+
+**Rule:** strict path = fail-closed at tick; fusion abstains per factor; delivery never ships on incomplete derivatives (full tier).
+
+## Pre-TG observability
+
+| Artifact | Path | When |
+|----------|------|------|
+| Full tick rows | `data/dump_minute_watch.jsonl` | Every symbol tick |
+| Gate-block funnel | `data/setup_candidates.jsonl` | forming / blocked / `gate_blocked` without TG |
+| Early tiers | `data/prep_shadow_events.jsonl` | prep/imminent/start shadow (no TG required) |
+| Deliver/block audit | `track/outcome_ledger.py` → JSONL | Delivery decision |
+| Active tracker | `data/hunt_signal_state.json` | **Only** after successful Telegram |
+
+Gap: structural follow-ups (invalidate/TP) require `telegram_sent=True`. Confirm-pass + TG-fail is visible in tick JSONL + setup_candidates, not in tracker FSM.
+
+## REST/WS capacity (`market/capacity.py`)
+
+Per-tick scheduling stays **under** venue limits (proactive, not 429-reactive).
+
+| Limit | Value | Env override |
+|-------|-------|--------------|
+| Binance weight / min | 2400 | pace target `HUNT_BINANCE_WEIGHT_PACE` (default 1500) |
+| `/futures/data/*` / 5 min | 1000 | pace `HUNT_BINANCE_FAPI_PACE` (default 900) |
+| Target weight per tick | ~700 | `HUNT_TARGET_WEIGHT_PER_TICK` |
+| Parallel snapshot cap | 6 | `HUNT_SNAPSHOT_PARALLEL` |
+
+`HuntLoadPlanner.plan_tick()` assigns **full** vs **fast** tier per symbol: pinned always full; rotatable symbols round-robin when budget tight. Estimates: full ≈100 weight + 12 fapi calls; fast ≈35 weight + 6 fapi.
+
+**Worst-case sanity:** N symbols × interval → run `python -m hunt_core._dev.ccxt_plane_smoke` on 1 vs full universe; compare `TickLoadPlan.estimated_binance_weight` in cycle logs. Universe >40 or weight >85% pace → `skip_secondary_tickers`.
+
+Note: `_dev/budget.py` is **LOC budget** (hot-path line count), not API budget.
+
+## Offline verification limits
+
+No full event-driven backtest on the live signal path. Available:
+
+| Tool | Scope |
+|------|-------|
+| `_dev/replay_fusion` | Detection parity on lake bars (`gate_open`, phase, `fusion_score`) |
+| `_dev/live_integrity_check` | One-shot data → indicators → routing → gates |
+| `scripts/reconcile_signals.py` | Post-hoc SL/TP on 5m bars after tracker open |
+| `scripts/supervised_session.py` | Live watch + pause/resume diff |
+
+Lookahead check: same closed bar, compare live tick vs `replay_fusion` with matching `ts_max`.
+
+## Delivery authority (canonical — resolves doc conflicts)
+
+```text
+FUSION gate_open  →  setup.confirmed  →  route_tick candidate
+  →  contract + must_pass + family_vote
+  →  mission (pre_* phase) + playbook N-of-M + RR + EV + freshness
+  →  telegram  →  tracker
+```
+
+| Question | Answer |
+|----------|--------|
+| Who picks side? | Fusion (`detect/fusion.py`) |
+| Who sets `confirmed`? | Fusion `gate_open` via `delivery_bridge` |
+| Who blocks mid-leg TG? | Mission + sniper (`gate/_mission.py`, `SniperConfig`) |
+| Who is default delivery authority? | Playbook N-of-M when `HUNT_PWIN_GATE=0` ([ENGINE_DESIGN.md](ENGINE_DESIGN.md)) |
+| Is `fusion_score` the gate? | No — magnitude quantile opens gate; score is strength index |
+| PRE phase source | CUSUM only (`detect/phase.py`); legacy FSM removed from tick writer |
+| Phase compat | `gate/_phase_compat.py` maps fusion ↔ legacy for mission/sniper |
+
+**Audit:** every deliver/block writes `hunt_outcome_ledger.jsonl` with `fusion_gate_open`, `playbook_pass_ok`, `mission_pass`, `authority_violation`. Run `python -m hunt_core._dev.authority_audit` after sessions.
+
+**Pre-TG funnel:** `setup_candidates.jsonl` + `dump_minute_watch.jsonl` — not tracker FSM.
+
 ## Forbidden
 
 - `from engine.*` / `from bot.*`
@@ -123,4 +246,4 @@ hunt_core/market/
 
 ## Hunt setup catalog (7 detectors)
 
-Metadata in `hunt_core/setups/catalog.py` — `HUNT_SETUP_IDS` + `HUNT_SETUP_META`.
+Metadata in `hunt_core/setups/catalog.py` — `HUNT_SETUP_IDS` + `HUNT_SETUP_META`. Detectors in `setups/detectors.py`.

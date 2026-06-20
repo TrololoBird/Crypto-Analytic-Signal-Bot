@@ -493,9 +493,23 @@ def mtf_to_dict(mtf: Any | None) -> dict[str, Any] | None:
 
 VerdictKind = Literal["long", "short", "sideways"]
 
-_SCORE_GAP_MIN = 0.15
-_CONFIDENCE_MIN = 0.55
+_HTF_VOTE_MIN = 2
 _ADX_SIDEWAYS_MAX = ADX_RANGE_MAX
+
+
+def _htf_confidence(sc: ScenarioScore) -> float:
+    if sc.htf_total <= 0:
+        return round(min(1.0, max(0.0, sc.score)), 3)
+    return round(min(1.0, sc.htf_count / max(sc.htf_total, 1)), 3)
+
+
+def _htf_dominant(long_s: ScenarioScore, short_s: ScenarioScore) -> VerdictKind | None:
+    """Dominant direction when ≥2 HTF agree (boolean vote, not score gap)."""
+    if long_s.htf_count >= _HTF_VOTE_MIN and long_s.htf_count > short_s.htf_count:
+        return "long"
+    if short_s.htf_count >= _HTF_VOTE_MIN and short_s.htf_count > long_s.htf_count:
+        return "short"
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -536,6 +550,8 @@ def _adx_sideways(tf: dict[str, Any]) -> bool:
 
 
 def _cvd_slope_note(row: dict[str, Any]) -> str:
+    from hunt_core.analysis.deep_signal import fmt_flow_qty
+
     tf = row.get("timeframes") or {}
     for key in ("1h", "15m"):
         snap = tf.get(key) or {}
@@ -544,9 +560,9 @@ def _cvd_slope_note(row: dict[str, Any]) -> str:
             try:
                 v = float(cvd)
                 if v > 0:
-                    return f"CVD {key} положительный ({v:+.0f})"
+                    return f"CVD {key} положительный ({fmt_flow_qty(v)})"
                 if v < 0:
-                    return f"CVD {key} отрицательный ({v:+.0f})"
+                    return f"CVD {key} отрицательный ({fmt_flow_qty(v)})"
             except (TypeError, ValueError):
                 pass
     return ""
@@ -613,11 +629,7 @@ def _trade_ready(row: dict[str, Any]) -> tuple[bool, str, str | None]:
 
 
 def _advisory_bias(long_s: ScenarioScore, short_s: ScenarioScore) -> VerdictKind | None:
-    if short_s.score >= long_s.score + _SCORE_GAP_MIN and short_s.score >= _CONFIDENCE_MIN:
-        return "short"
-    if long_s.score >= short_s.score + _SCORE_GAP_MIN and long_s.score >= _CONFIDENCE_MIN:
-        return "long"
-    return None
+    return _htf_dominant(long_s, short_s)
 
 
 def build_pinned_verdict(row: dict[str, Any]) -> PinnedVerdict:
@@ -653,8 +665,13 @@ def build_pinned_verdict(row: dict[str, Any]) -> PinnedVerdict:
     adx_flat = _adx_sideways(tf)
 
     reasons_sideways: list[str] = []
-    if gap < _SCORE_GAP_MIN:
-        reasons_sideways.append(f"scores близки ({long_s.score:.2f} ≈ {short_s.score:.2f})")
+    htf_dom = _htf_dominant(long_s, short_s)
+    if htf_dom is None:
+        reasons_sideways.append(
+            f"HTF нет ≥{_HTF_VOTE_MIN} согласных "
+            f"(long {long_s.htf_count}/{long_s.htf_total}, "
+            f"short {short_s.htf_count}/{short_s.htf_total})"
+        )
     if htf_conflict:
         reasons_sideways.append("HTF расходятся")
     if adx_flat:
@@ -668,6 +685,37 @@ def build_pinned_verdict(row: dict[str, Any]) -> PinnedVerdict:
     panel_note = _panel_reason(panel)
     trade_ok, _ready_code, ready_note = _trade_ready(row)
     advisory = _advisory_bias(long_s, short_s)
+
+    from hunt_core.analysis.deep_signal import hunt_confirmed_direction
+
+    conf_dir = hunt_confirmed_direction(row)
+    if conf_dir:
+        active_setup = (row.get("dump") if conf_dir == "short" else row.get("long")) or {}
+        sc = short_s if conf_dir == "short" else long_s
+        phase = str(active_setup.get("phase") or "—")
+        reason_parts = [
+            f"Hunt closed-bar confirm · phase={phase}",
+            f"MTF контекст {sc.htf_count}/{sc.htf_total} · score {sc.score:.2f}",
+        ]
+        if advisory and advisory != conf_dir:
+            adv_sc = short_s if advisory == "short" else long_s
+            reason_parts.append(
+                f"MTF advisory {advisory.upper()} {adv_sc.score:.2f} — не перекрывает confirm"
+            )
+        if panel_note:
+            reason_parts.append(panel_note)
+        return PinnedVerdict(
+            kind=conf_dir,
+            confidence=round(max(sc.score, 0.65), 3),
+            reason=" · ".join(reason_parts),
+            long_scenario=long_s,
+            short_scenario=short_s,
+            micro_bias=micro,
+            cvd_note=cvd_note,
+            indicator_panel=panel,
+            liquidity_scenarios=liq_pack,
+            poc_level_scenarios=poc_pack,
+        )
 
     if not trade_ok:
         bias_note = ""
@@ -690,7 +738,7 @@ def build_pinned_verdict(row: dict[str, Any]) -> PinnedVerdict:
             poc_level_scenarios=poc_pack,
         )
 
-    if reasons_sideways and max(long_s.score, short_s.score) < _CONFIDENCE_MIN + 0.1:
+    if reasons_sideways and htf_dom is None:
         reason = " · ".join(reasons_sideways)
         if panel_note:
             reason = f"{reason} · {panel_note}"
@@ -707,15 +755,15 @@ def build_pinned_verdict(row: dict[str, Any]) -> PinnedVerdict:
             poc_level_scenarios=poc_pack,
         )
 
-    if long_s.score >= short_s.score + _SCORE_GAP_MIN and long_s.score >= _CONFIDENCE_MIN:
+    if htf_dom == "long":
         if not htf_conflict or long_s.htf_count >= short_s.htf_count:
             if not _panel_conflict(panel, "long"):
-                reason = f"HTF {long_s.htf_count}/{long_s.htf_total} · score {long_s.score:.2f}"
+                reason = f"HTF vote {long_s.htf_count}/{long_s.htf_total} · conf {_htf_confidence(long_s):.0%}"
                 if panel_note:
                     reason = f"{reason} · {panel_note}"
                 return PinnedVerdict(
                     kind="long",
-                    confidence=long_s.score,
+                    confidence=_htf_confidence(long_s),
                     reason=reason,
                     long_scenario=long_s,
                     short_scenario=short_s,
@@ -727,15 +775,15 @@ def build_pinned_verdict(row: dict[str, Any]) -> PinnedVerdict:
                 )
             reasons_sideways.append("индикаторы против лонга")
 
-    if short_s.score >= long_s.score + _SCORE_GAP_MIN and short_s.score >= _CONFIDENCE_MIN:
+    if htf_dom == "short":
         if not htf_conflict or short_s.htf_count >= long_s.htf_count:
             if not _panel_conflict(panel, "short"):
-                reason = f"HTF {short_s.htf_count}/{short_s.htf_total} · score {short_s.score:.2f}"
+                reason = f"HTF vote {short_s.htf_count}/{short_s.htf_total} · conf {_htf_confidence(short_s):.0%}"
                 if panel_note:
                     reason = f"{reason} · {panel_note}"
                 return PinnedVerdict(
                     kind="short",
-                    confidence=short_s.score,
+                    confidence=_htf_confidence(short_s),
                     reason=reason,
                     long_scenario=long_s,
                     short_scenario=short_s,
@@ -789,6 +837,7 @@ class PinnedScenarioPack:
     range_bounds: tuple[float, float] | None
     verdict_kind: str
     context_ru: str
+    maps_forecast: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         def _sc(s: PinnedScenario) -> dict[str, Any]:
@@ -812,6 +861,7 @@ class PinnedScenarioPack:
             "range_bounds": list(self.range_bounds) if self.range_bounds else None,
             "verdict_kind": self.verdict_kind,
             "context": self.context_ru,
+            "maps_forecast": self.maps_forecast,
         }
 
 
@@ -821,6 +871,19 @@ def _pos_float(value: Any) -> float | None:
         return v if v > 0 else None
     except (TypeError, ValueError):
         return None
+
+
+def _narrow_entry_band(
+    price: float,
+    level: float,
+    *,
+    kind: Literal["long", "short"],
+) -> tuple[float, float]:
+    """Structural retest band (~0.3%) — not the full range width (L3/L4)."""
+    band = max(price * 0.003, level * 1e-6)
+    if kind == "short":
+        return round(level - band, 6), round(level, 6)
+    return round(level, 6), round(level + band, 6)
 
 
 def _range_scenario(
@@ -836,29 +899,56 @@ def _range_scenario(
     if lo > hi:
         lo, hi = hi, lo
     mid = (lo + hi) / 2.0
+    if price >= mid:
+        entry_lo, entry_hi = _narrow_entry_band(price, hi, kind="short")
+        sl = round(hi * 1.005, 6)
+        tp1 = round(mid, 6)
+        tp2 = round(lo, 6)
+        action = f"Short retest VAH/сопротивления {entry_lo:.4g}–{entry_hi:.4g}"
+    else:
+        entry_lo, entry_hi = _narrow_entry_band(price, lo, kind="long")
+        sl = round(lo * 0.995, 6)
+        tp1 = round(mid, 6)
+        tp2 = round(hi, 6)
+        action = f"Long retest VAL/поддержки {entry_lo:.4g}–{entry_hi:.4g}"
     return PinnedScenario(
         kind="range",
         confidence=0.55 if adx < ADX_RANGE_MAX else 0.45,
         label_ru="Боковик / диапазон",
-        action_ru=f"Торговать границы {lo:.4g}–{hi:.4g} · без пробоя не лезть",
-        entry_lo=round(lo, 6),
-        entry_hi=round(hi, 6),
-        stop_loss=round(lo * 0.995 if price > mid else hi * 1.005, 6),
-        tp1=round(mid, 6),
-        tp2=round(hi if price <= mid else lo, 6),
+        action_ru=action,
+        entry_lo=entry_lo,
+        entry_hi=entry_hi,
+        stop_loss=sl,
+        tp1=tp1,
+        tp2=tp2,
         invalidation_ru=f"Закрытие {'ниже' if price > mid else 'выше'} границы диапазона",
         factors=tuple(factors),
     )
 
 
-def _levels_from_setup(setup: dict[str, Any], *, price: float, kind: str) -> dict[str, Any]:
+def _levels_from_setup(
+    setup: dict[str, Any],
+    *,
+    price: float,
+    kind: str,
+) -> dict[str, Any]:
+    """Direction-specific entry zones — short uses entry_hi edge, long uses entry_lo."""
     ez = setup.get("entry_zone") or [price, price]
     try:
-        entry = float(ez[0])
+        entry_lo = float(ez[0])
+        entry_hi = float(ez[1] if len(ez) > 1 else ez[0])
     except (TypeError, ValueError, IndexError):
-        entry = price
+        entry_lo = entry_hi = price
+    direction = str(setup.get("direction") or kind or "long").lower()
+    if direction == "short" and entry_hi <= entry_lo:
+        entry_hi = max(entry_lo, price)
+    elif direction == "long" and entry_lo >= entry_hi:
+        entry_lo = min(entry_hi, price)
+    entry = entry_hi if direction == "short" else entry_lo
     return {
         "entry": entry,
+        "entry_lo": entry_lo,
+        "entry_hi": entry_hi,
         "stop_loss": setup.get("stop_loss"),
         "tp1": setup.get("tp1"),
         "tp2": setup.get("tp2"),
@@ -880,25 +970,27 @@ def _directional_scenario(
     tp1 = _pos_float(levels.get("tp1"))
     tp2 = _pos_float(levels.get("tp2"))
     inv = _pos_float(levels.get("invalidation_above") or levels.get("invalidation_below"))
+    entry_lo = _pos_float(levels.get("entry_lo"))
+    entry_hi = _pos_float(levels.get("entry_hi"))
     if kind == "long":
         label = "Лонг от поддержки"
         action = "Limit на retest поддержки / VAL"
         inv_ru = f"Инвалидация ниже {inv:.4g}" if inv else "Закрытие ниже stop-loss"
-        ez_lo = entry * 0.998 if entry else None
-        ez_hi = entry * 1.002 if entry else None
+        if entry_lo is None or entry_hi is None:
+            entry_lo, entry_hi = _narrow_entry_band(price, entry, kind="long")
     else:
         label = "Шорт от сопротивления"
         action = "Limit на retest сопротивления / VAH"
         inv_ru = f"Инвалидация выше {inv:.4g}" if inv else "Закрытие выше stop-loss"
-        ez_lo = entry * 0.998 if entry else None
-        ez_hi = entry * 1.002 if entry else None
+        if entry_lo is None or entry_hi is None:
+            entry_lo, entry_hi = _narrow_entry_band(price, entry, kind="short")
     return PinnedScenario(
         kind=kind,
         confidence=confidence,
         label_ru=label,
         action_ru=action,
-        entry_lo=round(ez_lo, 6) if ez_lo else None,
-        entry_hi=round(ez_hi, 6) if ez_hi else None,
+        entry_lo=round(entry_lo, 6) if entry_lo else None,
+        entry_hi=round(entry_hi, 6) if entry_hi else None,
         stop_loss=round(sl, 6) if sl else None,
         tp1=round(tp1, 6) if tp1 else None,
         tp2=round(tp2, 6) if tp2 else None,
@@ -921,10 +1013,13 @@ def build_pinned_scenario(row: dict[str, Any], *, attach_lake: bool = True) -> P
 
     support = _pos_float((row.get("session") or {}).get("low_24h"))
     resistance = _pos_float((row.get("session") or {}).get("high_24h"))
-    market = row.get("market") or {}
-    poc = _pos_float(market.get("poc_1h") or market.get("poc"))
-    vah = _pos_float(market.get("vah_1h"))
-    val = _pos_float(market.get("val_1h"))
+    market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    from hunt_core.analysis.deep_signal import _resolve_maps_vp
+
+    poc, vah, val = _resolve_maps_vp(row)
+    poc = poc or _pos_float(market.get("poc_1h") or market.get("poc"))
+    vah = vah or _pos_float(market.get("vah_1h"))
+    val = val or _pos_float(market.get("val_1h"))
     if val:
         support = min(support or val, val) if support else val
     if vah:
@@ -934,6 +1029,12 @@ def build_pinned_scenario(row: dict[str, Any], *, attach_lake: bool = True) -> P
             support = support or poc
         if not resistance or poc > price:
             resistance = resistance or poc
+
+    from hunt_core.maps.forecast import build_maps_forecast
+
+    forecast = build_maps_forecast(row)
+    if forecast:
+        row["maps_forecast"] = forecast
 
     verdict = build_pinned_verdict(row)
     factors: list[str] = []
@@ -979,11 +1080,21 @@ def build_pinned_scenario(row: dict[str, Any], *, attach_lake: bool = True) -> P
         ctx = "Структурный диапазон · вход только от границ"
     elif verdict.kind == "long":
         long_setup = row.get("long") or {}
+        levels = _levels_from_setup(long_setup, price=price, kind="long")
+        if forecast and forecast.get("target_primary"):
+            try:
+                levels["tp2"] = float(forecast["target_primary"])
+                if not levels.get("tp1"):
+                    levels["tp1"] = round(
+                        price + (float(forecast["target_primary"]) - price) * 0.55, 6
+                    )
+            except (TypeError, ValueError):
+                pass
         primary = _directional_scenario(
             kind="long",
             price=price,
-            levels=_levels_from_setup(long_setup, price=price, kind="long"),
-            confidence=verdict.confidence,
+            levels=levels,
+            confidence=max(verdict.confidence, float(forecast.get("confidence") or 0) if forecast else 0),
             factors=factors or ["HTF long bias"],
         )
         alternate = _range_scenario(price, support=support, resistance=resistance, adx=adx, factors=["alt range"]) if range_bounds else None
@@ -1016,6 +1127,7 @@ def build_pinned_scenario(row: dict[str, Any], *, attach_lake: bool = True) -> P
         range_bounds=range_bounds,
         verdict_kind=verdict.kind,
         context_ru=ctx,
+        maps_forecast=forecast,
     )
 
 
@@ -1059,6 +1171,13 @@ def format_pinned_scenario_telegram(pack: PinnedScenarioPack | dict[str, Any]) -
     if rb:
         lo, hi = rb if not isinstance(rb, dict) else (rb[0], rb[1])
         out.append(f"Диапазон: <code>{lo}</code> – <code>{hi}</code>")
+    fc = pack.get("maps_forecast") if isinstance(pack, dict) else getattr(pack, "maps_forecast", None)
+    if fc:
+        from hunt_core.deliver._sections import format_accumulation_forecast_section
+
+        fc_block = format_accumulation_forecast_section({"maps_forecast": fc})
+        if fc_block:
+            out.extend(["", fc_block])
     out.extend(_line(primary, header="▶"))
     if alt:
         out.append("")

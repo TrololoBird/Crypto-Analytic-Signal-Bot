@@ -422,6 +422,7 @@ class HuntCcxtClient:
             await close_exchange_async(self._pro_ex, label="binance_pro")
             self._pro_ex = None
         await close_exchange_async(self._ex, label="binance_rest")
+        await asyncio.sleep(0.35)
 
     def _ccxt_sym(self, symbol: str) -> str:
         return to_ccxt_symbol(symbol, exchange=self._ex)
@@ -839,6 +840,58 @@ class HuntCcxtClient:
             ttl_key="taker_ratio",
         )
 
+    async def fetch_oi_history_raw(
+        self, symbol: str, *, period: str = "1h", limit: int = 48
+    ) -> list[dict[str, Any]]:
+        """Raw CCXT open-interest history rows (timestamp + openInterestAmount)."""
+        sym = self._bin_sym(symbol)
+        cache_key = (sym, period, int(limit), "raw")
+        cached = self._oi_series_cache.get(cache_key)  # type: ignore[arg-type]
+        if self._cache_fresh(cached, _CACHE_TTL["metric_series"]):
+            return cached[1]  # type: ignore[index]
+        await self.load_markets()
+        payload = await self._direct_binance_fetch(
+            lambda: self._ex.fetch_open_interest_history(
+                self._ccxt_sym(sym), timeframe=period, limit=int(limit)
+            ),
+            context=f"oi_history_raw:{sym}:{period}",
+            weight=1,
+            method="fetchOpenInterestHistory",
+        )
+        rows = [x for x in payload if isinstance(x, dict)] if isinstance(payload, list) else []
+        if rows:
+            self._oi_series_cache[cache_key] = (time.monotonic(), rows)  # type: ignore[index]
+        return rows
+
+    async def fetch_oi_bars_for_maps(
+        self, symbol: str, *, period: str = "1h", limit: int = 48
+    ) -> list[dict[str, Any]]:
+        """OI deltas aligned to OHLCV for entry-anchored liquidation forward map."""
+        from hunt_core.maps.oi import oi_bars_from_frames, oi_bars_from_scalar_series
+
+        sym = self._bin_sym(symbol)
+        cache_key = (sym, period, int(limit), "map_bars")
+        cached = self._oi_series_cache.get(cache_key)  # type: ignore[arg-type]
+        if self._cache_fresh(cached, _CACHE_TTL["metric_series"]):
+            return cached[1]  # type: ignore[index]
+        try:
+            raw = await self.fetch_oi_history_raw(sym, period=period, limit=limit)
+            klines = await self.fetch_klines(sym, period, limit=limit + 5)
+            bars = oi_bars_from_frames(raw, klines)
+            if not bars and raw:
+                scalars = [
+                    float(x.get("openInterestAmount") or 0)
+                    for x in raw
+                    if x.get("openInterestAmount") is not None
+                ]
+                bars = oi_bars_from_scalar_series(scalars, klines)
+            if bars:
+                self._oi_series_cache[cache_key] = (time.monotonic(), bars)  # type: ignore[index]
+            return bars
+        except Exception as exc:
+            LOG.warning("fetch_oi_bars_for_maps failed | symbol=%s error=%s", sym, exc)
+            return []
+
     async def fetch_open_interest_series(
         self, symbol: str, *, period: str = "5m", limit: int = 48
     ) -> list[float]:
@@ -1187,6 +1240,34 @@ class HuntCcxtClient:
             return None
         return cached[1]
 
+    def get_cached_oi_series(
+        self,
+        symbol: str,
+        *,
+        period: str = "5m",
+        limit: int = 48,
+        max_age_s: float = 1800.0,
+    ) -> list[float] | None:
+        cache_key = (self._bin_sym(symbol), period, int(limit))
+        cached = self._oi_series_cache.get(cache_key)
+        if cached is None or time.monotonic() - cached[0] > max_age_s:
+            return None
+        return list(cached[1])
+
+    def get_cached_gls_series(
+        self,
+        symbol: str,
+        *,
+        period: str = "5m",
+        limit: int = 48,
+        max_age_s: float = 1800.0,
+    ) -> list[float] | None:
+        cache_key = (self._bin_sym(symbol), period, int(limit))
+        cached = self._gls_series_cache.get(cache_key)
+        if cached is None or time.monotonic() - cached[0] > max_age_s:
+            return None
+        return list(cached[1])
+
     def get_cached_ls_ratio(
         self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
     ) -> float | None:
@@ -1481,6 +1562,9 @@ class HuntCcxtClient:
                     await close_exchange_async(ex, label=f"secondary_rest_skip:{name}")
                     self._secondary_failed.add(name)
                     return None
+            except asyncio.CancelledError:
+                await close_exchange_async(ex, label=f"secondary_rest_cancel:{name}")
+                raise
             except Exception as exc:
                 LOG.warning("secondary_load_markets_failed | exchange=%s error=%s", name, exc)
                 await close_exchange_async(ex, label=f"secondary_rest_init:{name}")
@@ -1556,6 +1640,16 @@ class HuntCcxtClient:
             result = {"fundingRate": None}
         self._secondary_funding_cache[cache_key] = (now, result)
         return result
+
+    async def fetch_secondary_funding_rate(self, exchange_id: str, symbol: str) -> float | None:
+        """Public REST funding for cross venues without Pro ``watchFundingRates``."""
+        bin_sym = self._bin_sym(symbol)
+        ccxt_sym = await self._secondary_ccxt_symbol(exchange_id, bin_sym)
+        if ccxt_sym is None:
+            return None
+        row = await self._fetch_secondary_funding(exchange_id, ccxt_sym)
+        fr = row.get("fundingRate")
+        return float(fr) if fr is not None else None
 
     async def _fetch_secondary_oi(
         self, name: str, ccxt_sym: str
@@ -1694,9 +1788,11 @@ class HuntCcxtClient:
         ref_mark = float(pr.get("mark_price") or 0)
 
         listed: dict[str, bool] = {"binance": True}
-        funding: dict[str, float | None] = {"binance": ref_funding or None}
-        oi_usd: dict[str, float | None] = {}
-        mark_price: dict[str, float | None] = {"binance": ref_mark or None}
+        funding: dict[str, float] = {"binance": ref_funding}
+        oi_usd: dict[str, float] = {}
+        mark_price: dict[str, float] = {}
+        if ref_mark > 0:
+            mark_price["binance"] = ref_mark
 
         async def _fetch_one_secondary(name: str) -> tuple[str, str | None, Any]:
             ccxt_sym = await self._secondary_ccxt_symbol(name, bin_sym)
@@ -1721,14 +1817,17 @@ class HuntCcxtClient:
                 continue
             name, _ccxt_sym, res = item
             if res is None:
-                funding[name] = None
-                oi_usd[name] = None
-                mark_price[name] = None
                 continue
             f_r, oi_r, t_r = res
-            funding[name] = f_r.get("fundingRate")
-            oi_usd[name] = oi_r.get("oi_usd")
-            mark_price[name] = t_r.get("mark_price")
+            fr = f_r.get("fundingRate")
+            if fr is not None:
+                funding[name] = float(fr)
+            oi_val = oi_r.get("oi_usd")
+            if oi_val is not None:
+                oi_usd[name] = float(oi_val)
+            mp = t_r.get("mark_price")
+            if mp is not None and float(mp) > 0:
+                mark_price[name] = float(mp)
 
         # Aggregate
         rates = [v for v in funding.values() if v is not None]
@@ -2091,347 +2190,16 @@ def wall_cluster_to_dict(cluster: WallCluster) -> dict[str, Any]:
 
 
 
-# --- merged from market/liquidation_heatmap.py ---
+# --- liquidation heatmap (canonical impl in hunt_core.maps.liquidation) ---
 
-import collections
-from dataclasses import dataclass
-
-_DEFAULT_LEVERAGE_TIERS = (5, 10, 20, 50)
-
-
-def maintenance_rates_from_tiers(tiers: list[dict[str, Any]]) -> tuple[float, ...]:
-    """Extract unique maintenance margin rates from Binance/CCXT bracket rows."""
-    rates: list[float] = []
-    seen: set[float] = set()
-    for tier in tiers:
-        if not isinstance(tier, dict):
-            continue
-        mmr = tier.get("maintenance_margin_rate")
-        if mmr is None:
-            mmr = tier.get("maintenanceMarginRate")
-        try:
-            val = float(mmr)
-        except (TypeError, ValueError):
-            continue
-        if val <= 0 or val >= 1 or val in seen:
-            continue
-        seen.add(val)
-        rates.append(val)
-    return tuple(sorted(rates))
-
-
-def leverage_tiers_from_brackets(tiers: list[dict[str, Any]]) -> tuple[int, ...]:
-    """Fallback leverage integers from bracket max_leverage when MMR rows are absent."""
-    levs: list[int] = []
-    seen: set[int] = set()
-    for tier in tiers:
-        if not isinstance(tier, dict):
-            continue
-        raw = tier.get("max_leverage")
-        if raw is None:
-            raw = tier.get("maxLeverage")
-        try:
-            lev = int(raw)
-        except (TypeError, ValueError):
-            continue
-        if lev <= 0 or lev in seen:
-            continue
-        seen.add(lev)
-        levs.append(lev)
-    if not levs:
-        return _DEFAULT_LEVERAGE_TIERS
-    return tuple(sorted(levs, reverse=True)[:8])
-
-
-@dataclass(frozen=True, slots=True)
-class LiquidationDensityZone:
-    price_lo: float
-    price_hi: float
-    price_center: float
-    total_notional: float
-    long_notional: float
-    short_notional: float
-    intensity: float
-    event_count: int
-    side_bias: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class LiquidationCluster:
-    price: float
-    total_notional: float
-    long_notional: float
-    short_notional: float
-    event_count: int
-    intensity: float
-
-
-@dataclass(frozen=True, slots=True)
-class LiquidationHeatmap:
-    clusters: tuple[LiquidationCluster, ...]
-    density_zones: tuple[LiquidationDensityZone, ...]
-    nearest_long_liquidation: float | None
-    nearest_short_liquidation: float | None
-    cascade_risk_direction: str | None
-    total_long_at_risk: float
-    total_short_at_risk: float
-
-
-def _bucket_events(
-    buffer: collections.deque[tuple[int, str, str, float, float]],
-    *,
-    symbol: str,
-    current_price: float,
-    window_seconds: int,
-    n_buckets: int,
-    price_range_pct: float,
-) -> dict[int, dict[str, float]]:
-    if current_price <= 0:
-        return {}
-    cutoff_ms = int(time.time() * 1000) - window_seconds * 1000
-    span = current_price * price_range_pct / 100.0
-    price_min = current_price - span
-    price_max = current_price + span
-    bucket_size = (price_max - price_min) / max(1, n_buckets)
-    buckets: dict[int, dict[str, float]] = {}
-    for ts_ms, sym, side, qty, price in buffer:
-        if ts_ms < cutoff_ms or sym != symbol:
-            continue
-        try:
-            qty_val = float(qty)
-            price_val = float(price)
-        except (TypeError, ValueError):
-            continue
-        if qty_val <= 0 or price_val <= 0:
-            continue
-        if price_val < price_min or price_val > price_max:
-            continue
-        b = int((price_val - price_min) / bucket_size)
-        b = max(0, min(n_buckets - 1, b))
-        row = buckets.setdefault(
-            b, {"long": 0.0, "short": 0.0, "total": 0.0, "events": 0.0}
-        )
-        notional = qty_val * price_val
-        row["total"] += notional
-        row["events"] += 1.0
-        if side == "BUY":
-            row["short"] += notional
-        else:
-            row["long"] += notional
-    return buckets
-
-
-def _prospective_levels(
-    current_price: float,
-    *,
-    n_buckets: int,
-    price_range_pct: float,
-    leverage_tiers: tuple[int, ...] = _DEFAULT_LEVERAGE_TIERS,
-    maintenance_margin_rates: tuple[float, ...] | None = None,
-) -> list[tuple[float, float, str]]:
-    """Estimate liquidation magnets from leverage brackets or generic tiers."""
-    if current_price <= 0:
-        return []
-    out: list[tuple[float, float, str]] = []
-    if maintenance_margin_rates:
-        for mmr in maintenance_margin_rates:
-            if mmr <= 0 or mmr >= 1:
-                continue
-            long_liq = current_price * (1.0 - mmr)
-            short_liq = current_price * (1.0 + mmr)
-            out.append((long_liq, mmr, "long"))
-            out.append((short_liq, mmr, "short"))
-    else:
-        for lev in leverage_tiers:
-            if lev <= 0:
-                continue
-            long_liq = current_price * (1.0 - 1.0 / lev)
-            short_liq = current_price * (1.0 + 1.0 / lev)
-            out.append((long_liq, 1.0 / lev, "long"))
-            out.append((short_liq, 1.0 / lev, "short"))
-    span = current_price * price_range_pct / 100.0
-    lo = current_price - span
-    hi = current_price + span
-    return [(p, w, side) for p, w, side in out if lo <= p <= hi]
-
-
-def build_liquidation_heatmap(
-    buffer: collections.deque[tuple[int, str, str, float, float]],
-    *,
-    symbol: str,
-    current_price: float,
-    window_seconds: int = 300,
-    n_buckets: int = 20,
-    price_range_pct: float = 5.0,
-    leverage_tiers: tuple[int, ...] | None = None,
-    maintenance_margin_rates: tuple[float, ...] | None = None,
-    bracket_tiers: list[dict[str, Any]] | None = None,
-) -> LiquidationHeatmap | None:
-    """Bucket WS liquidations ±price_range_pct; merge with prospective leverage levels."""
-    if current_price <= 0:
-        return None
-    mm_rates = maintenance_margin_rates
-    lev_tiers = leverage_tiers
-    if bracket_tiers:
-        parsed_mmr = maintenance_rates_from_tiers(bracket_tiers)
-        if parsed_mmr:
-            mm_rates = parsed_mmr
-        elif lev_tiers is None:
-            lev_tiers = leverage_tiers_from_brackets(bracket_tiers)
-    if lev_tiers is None and not mm_rates:
-        lev_tiers = _DEFAULT_LEVERAGE_TIERS
-    span = current_price * price_range_pct / 100.0
-    price_min = current_price - span
-    bucket_size = (2.0 * span) / max(1, n_buckets)
-    raw = _bucket_events(
-        buffer,
-        symbol=symbol,
-        current_price=current_price,
-        window_seconds=window_seconds,
-        n_buckets=n_buckets,
-        price_range_pct=price_range_pct,
-    )
-    cluster_map: dict[int, dict[str, float]] = {
-        b: {"long": v["long"], "short": v["short"], "total": v["total"], "events": v["events"]}
-        for b, v in raw.items()
-    }
-    for price, weight, side in _prospective_levels(
-        current_price,
-        n_buckets=n_buckets,
-        price_range_pct=price_range_pct,
-        leverage_tiers=lev_tiers or _DEFAULT_LEVERAGE_TIERS,
-        maintenance_margin_rates=mm_rates,
-    ):
-        b = int((price - price_min) / bucket_size)
-        b = max(0, min(n_buckets - 1, b))
-        row = cluster_map.setdefault(b, {"long": 0.0, "short": 0.0, "total": 0.0, "events": 0.0})
-        synthetic = current_price * weight * 0.05
-        row["total"] += synthetic
-        if side == "long":
-            row["long"] += synthetic
-        else:
-            row["short"] += synthetic
-
-    if not cluster_map:
-        return None
-
-    max_total = max(row["total"] for row in cluster_map.values()) or 1.0
-    clusters: list[LiquidationCluster] = []
-    for b, row in cluster_map.items():
-        center = price_min + (b + 0.5) * bucket_size
-        clusters.append(
-            LiquidationCluster(
-                price=round(center, 6),
-                total_notional=round(row["total"], 2),
-                long_notional=round(row["long"], 2),
-                short_notional=round(row["short"], 2),
-                event_count=int(row["events"]),
-                intensity=round(row["total"] / max_total, 4),
-            )
-        )
-    clusters.sort(key=lambda c: c.total_notional, reverse=True)
-    top = tuple(clusters[:3])
-
-    density_zones: list[LiquidationDensityZone] = []
-    for b, row in sorted(cluster_map.items(), key=lambda kv: kv[1]["total"], reverse=True):
-        lo = price_min + b * bucket_size
-        hi = lo + bucket_size
-        center = price_min + (b + 0.5) * bucket_size
-        long_n = row["long"]
-        short_n = row["short"]
-        total = row["total"]
-        intensity = round(total / max_total, 4)
-        if intensity < 0.15 and row["events"] <= 0:
-            continue
-        if long_n > short_n * 1.3:
-            bias: str | None = "long_liq"
-        elif short_n > long_n * 1.3:
-            bias = "short_liq"
-        else:
-            bias = None
-        density_zones.append(
-            LiquidationDensityZone(
-                price_lo=round(lo, 6),
-                price_hi=round(hi, 6),
-                price_center=round(center, 6),
-                total_notional=round(total, 2),
-                long_notional=round(long_n, 2),
-                short_notional=round(short_n, 2),
-                intensity=intensity,
-                event_count=int(row["events"]),
-                side_bias=bias,
-            )
-        )
-    zones_top = tuple(density_zones[:8])
-
-    nearest_long: float | None = None
-    nearest_short: float | None = None
-    total_long_risk = 0.0
-    total_short_risk = 0.0
-    for c in clusters:
-        if c.price < current_price:
-            total_long_risk += c.long_notional
-            if nearest_long is None or c.price > nearest_long:
-                nearest_long = c.price
-        elif c.price > current_price:
-            total_short_risk += c.short_notional
-            if nearest_short is None or c.price < nearest_short:
-                nearest_short = c.price
-
-    cascade: str | None = None
-    if total_long_risk > total_short_risk * 1.5 and total_long_risk >= 25_000:
-        cascade = "long_flush"
-    elif total_short_risk > total_long_risk * 1.5 and total_short_risk >= 25_000:
-        cascade = "short_squeeze"
-
-    return LiquidationHeatmap(
-        clusters=top,
-        density_zones=zones_top,
-        nearest_long_liquidation=nearest_long,
-        nearest_short_liquidation=nearest_short,
-        cascade_risk_direction=cascade,
-        total_long_at_risk=round(total_long_risk, 2),
-        total_short_at_risk=round(total_short_risk, 2),
-    )
-
-
-def heatmap_to_market_dict(
-    heatmap: LiquidationHeatmap | None,
-    *,
-    prospective_source: str | None = None,
-) -> dict[str, Any]:
-    if heatmap is None:
-        return {}
-    out: dict[str, Any] = {
-        "liq_heatmap_nearest_long": heatmap.nearest_long_liquidation,
-        "liq_heatmap_nearest_short": heatmap.nearest_short_liquidation,
-        "liq_cascade_risk": heatmap.cascade_risk_direction,
-        "liq_long_at_risk_usd": heatmap.total_long_at_risk,
-        "liq_short_at_risk_usd": heatmap.total_short_at_risk,
-        "liq_heatmap_clusters": [
-            {
-                "price": c.price,
-                "total_notional": c.total_notional,
-                "intensity": c.intensity,
-                "event_count": c.event_count,
-            }
-            for c in heatmap.clusters
-        ],
-        "liq_density_zones": [
-            {
-                "price_lo": z.price_lo,
-                "price_hi": z.price_hi,
-                "price_center": z.price_center,
-                "total_notional": z.total_notional,
-                "intensity": z.intensity,
-                "side_bias": z.side_bias,
-                "event_count": z.event_count,
-            }
-            for z in heatmap.density_zones
-        ],
-    }
-    if prospective_source:
-        out["liq_prospective_source"] = prospective_source
-    return out
+from hunt_core.maps.liquidation import (
+    LiquidationCluster,
+    LiquidationDensityZone,
+    LiquidationHeatmap,
+    build_liquidation_heatmap,
+    heatmap_to_market_dict,
+    leverage_tiers_from_brackets,
+    maintenance_rates_from_tiers,
+)
 
 

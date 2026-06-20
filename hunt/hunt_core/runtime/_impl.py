@@ -57,6 +57,17 @@ def _acquire_single_instance_lock() -> None:
     lock.write_text(str(os.getpid()), encoding="utf-8")
 
 
+def _normalize_cli_symbols(raw: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
+    """Split ``BTC,ETH`` mistakes and dedupe while preserving order."""
+    out: list[str] = []
+    for item in raw or ():
+        for part in str(item).replace(",", " ").split():
+            sym = part.strip().upper()
+            if sym and sym not in out:
+                out.append(sym)
+    return tuple(out)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Signal minute watch + Telegram")
     parser.add_argument(
@@ -69,7 +80,7 @@ def main() -> None:
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--no-telegram", action="store_true", help="Log only, no Telegram sends")
     args = parser.parse_args()
-    symbols = tuple(dict.fromkeys(s.upper() for s in args.symbols))
+    symbols = _normalize_cli_symbols(args.symbols)
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
     if not args.once:

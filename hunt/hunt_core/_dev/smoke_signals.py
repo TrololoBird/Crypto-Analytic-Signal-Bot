@@ -19,12 +19,14 @@ DEFAULT_SYMBOLS = (
 
 
 def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
+    from hunt_core.gate._ev import setup_conviction_pct
+
     lc = row.get("lifecycle") or {}
     dump = row.get("dump") or {}
     long = row.get("long") or {}
-    setup_s = dump if dump.get("confirmed") or float(dump.get("dump_score") or 0) >= float(
-        long.get("long_score") or 0
-    ) else long
+    short_c = setup_conviction_pct(dump, direction="short")
+    long_c = setup_conviction_pct(long, direction="long")
+    setup_s = dump if dump.get("confirmed") or short_c >= long_c else long
     levels = {
         k: setup_s.get(k)
         for k in ("entry_zone", "stop_loss", "tp1", "tp2", "risk_reward", "levels_viable")
@@ -38,8 +40,8 @@ def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
         "bias": lc.get("recommended_bias"),
         "short_conf": dump.get("confirmed"),
         "long_conf": long.get("confirmed"),
-        "short_score": dump.get("dump_score"),
-        "long_score": long.get("long_score"),
+        "short_conviction": round(short_c, 1),
+        "long_conviction": round(long_c, 1),
     }
     if levels:
         out["levels"] = levels

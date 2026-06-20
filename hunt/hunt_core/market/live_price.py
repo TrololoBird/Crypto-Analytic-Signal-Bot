@@ -1,11 +1,49 @@
 """Resolve freshest executable price for hunt snapshots and Telegram."""
 from __future__ import annotations
 
-
-
+import os
+import time
+from dataclasses import dataclass
 from typing import Any
 
 from hunt_core.market.streams import HuntCcxtStreams
+
+_DEFAULT_MAX_AGE_S = float(os.getenv("HUNT_PRICE_MAX_AGE_S", "5"))
+
+
+@dataclass(frozen=True, slots=True)
+class PriceQuote:
+    """Unified price oracle result — mark/last with source and staleness."""
+
+    price: float
+    source: str
+    stale: bool
+    age_s: float | None = None
+
+
+def resolve_price_quote(
+    symbol: str,
+    *,
+    ws_feed: HuntCcxtStreams | None = None,
+    book: dict[str, Any] | None = None,
+    ws_snap: dict[str, Any] | None = None,
+    fallback: float = 0.0,
+    max_age_s: float | None = None,
+) -> PriceQuote:
+    px, source = resolve_live_price(
+        symbol,
+        ws_feed=ws_feed,
+        book=book,
+        ws_snap=ws_snap,
+        fallback=fallback,
+        max_age_s=max_age_s,
+    )
+    stale = source in {"stale_ticker", "missing"}
+    return PriceQuote(price=px, source=source, stale=stale)
+
+
+def price_max_age_s() -> float:
+    return _DEFAULT_MAX_AGE_S
 
 
 def resolve_live_price(
@@ -15,13 +53,15 @@ def resolve_live_price(
     book: dict[str, Any] | None = None,
     ws_snap: dict[str, Any] | None = None,
     fallback: float = 0.0,
+    max_age_s: float | None = None,
 ) -> tuple[float, str]:
-    """Best-effort live price: WS ticker → mark → BBO mid → book → fallback."""
+    """Best-effort live price: fresh WS last → BBO mid → mark → book → fallback."""
     sym = str(symbol).upper()
     fb = float(fallback) if fallback and float(fallback) > 0 else 0.0
+    age_limit = _DEFAULT_MAX_AGE_S if max_age_s is None else max_age_s
 
     if ws_feed is not None:
-        lt = ws_feed.live_ticker(sym)
+        lt = ws_feed.live_ticker(sym, max_age_s=age_limit)
         if lt:
             last = float(lt.get("last") or 0)
             if last > 0:
@@ -70,6 +110,7 @@ def apply_live_price_to_row(
     *,
     ws_feed: HuntCcxtStreams | None = None,
     book: dict[str, Any] | None = None,
+    max_age_s: float | None = None,
 ) -> float:
     """Overwrite row price with live source; return resolved price."""
     sym = str(row.get("symbol") or "")
@@ -83,19 +124,31 @@ def apply_live_price_to_row(
             "ask_price": market.get("ask"),
         }
     prev = float(row.get("price") or 0)
+    age_limit = _DEFAULT_MAX_AGE_S if max_age_s is None else max_age_s
     px, source = resolve_live_price(
         sym,
         ws_feed=ws_feed,
         book=book_src,
         fallback=prev,
+        max_age_s=age_limit,
     )
     if px <= 0:
         return prev
     row["price"] = px
     row["price_source"] = source
+    row["price_stale"] = source in {"stale_ticker", "missing"}
     if prev > 0 and abs(px - prev) / prev > 0.0001:
         row["price_stale_delta_pct"] = round((px - prev) / prev * 100.0, 3)
     if isinstance(market, dict):
         market["last_price"] = px
         row["market"] = market
     return px
+
+
+__all__ = [
+    "PriceQuote",
+    "apply_live_price_to_row",
+    "price_max_age_s",
+    "resolve_live_price",
+    "resolve_price_quote",
+]

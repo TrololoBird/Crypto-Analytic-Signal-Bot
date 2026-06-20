@@ -133,54 +133,71 @@ def local_confirm_label(
     return "локальный support"
 
 
+def _setup_strength(setup: dict[str, Any], *, direction: str) -> float:
+    """0–100 strength for direction pick — P(win) first, legacy conviction fallback."""
+    from hunt_core.gate._ev import setup_conviction_pct, setup_p_win
+
+    p = setup_p_win(setup)
+    if p is not None:
+        return min(100.0, max(0.0, p * 100.0))
+    return setup_conviction_pct(setup, direction=direction)
+
+
 def resolve_trade_direction(
     row: dict[str, Any],
 ) -> tuple[str, dict[str, Any], float, list[str]]:
-    """Lifecycle bias first, then BTC corr, then fuel (BEAT long-fuel vs short-bias fix)."""
+    """Lifecycle bias first, then structure/BTC corr, then conviction (P-first)."""
     dump = row.get("dump") or {}
     long_setup = row.get("long") or {}
     lc = row.get("lifecycle") or {}
-    short_fuel = float(dump.get("dump_fuel") or 0)
-    long_fuel = float(long_setup.get("long_fuel") or 0)
+    structure = row.get("structure") if isinstance(row.get("structure"), dict) else {}
+    short_strength = _setup_strength(dump, direction="short")
+    long_strength = _setup_strength(long_setup, direction="long")
     bias = str(lc.get("recommended_bias") or "")
     phase = str(lc.get("phase") or "")
+    struct_bias = str(
+        structure.get("structure_bias") or lc.get("structure_bias") or ""
+    ).lower()
     notes: list[str] = []
 
     if bias == "short" and phase in _SHORT_BIAS_PHASES:
-        if short_fuel >= 40 or short_fuel >= long_fuel - 12:
+        if short_strength >= 40 or short_strength >= long_strength - 12:
             direction = "short"
             notes.append(f"lifecycle bias=short phase={phase}")
-        elif long_fuel >= 75 and short_fuel < 45:
+        elif long_strength >= 75 and short_strength < 45:
             direction = "long"
-            notes.append("long fuel override при weak short")
+            notes.append("long conviction override при weak short")
         else:
             direction = "short"
-            notes.append("bias short — приоритет SHORT даже при lower fuel")
+            notes.append("bias short — приоритет SHORT даже при lower conviction")
     elif bias == "long" and phase in _LONG_BIAS_PHASES:
-        if long_fuel >= 40 or long_fuel >= short_fuel - 12:
+        if long_strength >= 40 or long_strength >= short_strength - 12:
             direction = "long"
             notes.append(f"lifecycle bias=long phase={phase}")
-        elif short_fuel >= 75 and long_fuel < 45:
+        elif short_strength >= 75 and long_strength < 45:
             direction = "short"
-            notes.append("short fuel override при weak long")
+            notes.append("short conviction override при weak long")
         else:
             direction = "long"
             notes.append("bias long — приоритет LONG")
+    elif struct_bias in {"short", "long"} and bias in {"", "wait"}:
+        direction = struct_bias
+        notes.append(f"structure bias={struct_bias}")
     elif bias == "wait":
-        direction = "short" if short_fuel >= long_fuel else "long"
-        notes.append("bias=wait — monitor only, pick higher fuel")
+        direction = "short" if short_strength >= long_strength else "long"
+        notes.append("bias=wait — monitor only, pick higher conviction")
     else:
         corr_raw = (row.get("regime") or {}).get("btc_corr_1h")
         direction, notes = correlated_direction(
-            short_fuel=short_fuel,
-            long_fuel=long_fuel,
+            short_strength=short_strength,
+            long_strength=long_strength,
             btc_corr_1h=float(corr_raw) if corr_raw is not None else None,
             btc_trend=str((row.get("btc_context") or {}).get("btc_trend") or "flat"),
             symbol=str(row.get("symbol") or ""),
         )
 
     setup = dump if direction == "short" else long_setup
-    fuel = short_fuel if direction == "short" else long_fuel
+    strength = short_strength if direction == "short" else long_strength
 
     from hunt_core.deliver.dispatch import (
         display_readiness_score,
@@ -197,32 +214,32 @@ def resolve_trade_direction(
         if not long_geo and long_display >= short_display - 15:
             direction = "long"
             setup = long_setup
-            fuel = long_fuel
+            strength = long_strength
             notes.append(f"SHORT headwind ({short_geo}) — показан LONG")
         elif long_geo and long_display > short_display + 8:
             direction = "long"
             setup = long_setup
-            fuel = long_fuel
+            strength = long_strength
             notes.append(f"SHORT blocked ({short_geo}); LONG выше по display")
         else:
-            notes.append(f"⚠️ SHORT fuel высокий, но {short_geo}")
+            notes.append(f"⚠️ SHORT conviction высокий, но {short_geo}")
     elif direction == "short" and short_geo and suppress_flip:
         notes.append(f"dump_active/wait — lean SHORT ({short_geo}), без flip на LONG")
     elif direction == "long" and long_geo:
         if not short_geo and short_display >= long_display - 15:
             direction = "short"
             setup = dump
-            fuel = short_fuel
+            strength = short_strength
             notes.append(f"LONG headwind ({long_geo}) — показан SHORT")
         elif short_geo and short_display > long_display + 8:
             direction = "short"
             setup = dump
-            fuel = short_fuel
+            strength = short_strength
             notes.append(f"LONG blocked ({long_geo}); SHORT выше по display")
         else:
-            notes.append(f"⚠️ LONG fuel высокий, но {long_geo}")
+            notes.append(f"⚠️ LONG conviction высокий, но {long_geo}")
 
-    return direction, setup, fuel, notes
+    return direction, setup, strength, notes
 
 
 def probe_header(row: dict[str, Any]) -> tuple[str, str, str]:
@@ -259,8 +276,8 @@ def probe_header(row: dict[str, Any]) -> tuple[str, str, str]:
 
 def correlated_direction(
     *,
-    short_fuel: float,
-    long_fuel: float,
+    short_strength: float,
+    long_strength: float,
     btc_corr_1h: float | None,
     btc_trend: str,
     symbol: str = "",
@@ -269,7 +286,7 @@ def correlated_direction(
     from hunt_core.params.store import btc_corr_thresholds
 
     notes: list[str] = []
-    raw = "short" if short_fuel >= long_fuel else "long"
+    raw = "short" if short_strength >= long_strength else "long"
     th = btc_corr_thresholds(symbol)
     soft_min = float(th.get("corr_soft_min", BTC_CORR_SOFT))
     hard_min = float(th.get("corr_hard_min", BTC_CORR_HARD))
@@ -293,22 +310,22 @@ def correlated_direction(
     else:
         aligned = "short" if corr > 0 else "long"
 
-    aligned_fuel = short_fuel if aligned == "short" else long_fuel
-    raw_fuel = short_fuel if raw == "short" else long_fuel
-    fuel_gap = raw_fuel - aligned_fuel
+    aligned_strength = short_strength if aligned == "short" else long_strength
+    raw_strength = short_strength if raw == "short" else long_strength
+    strength_gap = raw_strength - aligned_strength
 
     tier = "hard" if abs_corr >= hard_min else "soft"
     gap_max = hard_gap if tier == "hard" else soft_gap
     notes.append(
         f"BTC {tier} · 1h {btc_trend} · corr={corr:+.2f} → приоритет {aligned.upper()}"
     )
-    if raw != aligned and fuel_gap <= gap_max:
+    if raw != aligned and strength_gap <= gap_max:
         notes.append(
-            f"fuel {raw}={raw_fuel:.0f} vs {aligned}={aligned_fuel:.0f} — BTC {tier} bias"
+            f"conv {raw}={raw_strength:.0f} vs {aligned}={aligned_strength:.0f} — BTC {tier} bias"
         )
         return aligned, notes
     if raw != aligned:
-        notes.append(f"сильный fuel {raw}={raw_fuel:.0f} перекрывает BTC {tier} bias")
+        notes.append(f"сильный conv {raw}={raw_strength:.0f} перекрывает BTC {tier} bias")
     return raw, notes
 
 
@@ -475,6 +492,31 @@ def _f_signed(value: Any) -> float | None:
         return None
 
 
+def fmt_flow_qty(value: float | None) -> str:
+    """Compact signed flow label (CVD, delta) — base units, not contract count."""
+    if value is None:
+        return "—"
+    av = abs(value)
+    if av >= 1_000_000_000:
+        return f"{value / 1_000_000_000:+.2f}B"
+    if av >= 1_000_000:
+        return f"{value / 1_000_000:+.2f}M"
+    if av >= 1_000:
+        return f"{value / 1_000:+.1f}K"
+    return f"{value:+.0f}"
+
+
+def hunt_confirmed_direction(row: dict[str, Any]) -> str | None:
+    """Closed-bar confirm from hunt detectors (authoritative for delivery)."""
+    dump = row.get("dump") or {}
+    long_setup = row.get("long") or {}
+    if bool(dump.get("confirmed")):
+        return "short"
+    if bool(long_setup.get("confirmed")):
+        return "long"
+    return None
+
+
 def _pct_dist(a: float, b: float) -> float:
     if a <= 0 or b <= 0:
         return 999.0
@@ -515,38 +557,223 @@ def _walls_above_below(
     return ask_above, bid_below, factors
 
 
-def _normalize_probs(raw: dict[str, float]) -> dict[str, float]:
+def _normalize_probs(
+    raw: dict[str, float],
+    *,
+    fallback: dict[str, float] | None = None,
+) -> dict[str, float]:
     total = sum(max(0.0, v) for v in raw.values())
     if total <= 0:
+        if fallback and sum(max(0.0, v) for v in fallback.values()) > 0:
+            return _normalize_probs(fallback)
         n = len(raw) or 1
         return {k: round(1.0 / n, 3) for k in raw}
     return {k: round(max(0.0, v) / total, 3) for k, v in raw.items()}
+
+
+def _va_position(price: float, val: float, vah: float) -> float:
+    """0 = at VAL, 1 = at VAH."""
+    span = vah - val
+    if span <= 0:
+        return 0.5
+    return max(0.0, min(1.0, (price - val) / span))
+
+
+def _in_value_area(price: float, val: float | None, vah: float | None) -> bool:
+    if val is None or vah is None or vah <= val or price <= 0:
+        return False
+    return val * 0.998 <= price <= vah * 1.002
+
+
+def _apply_va_liquidity_weights(
+    raw: dict[str, float],
+    *,
+    price: float,
+    val: float | None,
+    vah: float | None,
+    poc: float | None,
+    poc_above: bool,
+    poc_below: bool,
+) -> str | None:
+    """Spread scenario mass by where price sits inside the 1h value area."""
+    if not _in_value_area(price, val, vah) or val is None or vah is None:
+        return None
+    pos = _va_position(price, val, vah)
+    if pos >= 0.68:
+        raw["sweep_resistance_to_poc"] += 0.34
+        if poc_below:
+            raw["sweep_resistance_to_poc"] += 0.16
+            raw["breakdown_support"] += 0.10
+        if poc_above:
+            raw["breakout_resistance"] += 0.20
+    elif pos <= 0.32:
+        raw["sweep_support_to_poc"] += 0.34
+        if poc_above:
+            raw["sweep_support_to_poc"] += 0.16
+        if poc_below:
+            raw["breakdown_support"] += 0.26
+    else:
+        raw["range_poc_magnet"] += 0.38
+        if poc is not None and _pct_dist(poc, price) <= 1.0:
+            raw["range_poc_magnet"] += 0.14
+
+    if poc_below and pos >= 0.45:
+        raw["sweep_resistance_to_poc"] += 0.10 * pos
+        raw["breakdown_support"] += 0.06 * pos
+    if poc_above and pos <= 0.55:
+        raw["sweep_support_to_poc"] += 0.10 * (1.0 - pos)
+
+    return f"цена в VA ({pos * 100:.0f}% VAL→VAH)"
+
+
+def _va_fallback_probs(
+    *,
+    price: float,
+    val: float | None,
+    vah: float | None,
+    poc: float | None,
+) -> dict[str, float]:
+    """Last-resort weights when no path fired — still differentiated by VA slot."""
+    if not _in_value_area(price, val, vah) or val is None or vah is None:
+        return {
+            "range_poc_magnet": 0.45,
+            "sweep_support_to_poc": 0.20,
+            "sweep_resistance_to_poc": 0.20,
+            "breakdown_support": 0.15,
+        }
+    pos = _va_position(price, val, vah)
+    if pos >= 0.68:
+        return {
+            "sweep_resistance_to_poc": 0.42,
+            "breakout_resistance": 0.22,
+            "breakdown_support": 0.18,
+            "range_poc_magnet": 0.18,
+        }
+    if pos <= 0.32:
+        return {
+            "sweep_support_to_poc": 0.42,
+            "breakdown_support": 0.22,
+            "range_poc_magnet": 0.20,
+            "sweep_resistance_to_poc": 0.16,
+        }
+    return {
+        "range_poc_magnet": 0.40,
+        "sweep_support_to_poc": 0.22,
+        "sweep_resistance_to_poc": 0.22,
+        "breakdown_support": 0.16,
+    }
+
+
+def _resolve_maps_vp(row: dict[str, Any]) -> tuple[float | None, float | None, float | None]:
+    """POC/VAH/VAL — maps VP first, then market scalars, cross, regime."""
+    maps = row.get("maps") or {}
+    market = row.get("market") or {}
+    cx = row.get("cross_microstructure") or {}
+    regime = row.get("regime") or {}
+    poc = vah = val = None
+    vp_map = maps.get("volume_profile") if isinstance(maps, dict) else None
+    if isinstance(vp_map, dict):
+        poc = _f(vp_map.get("poc")) or _f(vp_map.get("primary_poc"))
+        profiles = vp_map.get("profiles") or []
+        prof_1h = next(
+            (p for p in profiles if isinstance(p, dict) and p.get("period") == "1h"),
+            None,
+        )
+        if prof_1h:
+            poc = _f(prof_1h.get("poc")) or poc
+            vah = _f(prof_1h.get("vah"))
+            val = _f(prof_1h.get("val"))
+    if isinstance(market, dict):
+        poc = poc or _f(market.get("map_vp_poc"))
+        vah = vah or _f(market.get("map_vp_vah"))
+        val = val or _f(market.get("map_vp_val"))
+    vp1h = cx.get("volume_profile_1h") or {}
+    poc = poc or _f(vp1h.get("poc")) or _f(regime.get("poc_1h"))
+    vah = vah or _f(vp1h.get("vah")) or _f(regime.get("vah_1h"))
+    val = val or _f(vp1h.get("val")) or _f(regime.get("val_1h"))
+    return poc, vah, val
+
+
+def _resolve_liquidity_sr(row: dict[str, Any]) -> tuple[float | None, float | None]:
+    """Support/resistance for liquidity paths — avoid collapsed same-level bug."""
+    price = _f(row.get("price")) or 0.0
+    dump = row.get("dump") or {}
+    long_setup = row.get("long") or {}
+    lifecycle = row.get("lifecycle") or {}
+    tf = row.get("timeframes") or {}
+
+    support = _f(dump.get("support_break_level")) or _f(lifecycle.get("local_support"))
+    resistance = _f(long_setup.get("resistance_break_level")) or _f(
+        lifecycle.get("local_resistance")
+    )
+    for key in ("1h", "15m", "5m"):
+        snap = tf.get(key) or {}
+        if support is None:
+            support = _f(snap.get("donchian_low20") or snap.get("support"))
+        if resistance is None:
+            resistance = _f(snap.get("donchian_high20") or snap.get("resistance"))
+
+    _, val, vah = _resolve_maps_vp(row)
+    sess = row.get("session") or {}
+    lo24 = _f(sess.get("low_24h"))
+    hi24 = _f(sess.get("high_24h"))
+
+    collapsed = (
+        support is not None
+        and resistance is not None
+        and (support == resistance or _pct_dist(support, resistance) < 0.08)
+    )
+    if collapsed:
+        if val and vah and vah > val * 1.001:
+            support, resistance = val, vah
+        elif lo24 and hi24 and hi24 > lo24 * 1.001:
+            support, resistance = lo24, hi24
+        elif val and price > 0 and val < price:
+            support = val
+        elif vah and price > 0 and vah > price:
+            resistance = vah
+
+    if support and resistance and support > resistance:
+        support, resistance = resistance, support
+    return support, resistance
 
 
 def build_liquidity_scenarios(row: dict[str, Any]) -> LiquidityScenarioPack:
     """Rank path scenarios from row snapshot (no extra REST)."""
     price = _f(row.get("price")) or 0.0
     regime = row.get("regime") or {}
-    lifecycle = row.get("lifecycle") or {}
     dump = row.get("dump") or {}
     long_setup = row.get("long") or {}
     cx = row.get("cross_microstructure") or {}
 
-    vp1h = cx.get("volume_profile_1h") or {}
-    poc = _f(vp1h.get("poc")) or _f(regime.get("poc_1h"))
-    vah = _f(vp1h.get("vah")) or _f(regime.get("vah_1h"))
-    val = _f(vp1h.get("val")) or _f(regime.get("val_1h"))
+    poc, vah, val = _resolve_maps_vp(row)
 
-    support = _f(dump.get("support_break_level")) or _f(lifecycle.get("local_support"))
-    resistance = _f(long_setup.get("resistance_break_level")) or _f(
-        lifecycle.get("local_resistance")
-    )
+    support, resistance = _resolve_liquidity_sr(row)
 
-    walls = cx.get("book_walls") or row.get("book_walls") or {}
+    walls = row.get("book_walls") or cx.get("book_walls") or {}
     ask_above, bid_below, wall_factors = _walls_above_below(walls, price)
 
-    near_support = support is not None and _pct_dist(support, price) <= 0.45
-    near_resistance = resistance is not None and _pct_dist(resistance, price) <= 0.45
+    sr_same = (
+        support is not None
+        and resistance is not None
+        and _pct_dist(support, resistance) < 0.08
+    )
+    in_va = _in_value_area(price, val, vah)
+    if in_va and val is not None and vah is not None:
+        va_pos = _va_position(price, val, vah)
+        near_support = not sr_same and va_pos <= 0.30
+        near_resistance = not sr_same and va_pos >= 0.70
+    else:
+        near_support = (
+            support is not None
+            and not sr_same
+            and _pct_dist(support, price) <= 1.2
+        )
+        near_resistance = (
+            resistance is not None
+            and not sr_same
+            and _pct_dist(resistance, price) <= 1.2
+        )
     poc_above = poc is not None and poc > price * 1.002
     poc_below = poc is not None and poc < price * 0.998
 
@@ -594,6 +821,29 @@ def build_liquidity_scenarios(row: dict[str, Any]) -> LiquidityScenarioPack:
         if bid_below > ask_above:
             raw["sweep_resistance_to_poc"] += 0.12
 
+    market = row.get("market") or {}
+    if isinstance(market, dict):
+        cascade = market.get("liq_cascade_risk")
+        if cascade == "short_squeeze":
+            raw["breakout_resistance"] += 0.10 * float(market.get("liq_forward_confidence") or 1.0)
+        if cascade == "long_flush":
+            raw["breakdown_support"] += 0.10 * float(market.get("liq_forward_confidence") or 1.0)
+        sticky = market.get("map_sticky_wall_count")
+        if sticky is not None and int(sticky) >= 2:
+            raw["range_poc_magnet"] += 0.08
+        naked = market.get("map_naked_poc_1h")
+        if naked is not None and poc is not None:
+            try:
+                if abs(float(naked) - price) / price * 100.0 <= 1.5:
+                    raw["range_poc_magnet"] += 0.12
+            except (TypeError, ValueError):
+                pass
+        stacked = market.get("map_stacked_imbalance")
+        if stacked == "buy_stack":
+            raw["sweep_support_to_poc"] += 0.08
+        elif stacked == "sell_stack":
+            raw["sweep_resistance_to_poc"] += 0.08
+
     if near_resistance and poc_above:
         raw["breakout_resistance"] += 0.28
         if ask_above < bid_below:
@@ -611,7 +861,30 @@ def build_liquidity_scenarios(row: dict[str, Any]) -> LiquidityScenarioPack:
     elif dom == "long":
         raw["continuation_htf"] += 0.22
 
-    probs = _normalize_probs(raw)
+    va_hint = _apply_va_liquidity_weights(
+        raw,
+        price=price,
+        val=val,
+        vah=vah,
+        poc=poc,
+        poc_above=poc_above,
+        poc_below=poc_below,
+    )
+
+    conf = hunt_confirmed_direction(row)
+    if conf == "short":
+        raw["sweep_resistance_to_poc"] += 0.08
+        raw["breakdown_support"] += 0.06
+    elif conf == "long":
+        raw["sweep_support_to_poc"] += 0.08
+        raw["breakout_resistance"] += 0.06
+
+    fallback = _va_fallback_probs(price=price, val=val, vah=vah, poc=poc)
+    merged = {**{k: 0.0 for k in raw}, **{k: raw.get(k, 0.0) for k in raw}}
+    for k, v in fallback.items():
+        if merged.get(k, 0.0) <= 0.0 and v > 0.0:
+            merged[k] = v
+    probs = _normalize_probs(merged)
 
     scenarios: list[LiquidityScenario] = []
 
@@ -719,6 +992,8 @@ def build_liquidity_scenarios(row: dict[str, Any]) -> LiquidityScenarioPack:
 
     dom_sc = scenarios[0]
     ctx_parts: list[str] = []
+    if va_hint:
+        ctx_parts.append(va_hint)
     if support:
         ctx_parts.append(f"support {_fmt(support)}")
     if poc:
@@ -754,12 +1029,41 @@ def apply_liquidity_to_mtf_scores(
     long_score: float,
     short_score: float,
     pack: LiquidityScenarioPack | None,
+    *,
+    market: dict[str, Any] | None = None,
 ) -> tuple[float, float, list[str]]:
-    """Adjust MTF scenario scores using dominant liquidity path."""
-    if pack is None or not pack.scenarios:
-        return long_score, short_score, []
+    """Adjust MTF scenario scores using dominant liquidity path + map features."""
     notes: list[str] = []
-    boost = min(0.18, pack.dominant_probability * 0.25)
+    map_boost = 0.0
+    if isinstance(market, dict):
+        fwd_w = float(market.get("liq_forward_weight") or 0.0)
+        cascade = market.get("liq_cascade_risk")
+        stacked = market.get("map_stacked_imbalance")
+        cvd_div = market.get("map_cvd_divergence")
+        if cascade == "long_flush":
+            map_boost += 0.06 * max(fwd_w, 0.35)
+            notes.append("map: long-flush cascade")
+        elif cascade == "short_squeeze":
+            map_boost += 0.06 * max(fwd_w, 0.35)
+            notes.append("map: short-squeeze cascade")
+        if stacked == "sell_stack":
+            map_boost += 0.04
+        elif stacked == "buy_stack":
+            map_boost -= 0.02
+        if cvd_div == "bearish_div":
+            map_boost += 0.03
+        elif cvd_div == "bullish_div":
+            map_boost -= 0.03
+        sticky_n = market.get("map_sticky_wall_count")
+        if sticky_n is not None and int(sticky_n) >= 2:
+            map_boost += 0.02
+
+    if pack is None or not pack.scenarios:
+        if map_boost:
+            short_score = min(1.0, short_score + map_boost)
+            long_score = max(0.0, long_score - map_boost * 0.35)
+        return long_score, short_score, notes
+    boost = min(0.18, pack.dominant_probability * 0.25) + min(0.08, map_boost)
     top = pack.scenarios[0]
     if top.direction == "long":
         long_score = min(1.0, long_score + boost)
@@ -794,10 +1098,18 @@ def format_liquidity_scenarios_telegram(pack: LiquidityScenarioPack | dict[str, 
                 lines.append(f"  <i>{path}</i>")
         return "\n".join(lines) if len(lines) > 1 else ""
 
-    lines = ["🧲 <b>Сценарии ликвидности</b>", f"<i>{pack.context_ru}</i>"]
-    for sc in pack.scenarios[:3]:
+    ctx = pack.context_ru
+    if pack.support and pack.resistance and _pct_dist(pack.support, pack.resistance) < 0.08:
+        parts = [p for p in (f"POC {_fmt(pack.poc)}" if pack.poc else None, f"цена {_fmt(pack.price)}") if p]
+        ctx = " · ".join(parts) if parts else "уровни S/R совпали — контекст по POC"
+    lines = ["🧲 <b>Сценарии ликвидности</b>", f"<i>{ctx}</i>"]
+    shown = pack.scenarios[:3]
+    for sc in shown:
         lines.append(f"• <b>{sc.label_ru}</b> — {sc.probability * 100:.0f}%")
         lines.append(f"  <i>{sc.path_ru}</i>")
+    if len(shown) > 1:
+        tail = sum(sc.probability for sc in shown)
+        lines.append(f"<i>Σ top-{len(shown)} ≈ {tail * 100:.0f}% (остальное — другие пути)</i>")
     return "\n".join(lines)
 
 
@@ -846,28 +1158,53 @@ def _cvd_from_tf(row: dict[str, Any]) -> tuple[float | None, float | None]:
     tf = row.get("timeframes") or {}
     for key in ("1h", "15m", "5m"):
         snap = tf.get(key) or {}
-        cur = _f_signed(snap.get("session_cvd") or snap.get("rolling_cvd_24h"))
-        prev = _f_signed(snap.get("session_cvd_prev") or snap.get("cvd_prev"))
-        if cur is not None:
-            return cur, prev
+        closed = tf.get(f"{key}_closed") or {}
+        for block in (closed, snap):
+            if not isinstance(block, dict):
+                continue
+            cur = _f_signed(block.get("session_cvd") or block.get("rolling_cvd_24h"))
+            prev = _f_signed(block.get("session_cvd_prev") or block.get("cvd_prev"))
+            if cur is not None:
+                return cur, prev
+    return None, None
+
+
+def _cvd_from_row(row: dict[str, Any]) -> tuple[float | None, float | None]:
+    """Session CVD from TF blocks; kline taker-buy delta when WS/session CVD absent."""
+    cur, prev = _cvd_from_tf(row)
+    if cur is not None:
+        return cur, prev
+    from hunt_core.gate._delivery_helpers import kline_bar_flow, resolve_flow_cvd_px
+
+    tf = row.get("timeframes") or {}
+    market = row.get("market") or {}
+    for interval in ("15m", "5m", "1m"):
+        delta, _px = kline_bar_flow(tf, interval)
+        if delta is not None:
+            return delta, 0.0
+        flow_delta, _flow_px, _src = resolve_flow_cvd_px(market, tf, interval=interval)
+        if flow_delta is not None:
+            return flow_delta, 0.0
     return None, None
 
 
 def _infer_cvd_trend(cur: float | None, prev: float | None) -> tuple[TrendDir, str]:
     if cur is None:
         return "flat", "CVD недоступен"
+    cur_s = fmt_flow_qty(cur)
     if prev is None:
         if cur > 0:
-            return "bull", f"CVD положительный ({cur:+.0f})"
+            return "bull", f"CVD положительный ({cur_s})"
         if cur < 0:
-            return "bear", f"CVD отрицательный ({cur:+.0f})"
+            return "bear", f"CVD отрицательный ({cur_s})"
         return "flat", "CVD ≈ 0"
     delta = cur - prev
+    delta_s = fmt_flow_qty(delta)
     if delta > abs(cur) * 0.02 or delta > 500:
-        return "bull", f"CVD растёт ({cur:+.0f}, Δ{delta:+.0f})"
+        return "bull", f"CVD растёт ({cur_s}, Δ{delta_s})"
     if delta < -abs(cur) * 0.02 or delta < -500:
-        return "bear", f"CVD падает ({cur:+.0f}, Δ{delta:+.0f})"
-    return "flat", f"CVD боковой ({cur:+.0f})"
+        return "bear", f"CVD падает ({cur_s}, Δ{delta_s})"
+    return "flat", f"CVD боковой ({cur_s})"
 
 
 def _infer_absorption(
@@ -878,10 +1215,12 @@ def _infer_absorption(
 ) -> tuple[AbsorptionKind, str]:
     if depth_imb is None or delta_30s is None:
         return "none", ""
-    # Bid-heavy book + positive delta but price stalling → bid absorption (bullish)
-    if depth_imb >= 0.12 and delta_30s > 0 and (taker_5m or 0) < 0.52:
+    # delta_30s is the agg_trade buy-share in [0,1] (0.5 balanced), not a signed delta;
+    # taker_5m is a buy/sell ratio (1.0 balanced). Bid-heavy book + buy-leaning tape but
+    # taker not net-buying → bid absorption (bullish).
+    if depth_imb >= 0.12 and delta_30s > 0.5 and (taker_5m or 1.0) < 1.0:
         return "bid_absorption", "Поглощение на bid — продавцы не давят цену вниз"
-    if depth_imb <= -0.12 and delta_30s < 0 and (taker_5m or 1) > 0.48:
+    if depth_imb <= -0.12 and delta_30s < 0.5 and (taker_5m or 1.0) > 1.0:
         return "ask_absorption", "Поглощение на ask — покупатели не поднимают цену"
     return "none", ""
 
@@ -892,21 +1231,25 @@ def _infer_aggressor(
     delta_30s: float | None,
     delta_60s: float | None,
 ) -> tuple[str, str]:
+    # taker_5m is a buy/sell *ratio* (1.0 = balanced, >1 buyers, <1 sellers), not a
+    # [0,1] fraction — the old 0.58/0.42 thresholds labeled a 0.63 ratio (net sellers)
+    # as "buyers" (MLIVE-2). Use a symmetric band around 1.0.
     if taker_5m is not None:
-        if taker_5m >= 0.58:
+        if taker_5m >= 1.05:
             return "buyers", f"Агрессор: покупатели (taker {taker_5m:.2f})"
-        if taker_5m <= 0.42:
+        if taker_5m <= 0.95:
             return "sellers", f"Агрессор: продавцы (taker {taker_5m:.2f})"
+    # agg_trade_delta_* is a buy-share in [0,1] (0.5 balanced), not a signed delta.
     if delta_60s is not None:
-        if delta_60s > 0:
-            return "buyers", f"Δ60s buy-heavy ({delta_60s:+.0f})"
-        if delta_60s < 0:
-            return "sellers", f"Δ60s sell-heavy ({delta_60s:+.0f})"
+        if delta_60s > 0.5:
+            return "buyers", f"Δ60s buy-heavy ({delta_60s * 100:.0f}% buy)"
+        if delta_60s < 0.5:
+            return "sellers", f"Δ60s sell-heavy ({delta_60s * 100:.0f}% buy)"
     if delta_30s is not None:
-        if delta_30s > 0:
-            return "buyers", f"Δ30s buy ({delta_30s:+.0f})"
-        if delta_30s < 0:
-            return "sellers", f"Δ30s sell ({delta_30s:+.0f})"
+        if delta_30s > 0.5:
+            return "buyers", f"Δ30s buy ({delta_30s * 100:.0f}% buy)"
+        if delta_30s < 0.5:
+            return "sellers", f"Δ30s sell ({delta_30s * 100:.0f}% buy)"
     return "balanced", "Агрессор сбалансирован"
 
 
@@ -918,7 +1261,7 @@ def synthesize_order_flow(row: dict[str, Any]) -> OrderFlowSynthesis:
     taker_5m = _f(market.get("taker_5m"))
     depth_imb = _f_signed(market.get("depth_imbalance"))
 
-    cur, prev = _cvd_from_tf(row)
+    cur, prev = _cvd_from_row(row)
     cvd_trend, cvd_note = _infer_cvd_trend(cur, prev)
     absorption, abs_note = _infer_absorption(
         depth_imb=depth_imb, delta_30s=delta_30s, taker_5m=taker_5m
@@ -928,6 +1271,10 @@ def synthesize_order_flow(row: dict[str, Any]) -> OrderFlowSynthesis:
     )
 
     parts = [p for p in (cvd_note, abs_note, aggr_note) if p]
+    if cvd_trend == "bear" and aggressor == "buyers":
+        parts.append("⚠ CVD↓ vs taker buy — возможен краткий отскок")
+    elif cvd_trend == "bull" and aggressor == "sellers":
+        parts.append("⚠ CVD↑ vs taker sell — возможен flush")
     summary = " · ".join(parts) if parts else "Order flow нейтральный"
 
     return OrderFlowSynthesis(

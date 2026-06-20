@@ -149,7 +149,12 @@ def require_mark_price(
     *,
     field: str = "price",
 ) -> float:
-    for candidate in (price, (market or {}).get("last_price")):
+    mkt = market or {}
+    for mark_key in ("mark_price", "markPrice", "live_mark_price"):
+        val = optional_finite_float(mkt.get(mark_key))
+        if val is not None and val > 0:
+            return val
+    for candidate in (price, mkt.get("last_price")):
         val = optional_finite_float(candidate)
         if val is not None and val > 0:
             return val

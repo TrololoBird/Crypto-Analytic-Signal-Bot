@@ -209,7 +209,11 @@ class DigestScheduler:
     """
 
     def __init__(self) -> None:
-        self._last_emit: dict[float, float] = {}
+        mono = time.monotonic()
+        # Avoid 1h+3h+6h burst when host uptime already exceeds digest intervals.
+        self._last_emit: dict[float, float] = {
+            interval: mono for interval in _digest_intervals_s()
+        }
         self._emit_log: list[float] = []
 
     def _due_interval(self, now: float) -> float | None:
@@ -265,8 +269,10 @@ class DigestScheduler:
             if not items:
                 lines.append("   —")
                 return
+            from hunt_core.deliver._labels import format_symbol_telegram
+
             for idx, c in enumerate(items, 1):
-                sym = html.escape(c.symbol.replace("USDT", "-USDT"))
+                sym = format_symbol_telegram(c.symbol)
                 lines.append(
                     f"{idx}. <b>{sym}</b> · score {c.score:.0f} · "
                     f"24h {c.change_24h_pct:+.1f}%"
@@ -307,6 +313,10 @@ class DigestScheduler:
         result = await broadcaster.send_html(msg)
         if getattr(result, "status", "") == "sent":
             self._last_emit[interval] = mono
+            # Shorter cadences share the same emission — no 3h/1h follow-up bursts.
+            for iv in _digest_intervals_s():
+                if iv <= interval:
+                    self._last_emit[iv] = mono
             self._emit_log.append(mono)
             return True
         return False

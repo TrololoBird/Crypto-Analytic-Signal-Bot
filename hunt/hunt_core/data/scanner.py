@@ -350,12 +350,24 @@ class PrescanDebounceQueue:
 from dataclasses import dataclass
 from typing import Literal
 
-from hunt_core.scan.early import (
-    AdaptiveStore,
-    adaptive_extreme_pct,
-    adaptive_hot_pct,
-    change_24h_tier,
-)
+# Legacy adaptive ignition store removed; universe scoring uses static thresholds.
+AdaptiveStore = dict
+
+
+def adaptive_hot_pct(_store, _symbol) -> float:
+    return HUNT_RANGE_HOT_PCT
+
+
+def adaptive_extreme_pct(_store, _symbol) -> float:
+    return HUNT_PUMP_EXTREME_PCT
+
+
+def change_24h_tier(_store, _symbol, change_24h: float):
+    chg = abs(float(change_24h or 0))
+    tier = "extreme" if chg >= 15.0 else "hot" if chg >= 8.0 else "normal"
+    return tier, 0.0, "static"
+
+
 from hunt_core.track.pump_history import score_bonus
 
 import contextlib
@@ -367,11 +379,11 @@ import structlog
 
 from hunt_core.domain.config import load_settings
 from hunt_core.market import HuntCcxtClient
-from hunt_core.scan.early import (
-    load_adaptive_store,
-    save_adaptive_store,
-    update_change_24h,
-)
+def load_adaptive_store(*_a, **_k) -> dict: return {}
+def save_adaptive_store(*_a, **_k) -> None: return None
+def update_change_24h(*_a, **_k) -> None: return None
+
+
 from hunt_core.paths import WATCHLIST
 from hunt_core.track.pump_history import (
     _has_recent_leg,
@@ -391,6 +403,38 @@ HUNT_POS_NEAR_HIGH = 0.85
 HUNT_POS_NEAR_LOW = 0.25
 HUNT_SCORE_WATCH_THRESHOLD = 45.0
 HUNT_SCORE_PRIORITY_THRESHOLD = 60.0
+
+
+def legacy_scanner_thresholds_enabled() -> bool:
+    """When false (default), watchlist uses rank budget not absolute score cuts."""
+    import os
+
+    return os.getenv("HUNT_LEGACY_SCANNER", "0").strip().lower() in {"1", "true", "yes"}
+
+
+def _percentile_rank(values: list[float], value: float) -> float:
+    if not values:
+        return 0.0
+    below = sum(1 for v in values if v < value)
+    return below / len(values)
+
+
+def enrich_candidates_with_percentile_ranks(candidates: list["HuntCandidate"]) -> list["HuntCandidate"]:
+    """Attach cross-section percentile metadata for rank-budget scanner."""
+    if not candidates:
+        return candidates
+    from dataclasses import replace
+
+    changes = [abs(c.change_24h_pct) for c in candidates]
+    out: list[HuntCandidate] = []
+    for c in candidates:
+        pct = _percentile_rank(changes, abs(c.change_24h_pct))
+        flags = list(c.flags)
+        reasons = list(c.reasons) + [f"move_pctile={pct:.2f}"]
+        if pct >= 0.9:
+            flags.append("top_decile_move")
+        out.append(replace(c, flags=tuple(flags), reasons=tuple(reasons)))
+    return out
 
 # P1.18 — 60d volume-baseline z-score overlay thresholds.
 VOL_BASELINE_DAYS = 60
@@ -713,8 +757,9 @@ async def run_scan(
         adaptive_store = load_adaptive_store()
         stats_map = {sym: st.to_public() for sym, st in pump_store.symbols.items()}
         candidates = rank_hunt_candidates(
-            gated_tickers, limit=limit, pump_stats_by_sym=stats_map, adaptive=adaptive_store
+            gated_tickers, limit=max(limit, 30), pump_stats_by_sym=stats_map, adaptive=adaptive_store
         )
+        candidates = enrich_candidates_with_percentile_ranks(candidates)
         hot = funnel_hot_candidates(candidates)
         for row in tickers:
             sym = str(row.get("symbol") or "").strip().upper()
@@ -741,13 +786,21 @@ async def run_scan(
                     now=now,
                 )
         save_pump_history(pump_store)
-        watch = [
-            c
-            for c in candidates
-            if c.hunt_score >= min_score
-            or ("dump_in_progress" in c.flags and c.hunt_score >= 32.0)
-        ]
-        priority = [c for c in candidates if c.hunt_score >= HUNT_SCORE_PRIORITY_THRESHOLD]
+        if legacy_scanner_thresholds_enabled():
+            watch = [
+                c
+                for c in candidates
+                if c.hunt_score >= min_score
+                or ("dump_in_progress" in c.flags and c.hunt_score >= 32.0)
+            ]
+            priority = [c for c in candidates if c.hunt_score >= HUNT_SCORE_PRIORITY_THRESHOLD]
+        else:
+            watch = list(candidates[:limit])
+            priority = [
+                c
+                for c in candidates
+                if "top_decile_move" in c.flags or c.hunt_score >= candidates[0].hunt_score * 0.85
+            ][: max(5, limit // 3)] if candidates else []
         from hunt_core.data.universe import PINNED_SYMBOLS
 
         pinned = {str(s).upper() for s in PINNED_SYMBOLS}
