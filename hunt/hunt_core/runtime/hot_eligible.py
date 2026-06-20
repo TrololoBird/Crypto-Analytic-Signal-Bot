@@ -31,7 +31,7 @@ def filter_kline_hot_symbols(
     min_conviction: float = 40.0,
 ) -> tuple[str, ...]:
     """Return symbols worth a hot tick on 1m close (skip cold universe tail)."""
-    from hunt_core.gate._ev import setup_conviction_pct
+    from hunt_core.detect.setup_fields import setup_conviction_pct
 
     ignited = set((ignition_by_sym or {}).keys())
     out: list[str] = []

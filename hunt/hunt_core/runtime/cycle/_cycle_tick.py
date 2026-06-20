@@ -405,24 +405,9 @@ async def run_tick(
                         )
                     attach_cross_fields(row, cx)
                 if symbol in PINNED_SYMBOLS and not row.get("error"):
+                    # Pinned deep analysis is on-demand via detect/deep (/signal); the
+                    # watch tick only caches the row.
                     try:
-                        from hunt_core.analysis.pinned_deep import build_pinned_verdict
-                        from hunt_core.analysis.pinned_deep import (
-                            build_pinned_indicator_panel,
-                            mtf_to_dict,
-                            panel_to_dict,
-                        )
-                        from hunt_core.analysis.deep_signal import build_poc_level_scenarios
-
-                        tf_pin = row.get("timeframes") or {}
-                        px = float(row.get("price") or 0)
-                        if px > 0:
-                            panel = build_pinned_indicator_panel(symbol, tf_pin)
-                            row["indicator_panel"] = panel
-                            row["indicator_panel_summary"] = panel_to_dict(panel)
-                            build_poc_level_scenarios(row)
-                            row["pinned_verdict"] = build_pinned_verdict(row)
-                            row["mtf_summary"] = mtf_to_dict(row.get("mtf"))
                         save_pinned_cache(symbol, row)
                     except Exception as exc:
                         LOG.warning("pinned_cache_save_failed", symbol=symbol, error=repr(exc))
@@ -452,7 +437,7 @@ async def run_tick(
                 dump = row.get("dump") or {}
                 long_setup = row.get("long") or {}
                 from hunt_core.data.frame_cache import get_frame_cache
-                from hunt_core.gate._ev import setup_conviction_pct
+                from hunt_core.detect.setup_fields import setup_conviction_pct
 
                 lifecycle_raw = row.get("lifecycle") or (dump.get("lifecycle") if dump else None)
                 get_frame_cache().mark_priority(
@@ -706,7 +691,7 @@ async def run_tick(
                     ndir = str(pend.get("direction") or "short")
                     nsetup = dump if ndir == "short" else long_setup
                     lc_dict = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
-                    from hunt_core.gate._ev import setup_conviction_pct, setup_meets_strength
+                    from hunt_core.detect.setup_fields import setup_conviction_pct, setup_meets_strength
 
                     nconviction = setup_conviction_pct(nsetup or {}, direction=ndir)
                     nphase = str((nsetup or {}).get("phase") or "")
@@ -970,14 +955,14 @@ async def run_tick(
                             lifecycle_raw=lifecycle_raw,
                             now=now,
                         )
-                        from hunt_core.gate._ev import ev_primary_delivery_qualified
+                        from hunt_core.detect.setup_fields import ev_primary_delivery_qualified
 
                         _ev_primary_live = ev_primary_delivery_qualified(
                             setup,
                             direction=direction,
                             symbol=symbol,
                         )
-                        from hunt_core.gate._mission import mission_delivery_block
+                        from hunt_core.detect.delivery_support import mission_delivery_block
 
                         _lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
                         _lc_phase = str(_lc.get("phase") or "")
@@ -1099,7 +1084,7 @@ async def run_tick(
                                         max=HUNT_SNIPER_TOP_LS_MAX,
                                     )
                                     continue
-                        from hunt_core.detect.legacy_compat import prepare_anticipation_delivery
+                        from hunt_core.detect.probe import prepare_anticipation_delivery
 
                         prepare_anticipation_delivery(
                             row,
@@ -1337,7 +1322,7 @@ async def run_tick(
                             row=row,
                             sniper_config=SNIPER_CONFIG,
                         ).ok:
-                            from hunt_core.gate._ev import setup_conviction_pct, setup_meets_strength
+                            from hunt_core.detect.setup_fields import setup_conviction_pct, setup_meets_strength
 
                             lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
                             conviction = setup_conviction_pct(setup, direction=direction)

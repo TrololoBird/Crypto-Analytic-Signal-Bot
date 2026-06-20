@@ -266,7 +266,7 @@ def format_signal_brief_telegram(
     delivery_tier: Any = None,
 ) -> str:
     """User /signal reply: primary scenario + optional collapsed alternate."""
-    from hunt_core.detect.probe_compat import probe_header, resolve_trade_direction
+    from hunt_core.detect.probe import probe_header, resolve_trade_direction
 
     sym = format_symbol_telegram(str(row.get("symbol", "?")))
     price = float(row.get("price") or 0)

@@ -30,7 +30,7 @@ def run_setup_catalog(*_a, **_k) -> list: return []
 
 from hunt_core.data.universe import load_watchlist_symbols
 from hunt_core.track.candidates import load_setup_candidates_state
-from hunt_core.gate.delivery import (
+from hunt_core.detect.delivery_support import (
     collect_report_blockers,
     evaluate_alert_gate,
     evaluate_stale_advice,

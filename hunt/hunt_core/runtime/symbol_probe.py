@@ -23,8 +23,8 @@ from hunt_core.features.prepare import _prepare_frame, min_required_bars
 from hunt_core.market import HuntCcxtClient
 from hunt_core.deliver.telegram import TelegramBroadcaster
 
-from hunt_core.gate.delivery import evaluate_alert_gate, evaluate_formation
-from hunt_core.detect.probe_compat import (
+from hunt_core.detect.delivery_support import evaluate_alert_gate, evaluate_formation
+from hunt_core.detect.probe import (
     btc_market_context,
     forming_confirm_gaps,
     probe_header,
@@ -97,10 +97,6 @@ def format_signal_probe_telegram(
     (liquidity scenarios, volume profile, regime) so the two are not concatenated
     with duplicates.
     """
-    from hunt_core.analysis.deep_signal import (
-        build_liquidity_scenarios,
-        format_liquidity_scenarios_telegram,
-    )
     from hunt_core.deliver.dispatch import (
         readiness_short_for_setup,
     )
@@ -231,25 +227,6 @@ def format_signal_probe_telegram(
             )
         form = evaluate_formation(setup, direction=direction, symbol=str(row.get("symbol") or ""), lifecycle=lc)
         lines.append(f"Формирование: <i>{html.escape(form.message)}</i>")
-    # Liquidity scenarios — deep pinned header renders liquidity + POC taxonomy;
-    # memecoin pump/dump scan skips POC block (see poc_level_scenarios).
-    if not compact:
-        if row.get("_deep_analysis"):
-            from hunt_core.analysis.deep_signal import (
-                build_poc_level_scenarios,
-                format_poc_level_scenarios_telegram,
-            )
-
-            poc_pack = row.get("poc_level_scenarios") or build_poc_level_scenarios(row)
-            poc_block = format_poc_level_scenarios_telegram(poc_pack)
-            if poc_block:
-                lines.extend(["", poc_block])
-        elif not row.get("_pinned_reference"):
-            if not row.get("liquidity_scenarios"):
-                row["liquidity_scenarios"] = build_liquidity_scenarios(row)
-            liq_block = format_liquidity_scenarios_telegram(row["liquidity_scenarios"])
-            if liq_block:
-                lines.extend(["", liq_block])
     if bool(setup.get("confirmed")):
         gate = evaluate_alert_gate(
             setup,
@@ -434,13 +411,11 @@ async def probe_symbol_signal(
         if not catalog_probe:
             # MTF confluence (pinned + any explicit /signal symbol with frames)
             try:
-                from hunt_core.analysis.deep_signal import build_liquidity_scenarios
                 from hunt_core.confluence.mtf import build_mtf_confluence
 
                 tf = row.get("timeframes") or {}
                 price = float(row.get("price") or 0)
                 if tf and price > 0:
-                    row["liquidity_scenarios"] = build_liquidity_scenarios(row)
                     row["mtf"] = build_mtf_confluence(
                         sym, tf, price, market=row.get("market"), row=row
                     )
@@ -600,7 +575,6 @@ async def probe_pinned_deep(
     """Extended REST + full prepare + microstructure for pinned anchors."""
     import os
 
-    from hunt_core.analysis.pinned_deep import build_pinned_verdict
     from hunt_core.features.microstructure import build_microstructure_context
     from hunt_core.data.universe import cache_is_fresh, load_pinned_cache
     from hunt_core.runtime.query_service import STORE_STALE_S, row_age_seconds
@@ -629,11 +603,6 @@ async def probe_pinned_deep(
             return row
         market = dict(row.get("market") or {})
         market["symbol"] = sym
-        from hunt_core.analysis.pinned_deep import build_pinned_indicator_panel
-
-        tf = row.get("timeframes") or {}
-        if tf and not row.get("indicator_panel"):
-            row["indicator_panel"] = build_pinned_indicator_panel(sym, tf)
         ms_by_dir: dict[str, Any] = {}
         for direction in ("long", "short"):
             try:
@@ -648,7 +617,6 @@ async def probe_pinned_deep(
             row["microstructure_by_direction"] = ms_by_dir
             pick = resolve_trade_direction(row)[0]
             row["microstructure"] = ms_by_dir.get(pick) or ms_by_dir.get("long")
-        row["pinned_verdict"] = build_pinned_verdict(row)
         row["_deep_analysis"] = True
         price = float(row.get("price") or 0)
         if tf and price > 0 and row.get("mtf") is None:
@@ -692,13 +660,6 @@ async def probe_deep_only(
             client=client,
         )
         row["_deep_analysis"] = True
-    if row.get("error"):
-        return row
-    from hunt_core.analysis.deep.build import build_deep_report
-
-    deep = build_deep_report(row, include_watch_appendix=False)
-    row["_deep_verdicts"] = deep.verdicts
-    row["pinned_verdict"] = deep.pinned_verdict or row.get("pinned_verdict")
     return row
 
 

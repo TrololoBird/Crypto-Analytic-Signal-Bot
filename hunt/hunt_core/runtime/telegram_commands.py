@@ -154,26 +154,13 @@ class HuntTelegramCommands:
                     )
                     return
                 from hunt_core.analysis.confluence_grid import build_confluence_grid, format_grid_telegram
-                from hunt_core.analysis.deep_signal import (
-                    format_order_flow_block,
-                    synthesize_order_flow,
-                )
-                from hunt_core.analysis.pinned_deep import (
-                    build_pinned_scenario,
-                    format_pinned_scenario_telegram,
-                )
-                from hunt_core.deliver.telegram import format_pinned_deep_analysis
+                from hunt_core.detect.deep import build_deep_report_from_lake
 
-                row["order_flow"] = synthesize_order_flow(row).to_dict()
-                pack = build_pinned_scenario(row)
-                row["pinned_scenario"] = pack.to_dict()
-                blocks = [format_pinned_deep_analysis(row), "", format_pinned_scenario_telegram(pack)]
+                report = build_deep_report_from_lake(sym)
+                blocks = [report.text if report is not None else "нет данных для анализа"]
                 grid = build_confluence_grid(row)
                 if grid:
                     blocks.extend(["", format_grid_telegram(grid)])
-                of_block = format_order_flow_block(row["order_flow"])
-                if of_block:
-                    blocks.extend(["", of_block])
                 await self._send(chat_id, "\n".join(blocks))
             except Exception:
                 LOG.exception("hunt_analyze_cmd_failed", symbol=sym)

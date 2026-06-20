@@ -430,7 +430,7 @@ def process_setup_candidate(
         cur = active.get(key)
         if isinstance(cur, dict) and cur.get("status") == "active" and cur.get("stage") == "forming":
             return events
-        from hunt_core.gate._ev import setup_meets_strength
+        from hunt_core.detect.setup_fields import setup_meets_strength
 
         if setup_meets_strength(
             setup, direction=direction, symbol=sym, tier="forming"

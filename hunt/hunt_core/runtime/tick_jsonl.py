@@ -14,7 +14,7 @@ def ensure_fusion_lifecycle_fields(
 ) -> dict[str, Any]:
     """Backfill ``phase_fusion`` / entry flags — JSONL rows must never carry null gates."""
     from hunt_core.detect.phase import NEUTRAL
-    from hunt_core.gate._phase_compat import fusion_lifecycle_flags
+    from hunt_core.detect.phase_compat import fusion_lifecycle_flags
 
     base = dict(lc) if isinstance(lc, dict) else {}
     setup_d = setup if isinstance(setup, dict) else {}

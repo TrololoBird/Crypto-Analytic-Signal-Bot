@@ -83,10 +83,7 @@ def effective_engine_score_floor(
 
 
 def resolve_setup_entry_tf(setup_id: str, *, default: str = "15m") -> str:
-    """Catalog entry TF."""
-    from hunt_core.setups.catalog import resolve_setup_trigger_tf
-
-    return resolve_setup_trigger_tf(setup_id, default=default)
+    return default
 
 
 def resolve_setup_order_type(setup_id: str, *, default: str = "limit") -> str:

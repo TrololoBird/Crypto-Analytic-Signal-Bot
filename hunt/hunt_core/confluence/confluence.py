@@ -84,21 +84,6 @@ def evaluate_must_pass(row: dict[str, Any], *, direction: str) -> tuple[bool, li
         }
         if not (long_leg and bool(setup.get("confirmed"))):
             missing.append("htf_bias_veto")
-    from hunt_core.gate.policy import mtf_confirm_veto
-
-    tf = row.get("timeframes") if isinstance(row.get("timeframes"), dict) else {}
-    mkt = row.get("market") if isinstance(row.get("market"), dict) else {}
-    bounce_pct = float(lc.get("bounce_from_low_pct") or 0)
-    mtf_blocked, mtf_reason = mtf_confirm_veto(
-        direction,
-        tf,
-        phase,
-        market=mkt,
-        fall_from_high_pct=fall_pct,
-        bounce_from_low_pct=bounce_pct,
-    )
-    if mtf_blocked and mtf_reason:
-        missing.append(mtf_reason)
     return len(missing) == 0, missing
 
 

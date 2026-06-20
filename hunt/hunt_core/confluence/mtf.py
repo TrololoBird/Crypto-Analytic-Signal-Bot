@@ -193,47 +193,6 @@ def build_mtf_confluence(
     long_s = _build("long")
     short_s = _build("short")
 
-    liq_pack = None
-    if row is not None:
-        from hunt_core.analysis.deep_signal import (  # noqa: PLC0415
-            apply_liquidity_to_mtf_scores,
-            build_liquidity_scenarios,
-        )
-
-        raw_liq = row.get("liquidity_scenarios")
-        if raw_liq is not None:
-            liq_pack = raw_liq if hasattr(raw_liq, "scenarios") else None
-        if liq_pack is None and (row.get("market") or market):
-            liq_pack = build_liquidity_scenarios({**row, "market": market or row.get("market")})
-    if liq_pack is not None:
-        mkt = market or row.get("market") if row else market
-        ls, ss, notes = apply_liquidity_to_mtf_scores(
-            long_s.score, short_s.score, liq_pack, market=mkt if isinstance(mkt, dict) else None
-        )
-        long_s = ScenarioScore(
-            direction=long_s.direction,
-            score=ls,
-            htf_count=long_s.htf_count,
-            htf_total=long_s.htf_total,
-            entry_lo=long_s.entry_lo,
-            entry_hi=long_s.entry_hi,
-            tp1=long_s.tp1,
-            tp2=long_s.tp2,
-            stop=long_s.stop,
-            evidence=[*long_s.evidence, *notes],
-        )
-        short_s = ScenarioScore(
-            direction=short_s.direction,
-            score=ss,
-            htf_count=short_s.htf_count,
-            htf_total=short_s.htf_total,
-            entry_lo=short_s.entry_lo,
-            entry_hi=short_s.entry_hi,
-            tp1=short_s.tp1,
-            tp2=short_s.tp2,
-            stop=short_s.stop,
-            evidence=[*short_s.evidence, *notes],
-        )
 
     if long_s.score >= short_s.score + 0.15:
         dominant: Literal["long", "short", "neutral"] = "long"

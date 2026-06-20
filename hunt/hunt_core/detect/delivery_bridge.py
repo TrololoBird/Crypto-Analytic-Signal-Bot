@@ -141,10 +141,6 @@ def build_delivery_setup(detection: Detection, row: dict[str, Any]) -> dict[str,
     rr = compute_setup_risk_reward(setup, direction=detection.side or "long")
     if rr is not None:
         setup["risk_reward"] = round(float(rr), 4)
-
-    from hunt_core.gate._ev import stamp_delivery_ev_fields
-
-    stamp_delivery_ev_fields(setup, direction=detection.side, row=row)  # type: ignore[arg-type]
     return setup
 
 

@@ -68,7 +68,7 @@ def format_mtf_section(
     """
     Format MTF structure table + two scenarios for a PINNED /signal reply.
 
-    ``mtf`` is a ``MTFConfluence`` dataclass from ``hunt_core.analysis.deep_signal``.
+    ``mtf`` is a ``MTFConfluence`` dataclass from ``hunt_core.confluence.mtf``.
     """
     from hunt_core.deliver.dispatch import geometry_block_reason
 
@@ -107,7 +107,7 @@ def format_mtf_section(
     lines.append("")
     lines.append(f"🎯 <b>MTF bias:</b> {dom_ru} <i>(контекст)</i>")
 
-    from hunt_core.detect.probe_compat import hunt_confirmed_direction
+    from hunt_core.detect.probe import hunt_confirmed_direction
 
     hunt_conf = hunt_confirmed_direction(row or {})
     if hunt_conf == "short":

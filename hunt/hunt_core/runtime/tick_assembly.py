@@ -58,7 +58,7 @@ from hunt_core.features.snapshot import (
     tf_snapshot_for_symbol,
     tf_snapshot_lite,
 )
-from hunt_core.gate.delivery import liquidity_skip_reason
+from hunt_core.detect.delivery_support import liquidity_skip_reason
 from hunt_core.runtime.state import current_symbol_state
 from hunt_core.data.universe import PINNED_SYMBOLS
 
@@ -985,7 +985,7 @@ async def snapshot_symbol(
 
     side = detection.side if detection is not None else "none"
     phase_val = detection.phase if detection is not None else "neutral"
-    from hunt_core.gate._phase_compat import fusion_lifecycle_dict
+    from hunt_core.detect.phase_compat import fusion_lifecycle_dict
 
     lifecycle_dict = fusion_lifecycle_dict(
         detection,

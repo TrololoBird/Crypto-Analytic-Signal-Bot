@@ -554,7 +554,7 @@ def register_signal_open(
     features_open: dict[str, Any] | None = None,
     book_walls: dict[str, Any] | None = None,
 ) -> None:
-    from hunt_core.gate._mission import mission_delivery_block
+    from hunt_core.detect.delivery_support import mission_delivery_block
 
     lc_dict = lifecycle if isinstance(lifecycle, dict) else {}
     mission = mission_delivery_block(
@@ -577,7 +577,7 @@ def register_signal_open(
     dir_l = direction.lower()
     score_key = "dump_score" if dir_l == "short" else "long_score"
     fuel_key = "dump_fuel" if dir_l == "short" else "long_fuel"
-    from hunt_core.gate._ev import setup_conviction_pct, setup_p_win
+    from hunt_core.detect.setup_fields import setup_conviction_pct, setup_p_win
 
     # One direction per symbol: a fresh confirmed opposite setup supersedes
     # the stale one (simultaneous SYM:long + SYM:short is a contradiction).

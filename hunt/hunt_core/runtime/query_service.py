@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from hunt_core.data.universe import PINNED_SYMBOLS
-from hunt_core.gate._types import GateResult
+from hunt_core.detect.delivery_support import GateResult
 from hunt_core.market.client import HuntCcxtClient
 
 STORE_FRESH_S = 180.0
@@ -60,7 +60,7 @@ def row_age_seconds(row: dict[str, Any]) -> float | None:
 
 
 def _setup_conviction(setup: dict[str, Any], direction: str) -> float:
-    from hunt_core.gate._ev import setup_conviction_pct
+    from hunt_core.detect.setup_fields import setup_conviction_pct
 
     return setup_conviction_pct(setup, direction=direction)
 
@@ -112,7 +112,7 @@ def _evaluate_direction(
     sniper_config: Any,
 ) -> DirectionQuery:
     from hunt_core.deliver.dispatch import evaluate_delivery, evaluate_delivery_fast
-    from hunt_core.gate.delivery import collect_report_blockers, evaluate_formation
+    from hunt_core.detect.delivery_support import collect_report_blockers, evaluate_formation
 
     setup = (row.get("dump") if direction == "short" else row.get("long")) or {}
     confirmed = bool(setup.get("confirmed") or setup.get("intrabar_confirmed"))
@@ -248,19 +248,10 @@ async def resolve_query_row(
             row["_deep_analysis"] = True
             source = "live_rest"
 
-    if sym not in PINNED_SYMBOLS and not row.get("poc_level_scenarios"):
-        from hunt_core.analysis.deep_signal import build_poc_level_scenarios
-
-        build_poc_level_scenarios(row)
-
     if row.get("maps") and not row.get("maps_forecast"):
         from hunt_core.maps.forecast import stamp_forecasts_on_row
 
         stamp_forecasts_on_row(row)
-    if not row.get("manipulation_fusion"):
-        from hunt_core.analysis.manipulation_fusion import stamp_fusion_on_row
-
-        stamp_fusion_on_row(row)
 
     return row, source, from_store, age_s
 
@@ -315,18 +306,11 @@ def _format_blockers_section(dq: DirectionQuery) -> list[str]:
 
 def format_query_telegram(q: QueryResult, *, added_watch: bool = False) -> str:
     """Deep-first /signal — structure/MTF/maps; watch hunter collapsed at bottom."""
-    from hunt_core.analysis.deep.build import build_deep_report
-    from hunt_core.analysis.deep.format_telegram import format_deep_analysis_telegram
+    from hunt_core.detect.deep import build_deep_report_from_lake
 
     focus = q.focus()
-    deep = build_deep_report(
-        q.row,
-        would_deliver=focus.would_deliver,
-        blockers=[str(b.code) for b in focus.blockers if not b.ok][:5],
-        include_watch_appendix=False,
-    )
-    q.row["_deep_verdicts"] = deep.verdicts
-    parts: list[str] = [format_deep_analysis_telegram(deep)]
+    report = build_deep_report_from_lake(q.symbol)
+    parts: list[str] = [report.text if report is not None else "нет данных для анализа"]
 
     watch_lines: list[str] = []
     if added_watch:

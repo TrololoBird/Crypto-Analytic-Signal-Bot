@@ -7,7 +7,7 @@ from typing import Any
 
 from hunt_core.deliver.dispatch import mark_unified_sent, unified_cooldown_ok
 from hunt_core.domain.config import COOLDOWN_MINUTES
-from hunt_core.gate.delivery import delivery_hard_block
+from hunt_core.detect.delivery_support import delivery_hard_block
 from hunt_core.market import HuntCcxtStreams
 from hunt_core.runtime.state import LOG
 # Legacy early/ignition/liquidation-burst advisory removed; the advisory senders below
