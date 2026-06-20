@@ -3,14 +3,21 @@ from __future__ import annotations
 
 
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from hunt_core.gate.delivery import GateResult
+from typing import Any
 
 from hunt_core.contract import validate_signal_contract
+
+
+@dataclass(frozen=True)
+class GateResult:
+    """Delivery decision result (the fusion `confirmed` flag is authoritative)."""
+
+    ok: bool
+    code: str = ""
+    message: str = ""
 
 # Cross-stage cooldown: one symbol+direction must not re-fire across advisory
 # Telegram stages (early → dump_hunt → squeeze → confirm) inside the window.
@@ -145,11 +152,9 @@ def _record_delivery_funnel(
     tier: str,
 ) -> None:
     """Telemetry only after ARMED/TRIGGERED tier is known (not at gate-pipeline mid-flight)."""
-    from hunt_core.gate._ev import setup_conviction_pct, setup_p_win
     from hunt_core.track.events import record_funnel_stage
 
     score_key = "dump_score" if direction == "short" else "long_score"
-    fuel_key = "dump_fuel" if direction == "short" else "long_fuel"
     record_funnel_stage(
         "deliver",
         symbol=symbol,
@@ -158,9 +163,8 @@ def _record_delivery_funnel(
         payload={
             "symbol": symbol,
             "score": setup.get(score_key),
-            "fuel": setup.get(fuel_key),
-            "p_win": setup_p_win(setup),
-            "conviction": setup_conviction_pct(setup, direction=direction),
+            "magnitude": setup.get("magnitude"),
+            "p_win": setup.get("p_win"),
             "phase": setup.get("phase") or setup.get("lifecycle_phase"),
             "delivery_tier": tier,
             "risk_reward": setup.get("risk_reward"),
@@ -188,255 +192,38 @@ def evaluate_delivery(
     setup: dict[str, Any],
     lifecycle: dict[str, Any] | None = None,
     symbol: str = "",
-    sniper_config: SniperConfig | None = None,
+    sniper_config: "SniperConfig | None" = None,
     refresh_live_price: bool = False,
     ws_feed: Any | None = None,
-) -> tuple["GateResult", str | None]:
-    """Run full gate pipeline and classify ARMED/TRIGGERED tier.
+) -> tuple[GateResult, str | None]:
+    """Deliver a confirmed fusion setup: live-price -> geometry contract -> tier.
 
-    Order is invariant: contract validation → gate pipeline → delivery freshness
-    → tier. Returns ``(gate, delivery_tier)`` where tier is ``None`` when the
-    contract is violated, the gate blocks, or the trigger is hard-stale.
+    The fusion engine's ``confirmed`` flag already encodes the full decision (gate
+    cleared and a matching PRE phase), so delivery only re-validates the trade geometry
+    contract and ships. Returns ``(gate, tier)``; tier is ``None`` when blocked.
     """
-    from hunt_core.gate.delivery import (
-        GateResult,
-        classify_delivery_tier,
-        delivery_freshness_block,
-        effective_min_rr_for_delivery,
-        run_gate_pipeline,
-    )
+    from hunt_core.levels.levels import reanchor_setup_levels
     from hunt_core.market.live_price import apply_live_price_to_row
 
     sym = symbol or str(row.get("symbol") or "")
-    from hunt_core.detect.legacy_compat import prepare_anticipation_delivery
-
-    prepare_anticipation_delivery(row, setup, direction=direction, ws_feed=ws_feed)
     if refresh_live_price:
         apply_live_price_to_row(row, ws_feed=ws_feed)
-    from hunt_core.levels.levels import reanchor_setup_levels
-
     _apply_delivery_latch(setup)
-    # Re-anchor shifts SL/TP with live price — skip when geometry is latched or TG shipped.
     if not setup.get("telegram_sent") and not setup.get("_delivery_latched"):
         reanchor_setup_levels(setup, row, direction=direction, symbol=sym)
-    lc = lifecycle if isinstance(lifecycle, dict) else row.get("lifecycle")
-    lc_dict = lc if isinstance(lc, dict) else {}
-    min_rr = effective_min_rr_for_delivery(
-        setup,
-        direction=direction,
-        symbol=sym,
-        lifecycle=lc_dict,
-    )
-    _repair_setup_rr_for_contract(
-        setup,
-        direction=direction,
-        min_rr=min_rr,
-    )
-    issues = _contract_issues_for_setup(
-        direction=direction,
-        setup=setup,
-        min_risk_reward=min_rr,
-    )
+    min_rr = _resolve_min_rr(setup, direction=direction, symbol=sym)
+    issues = _contract_issues_for_setup(direction=direction, setup=setup, min_risk_reward=min_rr)
     if issues:
-        first = issues[0]
-        code = f"contract_{getattr(first, 'field', 'invalid')}"
+        code = f"contract_{getattr(issues[0], 'field', 'invalid')}"
         return GateResult(ok=False, code=code, message=code), None
-    from hunt_core.confluence.confluence import evaluate_must_pass
-
-    must_ok, must_missing = evaluate_must_pass(row, direction=direction)
-    if not must_ok:
-        code = f"must_pass:{must_missing[0] if must_missing else 'unknown'}"
-        return GateResult(ok=False, code=code, message=code), None
-    from hunt_core.confluence.confluence import (
-        FAMILY_VOTE_MIN,
-        build_mtf_confluence,
-        family_vote_count,
-    )
-
-    tf = row.get("timeframes") or {}
-    price = float(row.get("price") or row.get("last_price") or 0)
-    from hunt_core.runtime.tick_jsonl import resolve_row_mtf
-
-    mtf = resolve_row_mtf(row, symbol=sym)
-    if mtf is None and isinstance(tf, dict) and tf and price > 0 and sym:
-        mtf = build_mtf_confluence(
-            sym,
-            tf,
-            price,
-            market=row.get("market") if isinstance(row.get("market"), dict) else None,
-            row=row,
-        )
-        row["mtf"] = mtf
-    hard_confirm = list(setup.get("confirm_hard") or [])
-    lc_phase = str((lc_dict or {}).get("phase") or "")
-    fall_pct = float((lc_dict or {}).get("fall_from_high_pct") or 0)
-    from hunt_core.gate._ev import setup_conviction_pct, setup_meets_strength, setup_p_win, pwin_gate_enabled
-    from hunt_core.params.store import delivery_thresholds, effective_hunt_params
-
-    conviction = setup_conviction_pct(setup, direction=direction)
-    cal = effective_hunt_params(sym)
-    confirm_conv = float(cal.confirm_min_score)
-    dl = delivery_thresholds(sym)
-    p_win = setup_p_win(setup)
-    min_p_win = float(dl.get("min_p_win", 0.42))
-    if pwin_gate_enabled():
-        ev_primary_ok = bool(setup.get("ev_primary")) or (
-            p_win is not None and p_win >= min_p_win
-        )
-    else:
-        ev_primary_ok = bool(setup.get("ev_primary"))
-    meets_confirm = setup_meets_strength(
-        setup, direction=direction, symbol=sym, tier="confirm", row=row
-    )
-    struct_count = sum(
-        1
-        for h in hard_confirm
-        if any(
-            m in str(h)
-            for m in (
-                "close_below",
-                "below_support",
-                "pp_short",
-                "bear_cascade",
-                "rejection",
-                "continuation",
-            )
-        )
-    )
-    skip_family_vote = ev_primary_ok or (
-        (
-            direction == "short"
-            and bool(setup.get("confirmed"))
-            and meets_confirm
-            and len(hard_confirm) >= 1
-        )
-        or (
-            direction == "short"
-            and bool(setup.get("confirmed"))
-            and conviction >= confirm_conv - 5.0
-            and struct_count >= 1
-        )
-        or (
-            direction == "short"
-            and lc_phase in {"exhaustion_at_high", "distribution", "dump_initiating"}
-            and conviction >= 75.0
-            and struct_count >= 2
-        )
-        or (
-            direction == "short"
-            and bool(setup.get("confirmed"))
-            and lc_phase in {"exhaustion_at_high", "distribution", "dump_initiating"}
-            and struct_count >= 1
-            and conviction >= 68.0
-        )
-        or (
-            direction == "short"
-            and conviction >= confirm_conv - 3.0
-            and struct_count >= 2
-            and lc_phase in {"exhaustion_at_high", "distribution", "dump_initiating"}
-        )
-    )
-    if mtf is not None and not skip_family_vote:
-        from hunt_core.confluence.mtf import MTFConfluence
-
-        votes = family_vote_count(mtf, direction=direction)
-        if isinstance(mtf, MTFConfluence):
-            htf_total = (
-                mtf.short_scenario if direction == "short" else mtf.long_scenario
-            ).htf_total
-        elif isinstance(mtf, dict):
-            total_key = "short_htf_total" if direction == "short" else "long_htf_total"
-            sc_key = "short_scenario" if direction == "short" else "long_scenario"
-            htf_total = mtf.get(total_key)
-            if htf_total is None:
-                sc = mtf.get(sc_key)
-                if isinstance(sc, dict):
-                    htf_total = sc.get("htf_total")
-            htf_total = int(htf_total or 0)
-        else:
-            htf_total = FAMILY_VOTE_MIN
-        required_votes = min(FAMILY_VOTE_MIN, htf_total) if htf_total > 0 else FAMILY_VOTE_MIN
-        # No HTF families loaded (young alts / fast tier): do not hard-block when
-        # detector already confirmed with structural evidence (ALLOUSDT replay: 16×).
-        if htf_total == 0 and skip_family_vote:
-            pass
-        elif votes < required_votes or htf_total == 0:
-            code = f"family_vote_low:{votes}<{required_votes}"
-            return GateResult(ok=False, code=code, message=code), None
-    gate = run_gate_pipeline(
-        direction=direction,
-        setup=setup,
-        row=row,
-        lifecycle=lc_dict or None,
-        symbol=sym,
-        sniper_config=sniper_config,
-    )
-    if not gate.ok:
-        return gate, None
-    tier = classify_delivery_tier(
-        direction=direction,
-        setup=setup,
-        row=row,
-        lifecycle=lc_dict or None,
-    )
-    if tier in {"armed", "triggered"}:
-        stale = delivery_freshness_block(
-            direction=direction,
-            setup=setup,
-            row=row,
-            lifecycle=lc_dict or None,
-        )
-        if stale:
-            return GateResult(ok=False, code=stale, message=stale), None
-    if tier in {"armed", "triggered"}:
-        tier = _finalize_delivery_tier(
-            tier, direction=direction, setup=setup, row=row
-        )
-    if tier is None:
-        from hunt_core.gate.delivery import delivery_hard_block
-
-        hard = delivery_hard_block(direction=direction, setup=setup, row=row)
-        code = hard or "delivery_tier_none"
-        return GateResult(ok=False, code=code, message=code), None
-    if gate.ok:
-        setup["delivery_tier"] = tier
-        _latch_delivery_geometry(setup)
-        _record_delivery_funnel(
-            sym,
-            direction=direction,
-            setup=setup,
-            gate=gate,
-            tier=tier,
-        )
+    if not (setup.get("confirmed") or setup.get("intrabar_confirmed")):
+        return GateResult(ok=False, code="not_confirmed", message="not_confirmed"), None
+    tier = "triggered"
+    setup["delivery_tier"] = tier
+    _latch_delivery_geometry(setup)
+    gate = GateResult(ok=True)
+    _record_delivery_funnel(sym, direction=direction, setup=setup, gate=gate, tier=tier)
     return gate, tier
-
-
-def _fast_lane_htf_waiver(
-    *,
-    direction: str,
-    setup: dict[str, Any],
-    lc_dict: dict[str, Any],
-    must_missing: list[str],
-) -> bool:
-    """Hot-path waiver: structural confirmed dump should not wait for full MTF refresh."""
-    if direction != "short" or "htf_bias_veto" not in must_missing:
-        return False
-    if not bool(setup.get("confirmed")):
-        return False
-    phase = str(lc_dict.get("phase") or "")
-    hard = list(setup.get("confirm_hard") or [])
-    struct = any(
-        m in str(h)
-        for h in hard
-        for m in ("close_below", "below_support", "pp_short", "rejection", "continuation")
-    )
-    if phase in {"distribution", "exhaustion_at_high"} and struct:
-        from hunt_core.gate._ev import setup_meets_strength
-
-        sym = str(setup.get("symbol") or "")
-        if setup_meets_strength(setup, direction="short", symbol=sym, tier="confirm"):
-            return True
-    return len(must_missing) == 1
 
 
 def evaluate_delivery_fast(
@@ -446,110 +233,21 @@ def evaluate_delivery_fast(
     setup: dict[str, Any],
     lifecycle: dict[str, Any] | None = None,
     symbol: str = "",
-    sniper_config: SniperConfig | None = None,
+    sniper_config: "SniperConfig | None" = None,
     refresh_live_price: bool = False,
     ws_feed: Any | None = None,
-) -> tuple["GateResult", str | None]:
-    """Hot-path delivery: contract + fast must-pass + lean gate stack (no family vote)."""
-    from hunt_core.gate.delivery import (
-        GateResult,
-        classify_delivery_tier,
-        delivery_freshness_block,
-        effective_min_rr_for_delivery,
-        run_gate_pipeline,
-    )
-    from hunt_core.market.live_price import apply_live_price_to_row
-
-    sym = symbol or str(row.get("symbol") or "")
-    from hunt_core.detect.legacy_compat import prepare_anticipation_delivery
-
-    prepare_anticipation_delivery(row, setup, direction=direction, ws_feed=ws_feed)
-    if refresh_live_price:
-        apply_live_price_to_row(row, ws_feed=ws_feed)
-    _apply_delivery_latch(setup)
-    if not setup.get("telegram_sent") and not setup.get("_delivery_latched"):
-        from hunt_core.levels.levels import reanchor_setup_levels
-
-        reanchor_setup_levels(setup, row, direction=direction, symbol=sym)
-    lc = lifecycle if isinstance(lifecycle, dict) else row.get("lifecycle")
-    lc_dict = lc if isinstance(lc, dict) else {}
-    min_rr = effective_min_rr_for_delivery(
-        setup,
-        direction=direction,
-        symbol=sym,
-        lifecycle=lc_dict,
-    )
-    _repair_setup_rr_for_contract(setup, direction=direction, min_rr=min_rr)
-    issues = _contract_issues_for_setup(
+) -> tuple[GateResult, str | None]:
+    """Hot path is identical to the full path under the fusion engine."""
+    return evaluate_delivery(
+        row,
         direction=direction,
         setup=setup,
-        min_risk_reward=min_rr,
-    )
-    if issues:
-        first = issues[0]
-        code = f"contract_{getattr(first, 'field', 'invalid')}"
-        return GateResult(ok=False, code=code, message=code), None
-    from hunt_core.confluence.confluence import evaluate_must_pass
-
-    must_ok, must_missing = evaluate_must_pass(row, direction=direction)
-    if not must_ok and _fast_lane_htf_waiver(
-        direction=direction,
-        setup=setup,
-        lc_dict=lc_dict,
-        must_missing=list(must_missing),
-    ):
-        must_ok = True
-    if not must_ok:
-        code = f"must_pass:{must_missing[0] if must_missing else 'unknown'}"
-        return GateResult(ok=False, code=code, message=code), None
-    gate = run_gate_pipeline(
-        direction=direction,
-        setup=setup,
-        row=row,
-        lifecycle=lc_dict or None,
-        symbol=sym,
+        lifecycle=lifecycle,
+        symbol=symbol,
         sniper_config=sniper_config,
-        fast_lane=True,
+        refresh_live_price=refresh_live_price,
+        ws_feed=ws_feed,
     )
-    if not gate.ok:
-        return gate, None
-    tier = classify_delivery_tier(
-        direction=direction,
-        setup=setup,
-        row=row,
-        lifecycle=lc_dict or None,
-    )
-    if tier in {"armed", "triggered"}:
-        stale = delivery_freshness_block(
-            direction=direction,
-            setup=setup,
-            row=row,
-            lifecycle=lc_dict or None,
-        )
-        if stale:
-            return GateResult(ok=False, code=stale, message=stale), None
-    if tier in {"armed", "triggered"}:
-        tier = _finalize_delivery_tier(
-            tier, direction=direction, setup=setup, row=row
-        )
-    if tier is None:
-        from hunt_core.gate.delivery import delivery_hard_block
-
-        hard = delivery_hard_block(direction=direction, setup=setup, row=row)
-        code = hard or "delivery_tier_none"
-        return GateResult(ok=False, code=code, message=code), None
-    if gate.ok:
-        setup["delivery_lane"] = "fast"
-        setup["delivery_tier"] = tier
-        _latch_delivery_geometry(setup)
-        _record_delivery_funnel(
-            sym,
-            direction=direction,
-            setup=setup,
-            gate=gate,
-            tier=tier,
-        )
-    return gate, tier
 
 
 def shadow_full_lane_recheck(
@@ -562,98 +260,8 @@ def shadow_full_lane_recheck(
     broadcaster: Any | None = None,
     send_telegram: bool = False,
 ) -> bool:
-    """After hot delivery, verify full lane would still pass; emit telemetry if not."""
-    import logging
-
-    from hunt_core.track.events import append_signal_event
-
-    LOG = logging.getLogger("hunt_core.deliver.dispatch")
-    lane = str(setup.get("delivery_lane") or "full")
-    if lane == "fast":
-        gate, tier = evaluate_delivery_fast(
-            row,
-            direction=direction,
-            setup=setup,
-            lifecycle=lifecycle,
-            symbol=symbol,
-            refresh_live_price=False,
-        )
-    else:
-        gate, tier = evaluate_delivery(
-            row,
-            direction=direction,
-            setup=setup,
-            lifecycle=lifecycle,
-            symbol=symbol,
-            refresh_live_price=False,
-        )
-    if gate.ok and tier is not None:
-        return True
-
-    lane = str(setup.get("delivery_lane") or "full")
-    if lane == "fast" and setup.get("telegram_sent"):
-        gate_fast, tier_fast = evaluate_delivery_fast(
-            row,
-            direction=direction,
-            setup=setup,
-            lifecycle=lifecycle,
-            symbol=symbol,
-            refresh_live_price=False,
-        )
-        drift_codes = {"not_anomaly", "family_vote_low"}
-        code = str(gate.code or "")
-        if (
-            gate_fast.ok
-            and tier_fast is not None
-            and (code in drift_codes or code.startswith("family_vote_low:"))
-        ):
-            LOG.info(
-                "fast_lane_shadow_drift_only | sym=%s dir=%s full=%s fast=ok path=%s",
-                symbol,
-                direction,
-                code,
-                row.get("tick_path"),
-            )
-            return False
-
-    sym = symbol or str(row.get("symbol") or "")
-    LOG.warning(
-        "fast_lane_full_shadow_block | sym=%s dir=%s gate=%s path=%s",
-        sym,
-        direction,
-        gate.code,
-        row.get("tick_path"),
-    )
-    append_signal_event(
-        "fast_lane_shadow_block",
-        symbol=sym,
-        direction=direction,
-        detail=str(gate.code or "blocked"),
-        payload={
-            "gate_code": gate.code,
-            "tick_path": row.get("tick_path"),
-            "phase": setup.get("phase"),
-            "score": setup.get("dump_score" if direction == "short" else "long_score"),
-        },
-    )
-    if send_telegram and broadcaster is not None:
-        import asyncio
-        import html
-
-        sym_label = html.escape(sym.replace("USDT", "-USDT"))
-        detail = html.escape(str(gate.message or gate.code or "blocked"))[:220]
-        msg = (
-            f"⚠️ <b>Full lane recheck</b> {sym_label}\n"
-            f"<code>{html.escape(str(gate.code or 'blocked'))}</code>\n"
-            f"<i>{detail}</i>\n"
-            f"<i>Confirm уже в канале ({html.escape(lane)} lane) — перепроверь актуальность</i>"
-        )
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(broadcaster.send_html(msg, no_split=True))
-        except RuntimeError:
-            pass
-    return False
+    """Fast and full lanes are identical under the fusion engine — no shadow divergence."""
+    return True
 
 
 def evaluate_forming_gate(
@@ -663,39 +271,14 @@ def evaluate_forming_gate(
     symbol: str,
     lifecycle: Any | None = None,
     row: dict[str, Any] | None = None,
-    sniper_config: SniperConfig | None = None,
-) -> "GateResult":
-    """Gate check for non-confirmed (forming) setups — single entry for run_gate_pipeline."""
-    from hunt_core.gate.delivery import GateResult, run_gate_pipeline
-
+    sniper_config: "SniperConfig | None" = None,
+) -> GateResult:
+    """Only confirmed fusion setups deliver; there is no forming/armed lane."""
     if not isinstance(setup, dict):
         return GateResult(ok=False, code="invalid_setup", message="invalid_setup")
-    if bool(setup.get("confirmed")) or setup.get("intrabar_confirmed"):
-        return GateResult(ok=True, code="", message="")
-    if setup.get("early_tier") == "armed" or (
-        setup.get("anticipation") and not setup.get("advisory")
-    ):
-        cfg = sniper_config or SniperConfig.from_env()
-        gate = run_gate_pipeline(
-            setup=setup,
-            direction=direction,
-            symbol=symbol,
-            lifecycle=lifecycle,
-            row=row or {},
-            sniper_config=cfg,
-        )
-        if gate.ok:
-            return GateResult(ok=True, code="early_armed", message="early_armed")
-        return gate
-    cfg = sniper_config or SniperConfig.from_env()
-    return run_gate_pipeline(
-        setup=setup,
-        direction=direction,
-        symbol=symbol,
-        lifecycle=lifecycle,
-        row=row or {},
-        sniper_config=cfg,
-    )
+    if setup.get("confirmed") or setup.get("intrabar_confirmed"):
+        return GateResult(ok=True)
+    return GateResult(ok=False, code="not_confirmed", message="not_confirmed")
 
 
 def build_delivery_contract(
@@ -854,52 +437,8 @@ def sniper_block_reason(
     lifecycle: dict[str, Any] | None,
     config: SniperConfig | None = None,
 ) -> str | None:
-    """Return a machine block code if sniper mode vetoes TG delivery, else None."""
-    from hunt_core.gate._mission import mission_delivery_block
-
-    cfg = config or SniperConfig.from_env()
-    if not cfg.enabled:
-        return None
-    sym = str(row.get("symbol") or setup.get("symbol") or "").upper()
-    lc = lifecycle if isinstance(lifecycle, dict) else {}
-    mission = mission_delivery_block(
-        direction=direction,
-        lifecycle=lc,
-        setup=setup,
-        symbol=sym,
-    )
-    if mission is not None:
-        return mission.code
-    phase = str(lc.get("phase") or "")
-    live_phases = (
-        cfg.live_phases_short if direction == "short" else cfg.live_phases_long
-    )
-    if phase not in live_phases:
-        return f"sniper_phase:{phase or 'unknown'}"
-    if direction == "short" and lc.get("short_entry_ok") is not True:
-        return "sniper_short_entry_not_ok"
-    if direction == "long" and lc.get("long_entry_ok") is False:
-        return "sniper_long_entry_not_ok"
-    ez = setup.get("entry_zone")
-    try:
-        zone_lo = float(ez[0])
-        px = float(row["price"])
-    except (TypeError, ValueError, IndexError, KeyError):
-        return "sniper_bad_entry_geometry"
-    if px < zone_lo * (1.0 - cfg.chase_tol):
-        return "sniper_late_chase"
-    top_ls_f = effective_top_ls(row.get("market"))
-    # Absent = small altcoin without Binance FAPI top-trader endpoint.
-    # All top historical performers (ESPORTS, BTW, BEAT) lacked this data.
-    # Only block when data IS present and top traders are heavily long (squeeze risk).
-    if top_ls_f is not None and top_ls_f >= cfg.top_ls_max:
-        return "sniper_top_ls_high"
+    """Sniper-mode veto retired — the fusion gate already enforces PRE-phase entry."""
     return None
-
-# --- merged from deliver/card_formatter.py ---
-
-import html
-
 
 
 def _pct_str(entry: float, target: float | None, direction: str) -> str:
@@ -956,25 +495,7 @@ def _finalize_delivery_tier(
     setup: dict[str, Any],
     row: dict[str, Any],
 ) -> str | None:
-    """Demote TRIGGERED on TP1 progress, order-flow absorption, or funding caution."""
-    from hunt_core.gate.delivery import order_flow_demotes_triggered, tp1_progress_block
-    from hunt_core.gate.policy import funding_short_risk_tier, resolve_market_funding_rate
-
-    if tier is None:
-        return None
-    if tier == "triggered":
-        if tp1_progress_block(direction=direction, setup=setup, row=row):
-            tier = "armed"
-        elif order_flow_demotes_triggered(row, direction=direction):
-            tier = "armed"
-    if direction == "short":
-        fr = resolve_market_funding_rate(row.get("market") or {})
-        risk = funding_short_risk_tier(fr)
-        setup["funding_short_risk"] = risk
-        if risk == "caution":
-            setup["funding_squeeze_caution"] = True
-            if tier == "triggered":
-                tier = "armed"
+    """Tier demotion retired — the fusion gate is the single delivery decision."""
     return tier
 
 
@@ -996,17 +517,9 @@ def _squeeze_note(row: dict[str, Any], *, direction: str) -> str | None:
     if funding is None:
         funding = market.get("funding_rate")
     try:
-        from hunt_core.gate.policy import funding_short_risk_tier, resolve_market_funding_rate
-
-        fr = resolve_market_funding_rate(market)
+        fr = float(funding) if funding is not None else None
         if fr is not None and abs(fr) >= 0.00005:
             bits.append(f"funding {fr * 100.0:+.3f}%")
-            if direction == "short":
-                risk = funding_short_risk_tier(fr)
-                if risk == "block":
-                    bits.append("crowded short — блок новых шортов")
-                elif risk == "caution":
-                    bits.append("crowded short — только осторожный limit")
     except (TypeError, ValueError):
         pass
     if not bits:
@@ -1233,14 +746,6 @@ def format_delivery_card(
             "⚠️ <i>Funding crowded short — только limit в зоне (caution tier)</i>"
         )
 
-    if _order_flow_inputs_present(row):
-        from hunt_core.gate.delivery import order_flow_demotes_triggered
-
-        if order_flow_demotes_triggered(row, direction=direction):
-            lines.append("")
-            lines.append(
-                "⚠️ <i>CVD vs taker — поглощение; только limit в зоне, не market chase</i>"
-            )
         of_block = row.get("order_flow_block") if isinstance(row.get("order_flow_block"), str) else ""
         if of_block:
             lines.append("")
@@ -1337,9 +842,16 @@ _POC_HEADWIND_PCT = 0.5
 
 
 def readiness_score(setup: dict[str, Any], *, direction: str) -> float:
-    from hunt_core.gate._ev import setup_conviction_pct
-
-    return setup_conviction_pct(setup, direction=direction)
+    score = setup.get("dump_score" if direction == "short" else "long_score")
+    if score is not None:
+        try:
+            return float(score)
+        except (TypeError, ValueError):
+            pass
+    try:
+        return float(setup.get("p_win") or 0) * 100.0
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def readiness_tier(score: float) -> str:
@@ -1362,24 +874,9 @@ def _setup_rr(setup: dict[str, Any]) -> float | None:
         return None
 
 
-def _resolve_min_rr(
-    setup: dict[str, Any],
-    *,
-    direction: str,
-    row: dict[str, Any] | None,
-    min_rr: float,
-) -> float:
-    if row is None:
-        return min_rr
-    sym = str(row.get("symbol") or "").strip().upper()
-    if not sym:
-        return min_rr
-    from hunt_core.gate.delivery import effective_min_rr_for_delivery
-
-    lc = row.get("lifecycle") if isinstance(row.get("lifecycle"), dict) else {}
-    return effective_min_rr_for_delivery(
-        setup, direction=direction, symbol=sym, lifecycle=lc
-    )
+def _resolve_min_rr(setup: dict[str, Any], *, direction: str = "", symbol: str = "") -> float:
+    """Fixed R:R floor; the levels geometry already enforces a structural R:R."""
+    return _DEFAULT_MIN_RR
 
 
 def geometry_block_reason(
@@ -1390,7 +887,7 @@ def geometry_block_reason(
     direction: str = "",
 ) -> str | None:
     """Why trade geometry blocks a high fuel score from implying «strong setup»."""
-    min_rr = _resolve_min_rr(setup, direction=direction, row=row, min_rr=min_rr)
+    min_rr = _resolve_min_rr(setup, direction=direction)
     return geometry_block_evidence(
         setup, min_rr=min_rr, row=row, direction=direction
     ).get("reason")
@@ -1404,7 +901,7 @@ def geometry_block_evidence(
     direction: str = "",
 ) -> dict[str, Any]:
     """Structured geometry veto — code, reason, evidence list (§3 cleanup)."""
-    min_rr = _resolve_min_rr(setup, direction=direction, row=row, min_rr=min_rr)
+    min_rr = _resolve_min_rr(setup, direction=direction)
     evidence: list[str] = []
     if setup.get("levels_viable") is False:
         veto = setup.get("levels_veto") or []
@@ -1464,7 +961,7 @@ def display_readiness_score(
     min_rr: float = _DEFAULT_MIN_RR,
 ) -> float:
     """Fuel capped for display when geometry is not tradable."""
-    min_rr = _resolve_min_rr(setup, direction=direction, row=row, min_rr=min_rr)
+    min_rr = _resolve_min_rr(setup, direction=direction)
     fuel = readiness_score(setup, direction=direction)
     if geometry_block_reason(setup, min_rr=min_rr, row=row, direction=direction):
         return min(fuel, 59.0)
