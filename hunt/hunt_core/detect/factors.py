@@ -129,19 +129,26 @@ def factor_oi_pressure(window: FeatureWindow) -> FactorScore:
 
 
 def factor_compression(window: FeatureWindow) -> FactorScore:
-    """Volatility coil — compressed BB width vs the symbol's own history stores energy.
+    """Volatility coil — compression *level* and *velocity* both store energy.
 
-    Amplifier rewards compression only: ``max(0, -robust_z(bb_width))`` is large when
-    band width sits unusually low (coiled), zero when expanded. Replaces the fixed
-    "BB width ≤ 25th percentile" squeeze rule with a distribution-relative measure.
+    Level: ``max(0, -robust_z(bb_width))`` — band width unusually low vs the symbol's
+    own history. Velocity: ``max(0, -ols_slope(bb_width))`` — band sharply contracting
+    right now. A long-low band and a fast-collapsing band both coil; the factor takes
+    whichever is stronger so a sharp squeeze is not flattened to the same percentile as a
+    slow one (distribution-relative, no fixed threshold).
     """
     z_bb = C.robust_z(window.col("bb_width"))
     z_atr = C.robust_z(window.col("atr_pct"))
     comps = [v for v in (z_bb, z_atr) if v is not None]
     if not comps:
         return _abstain("compression", AMPLIFIER, "compression_inputs_missing")
-    coil = max(0.0, -(sum(comps) / len(comps)))
-    return FactorScore("compression", AMPLIFIER, coil, True, f"coil={coil:.2f}")
+    level_coil = max(0.0, -(sum(comps) / len(comps)))
+    slope = C.ols_slope(window.col("bb_width"))
+    vel_coil = max(0.0, -slope) if slope is not None else 0.0
+    coil = max(level_coil, vel_coil)
+    return FactorScore(
+        "compression", AMPLIFIER, coil, True, f"coil={coil:.2f}(lvl={level_coil:.2f},vel={vel_coil:.2f})"
+    )
 
 
 _FACTORS = (
