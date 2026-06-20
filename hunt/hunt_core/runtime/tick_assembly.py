@@ -972,7 +972,7 @@ async def snapshot_symbol(
     leg_gain_pct = round((hunt_h - hunt_l) / hunt_l * 100.0, 1) if hunt_l > 0 else 0.0
     fall_from_high_pct = round((hunt_h - price) / hunt_h * 100.0, 2) if hunt_h > 0 else 0.0
     structure_bias = str(structure.get("structure_bias") or "")
-    from hunt_core.detect.delivery_bridge import build_delivery_setup
+    from hunt_core.detect.delivery_setup import build_delivery_setup
     from hunt_core.detect.live import build_live_detection
     from hunt_core.features.feature_engine import build_feature_vector
 
