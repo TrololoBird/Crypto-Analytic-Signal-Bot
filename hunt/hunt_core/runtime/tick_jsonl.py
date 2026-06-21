@@ -128,7 +128,11 @@ def prepare_tick_row_for_jsonl(row: dict[str, Any]) -> dict[str, Any]:
             "short_htf_count": out["mtf"].get("short_htf_count"),
         }
 
-    return out
+    out.setdefault("plane", "hunt")
+
+    from hunt_core.analysis.deep.verdict_v2.serialize import strip_verdict_v2_for_jsonl
+
+    return strip_verdict_v2_for_jsonl(out)
 
 
 def hydrate_tick_row_from_jsonl(row: dict[str, Any]) -> dict[str, Any]:

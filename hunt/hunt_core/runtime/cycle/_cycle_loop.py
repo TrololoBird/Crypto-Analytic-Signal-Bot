@@ -19,7 +19,7 @@ from hunt_core.data.scanner import (
     apply_quality_gates,
     prescan_from_tickers,
 )
-from hunt_core.data.universe import MAX_PRESCAN_MERGE, resolve_watch_universe
+from hunt_core.data.universe import MAX_PRESCAN_MERGE, PINNED_SYMBOLS, resolve_watch_universe
 from hunt_core.deliver.digest import DigestCandidate, get_digest_scheduler
 from hunt_core.deliver.telegram import TelegramBroadcaster
 from hunt_core.domain.config import (
@@ -302,6 +302,51 @@ async def run_loop(
         tg_task = asyncio.create_task(tg_cmds.run_forever(), name="hunt_tg_commands")
         LOG.info("hunt_telegram_commands_scheduled")
 
+    deep_task: asyncio.Task[None] | None = None
+    if not once and os.getenv("HUNT_DEEP_PINNED_LOOP", "1").strip().lower() not in {"0", "false", "no"}:
+        from hunt_core.runtime.deep_assembly import deep_pinned_loop
+
+        deep_task = asyncio.create_task(
+            deep_pinned_loop(client, broadcaster, send_telegram=send_telegram),
+            name="deep_pinned_loop",
+        )
+        LOG.info("deep_pinned_loop_scheduled")
+
+    expansion_review_task: asyncio.Task[None] | None = None
+    from hunt_core.analysis.expansion_engine.config import load_expansion_config
+
+    exp_cfg = load_expansion_config()
+    if exp_cfg.enabled:
+        try:
+            from hunt_core.analysis.expansion_engine.runtime_state import load_expansion_runtime_state
+
+            load_expansion_runtime_state()
+        except Exception:
+            LOG.exception("expansion_fsm_load_failed")
+
+    if not once and exp_cfg.enabled and exp_cfg.review_loop:
+        from hunt_core.runtime.deep_assembly import expansion_outcome_review_loop
+
+        expansion_review_task = asyncio.create_task(
+            expansion_outcome_review_loop(client),
+            name="expansion_outcome_review_loop",
+        )
+        LOG.info("expansion_review_loop_scheduled", interval_s=exp_cfg.review_interval_s)
+
+    expansion_universe_task: asyncio.Task[None] | None = None
+    if not once and exp_cfg.enabled and exp_cfg.tg_universe_scan and send_telegram:
+        from hunt_core.runtime.expansion_universe_scan import expansion_universe_scan_loop
+
+        expansion_universe_task = asyncio.create_task(
+            expansion_universe_scan_loop(broadcaster, send_telegram=send_telegram),
+            name="expansion_universe_scan_loop",
+        )
+        LOG.info(
+            "expansion_universe_scan_scheduled",
+            interval_s=exp_cfg.tg_universe_interval_s,
+            top_n=exp_cfg.tg_universe_top_n,
+        )
+
     # Hang watchdog: if a cycle stalls (e.g. an unbounded loop in scan/levels on
     # degenerate data), faulthandler dumps every Python thread's stack — it works
     # even while the GIL is held by a tight loop — then hard-exits so the process
@@ -310,6 +355,7 @@ async def run_loop(
     _wd_timeout_s = float(os.getenv("HUNT_WATCHDOG_S", "300") or 300)
     _wd_file = (OUT_PATH.parent / "hunt_watchdog.log").open("a", buffering=1)
     LOG.info("hunt_watchdog_armed", timeout_s=_wd_timeout_s)
+    _pinned_brief_sent = False
     try:
         tick_ctx: dict[str, Any] | None = None
         while not should_stop():
@@ -515,12 +561,12 @@ async def run_loop(
                         s: SYMBOL_WATCH_MODES.get(s, "short") for s in merged
                     }
                 else:
-                    symbols, mode_map = resolve_watch_universe(
+                    full_symbols, mode_map = resolve_watch_universe(
                         settings,
                         static_modes=SYMBOL_WATCH_MODES,
                         ignited=ignition_by_sym,
                     )
-                    merged = list(symbols)
+                    merged = list(full_symbols)
                     for sym in cli_symbols:
                         s = sym.upper()
                         if s not in merged:
@@ -560,14 +606,17 @@ async def run_loop(
                         LOG.info("watch_tracker_pin", symbols=pinned_n)
                 merged = gate_symbol_list(merged, exchange=ex, label="watch_universe")
                 active = tuple(dict.fromkeys(merged))
+                hunt_active = tuple(s for s in active if s not in PINNED_SYMBOLS)
                 load_plan = load_planner.plan_tick(
-                    active,
+                    hunt_active,
                     ignited=set(ignition_by_sym.keys()),
                     interval_s=float(interval_s),
                 )
                 LOG.info(
                     "hunt_load_plan",
-                    symbols=len(active),
+                    symbols=len(hunt_active),
+                    ws_symbols=len(active),
+                    pinned_excluded=len(active) - len(hunt_active),
                     parallel=load_plan.parallel,
                     full=load_plan.full_count,
                     fast=load_plan.fast_count,
@@ -586,7 +635,8 @@ async def run_loop(
                     ws_n += min(len(active), 24)
                 LOG.info(
                     "watch_universe",
-                    symbols=len(active),
+                    symbols=len(hunt_active),
+                    ws_symbols=len(active),
                     ignited=len(ignition_by_sym),
                     ws_streams=ws_n,
                     kline_ws=ws_feed.kline_ws_enabled,
@@ -654,8 +704,28 @@ async def run_loop(
                     )
                 async with _TICK_LOCK:
                     rows = await run_tick(
-                        active, **{k: v for k, v in tick_ctx.items() if k != "active"}
+                        hunt_active, **{k: v for k, v in tick_ctx.items() if k != "active"}
                     )
+                if (
+                    not once
+                    and not _pinned_brief_sent
+                    and send_telegram
+                    and broadcaster is not None
+                ):
+                    from hunt_core.runtime.pinned_brief import (
+                        deliver_pinned_startup_brief,
+                        pinned_startup_brief_enabled,
+                    )
+
+                    if pinned_startup_brief_enabled():
+                        try:
+                            n_brief = await deliver_pinned_startup_brief(
+                                broadcaster, client=client
+                            )
+                            LOG.info("watch_pinned_startup_brief", sent=n_brief)
+                        except Exception:
+                            LOG.exception("watch_pinned_startup_brief_failed")
+                        _pinned_brief_sent = True
                 ban_telemetry = client.rest_gate.guard.telemetry
                 if ban_telemetry.last_at_mono and (
                     time.monotonic() - ban_telemetry.last_at_mono < interval_s + 5
@@ -680,6 +750,14 @@ async def run_loop(
                         LOG.info("hunt_digest_scheduled_sent", candidates=len(digest_candidates))
                 save_pump_history(pump_store)
                 buffer_tick_rows(rows)
+                try:
+                    from hunt_core.analysis.expansion_engine.runtime_state import (
+                        maybe_save_expansion_runtime_state,
+                    )
+
+                    maybe_save_expansion_runtime_state()
+                except Exception:
+                    LOG.debug("expansion_runtime_maybe_save_failed", exc_info=True)
                 if not once:
                     faulthandler.cancel_dump_traceback_later()
                 if (
@@ -737,6 +815,30 @@ async def run_loop(
                 await tg_task
             except asyncio.CancelledError:
                 pass
+        if deep_task is not None:
+            deep_task.cancel()
+            try:
+                await deep_task
+            except asyncio.CancelledError:
+                pass
+        if expansion_review_task is not None:
+            expansion_review_task.cancel()
+            try:
+                await expansion_review_task
+            except asyncio.CancelledError:
+                pass
+        if expansion_universe_task is not None:
+            expansion_universe_task.cancel()
+            try:
+                await expansion_universe_task
+            except asyncio.CancelledError:
+                pass
+        try:
+            from hunt_core.analysis.expansion_engine.runtime_state import save_expansion_runtime_state
+
+            save_expansion_runtime_state()
+        except Exception:
+            LOG.exception("expansion_fsm_save_failed")
         if tg_cmds is not None:
             await tg_cmds.close()
         await hot_kline_loop.stop()

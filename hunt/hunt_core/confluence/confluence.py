@@ -84,6 +84,13 @@ def evaluate_must_pass(row: dict[str, Any], *, direction: str) -> tuple[bool, li
         }
         if not (long_leg and bool(setup.get("confirmed"))):
             missing.append("htf_bias_veto")
+    market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    try:
+        funding_rate = float(market.get("funding_rate")) if market.get("funding_rate") is not None else None
+    except (TypeError, ValueError):
+        funding_rate = None
+    if direction == "short" and funding_rate is not None and funding_rate <= -0.002:
+        missing.append("mtf_funding_squeeze_short")
     return len(missing) == 0, missing
 
 

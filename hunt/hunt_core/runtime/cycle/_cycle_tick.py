@@ -46,6 +46,7 @@ from hunt_core.runtime.cycle._cycle_confirm import (
     _confirm_delivery_suppressed,
     _maybe_emit_scanner_continuation_wait,
     _should_emit_blocked_telemetry,
+    hunt_auto_confirm_blocked,
 )
 from hunt_core.runtime.cycle._cycle_advisory import (
     _cooldown_ok,
@@ -60,7 +61,7 @@ from hunt_core.runtime.cycle._cycle_reconcile import (
     _record_followup_side_effects,
 )
 from hunt_core.runtime.state import LOG, SNIPER_CONFIG, WatchMode, SymbolStateStore
-from hunt_core.data.universe import PINNED_SYMBOLS, effective_watch_mode, save_pinned_cache
+from hunt_core.data.universe import PINNED_SYMBOLS, effective_watch_mode
 def dump_hunt_skip_reason(*_a, **_k) -> str:
     return "dump_hunt_disabled"  # legacy dump-hunt advisory removed
 
@@ -373,20 +374,23 @@ async def run_tick(
                     rows.append(row)
                     continue
                 if feature_lake is not None and _tier_for(symbol) == "full":
-                    try:
-                        vector = build_feature_vector(
-                            row.get("_prepared"),
-                            row,
-                            symbol=symbol,
-                            tf="15m",
-                        )
-                        feature_lake.enqueue(symbol, str(row.get("ts")), "15m", vector.to_dict())
-                    except FeatureExtractError as exc:
-                        LOG.warning(
-                            "feature_lake_enqueue_skipped",
-                            symbol=symbol,
-                            error=str(exc),
-                        )
+                    if symbol in PINNED_SYMBOLS:
+                        pass
+                    else:
+                        try:
+                            vector = build_feature_vector(
+                                row.get("_prepared"),
+                                row,
+                                symbol=symbol,
+                                tf="15m",
+                            )
+                            feature_lake.enqueue(symbol, str(row.get("ts")), "15m", vector.to_dict())
+                        except FeatureExtractError as exc:
+                            LOG.warning(
+                                "feature_lake_enqueue_skipped",
+                                symbol=symbol,
+                                error=str(exc),
+                            )
                 mode = effective_watch_mode(
                     symbol,
                     mode_map,
@@ -404,14 +408,8 @@ async def run_tick(
                             ws_feed.live_funding_cross(symbol),
                         )
                     attach_cross_fields(row, cx)
-                if symbol in PINNED_SYMBOLS and not row.get("error"):
-                    # Pinned deep analysis is on-demand via detect/deep (/signal); the
-                    # watch tick only caches the row.
-                    try:
-                        save_pinned_cache(symbol, row)
-                    except Exception as exc:
-                        LOG.warning("pinned_cache_save_failed", symbol=symbol, error=repr(exc))
                 if not row.get("error"):
+                    row["plane"] = "hunt"
                     from hunt_core.runtime.tick_jsonl import (
                         ensure_fusion_lifecycle_fields,
                         resolve_row_mtf,
@@ -491,29 +489,56 @@ async def run_tick(
                         lifecycle_bias=last_bias[symbol],
                     )
                     row["watch_mode"] = mode
+                from hunt_core.detect.setup_fields import setup_conviction_pct
+
+                def _tick_conviction(setup: dict[str, Any]) -> float:
+                    if not setup:
+                        return 0.0
+                    raw = setup.get("fusion_score")
+                    if raw is not None:
+                        try:
+                            return round(float(raw), 1)
+                        except (TypeError, ValueError):
+                            pass
+                    return round(setup_conviction_pct(setup), 1)
+
+                def _tick_gate(setup: dict[str, Any]) -> str:
+                    if not setup:
+                        return "idle"
+                    if setup.get("confirmed"):
+                        return "confirmed"
+                    reason = str(setup.get("gate_reason") or "").strip()
+                    return reason or str(setup.get("phase") or "forming")
+
                 LOG.info(
                     "watch_tick",
                     symbol=symbol,
                     mode=mode,
                     price=row.get("price"),
                     hunt_phase=(lifecycle_raw or {}).get("phase"),
-                    short_score=dump.get("dump_score"),
-                    short_phase=dump.get("phase"),
-                    short_confirmed=dump.get("confirmed"),
-                    short_hunt_skipped=dump.get("hunt_skipped"),
-                    long_score=long_setup.get("long_score"),
-                    long_phase=long_setup.get("phase"),
-                    long_confirmed=long_setup.get("confirmed"),
-                    long_hunt_skipped=long_setup.get("hunt_skipped"),
-                    data_missing=(row.get("data_quality") or {}).get("fields_missing"),
+                    short_score=_tick_conviction(dump),
+                    short_phase=dump.get("phase") or "—",
+                    short_confirmed=bool(dump.get("confirmed")),
+                    short_gate=_tick_gate(dump),
+                    long_score=_tick_conviction(long_setup),
+                    long_phase=long_setup.get("phase") or "—",
+                    long_confirmed=bool(long_setup.get("confirmed")),
+                    long_gate=_tick_gate(long_setup),
+                    data_missing=(row.get("data_quality") or {}).get("fields_missing") or [],
                 )
-                if dump.get("hunt_skipped") or long_setup.get("hunt_skipped"):
+                skip_short = dump.get("hunt_skipped") or (
+                    dump and not dump.get("confirmed") and dump.get("gate_reason")
+                )
+                skip_long = long_setup.get("hunt_skipped") or (
+                    long_setup and not long_setup.get("confirmed") and long_setup.get("gate_reason")
+                )
+                if skip_short or skip_long:
                     LOG.info(
                         "watch_hunt_skipped",
                         symbol=symbol,
                         phase=(lifecycle_raw or {}).get("phase"),
-                        short_skipped=dump.get("hunt_skipped"),
-                        long_skipped=long_setup.get("hunt_skipped"),
+                        short_skipped=skip_short or "",
+                        long_skipped=skip_long or "",
                     )
                 tick_routes = route_tick(row)
                 row["setup_routes"] = [
@@ -733,6 +758,16 @@ async def run_tick(
                             },
                         )
                     if nsetup and bool(nsetup.get("confirmed")):
+                        if hunt_auto_confirm_blocked(symbol):
+                            append_signal_event(
+                                "blocked",
+                                symbol=symbol,
+                                direction=ndir,
+                                detail="pinned_monitor_only",
+                                payload={"block_code": "pinned_monitor_only"},
+                            )
+                            clear_signal_notify(symbol)
+                            continue
                         gate, delivery_tier = _evaluate_delivery_row(
                             row,
                             hot_path=hot_path,
@@ -985,6 +1020,15 @@ async def run_tick(
                                 },
                             )
                             continue
+                        if hunt_auto_confirm_blocked(symbol):
+                            append_signal_event(
+                                "blocked",
+                                symbol=symbol,
+                                direction=direction,
+                                detail="pinned_monitor_only",
+                                payload={"block_code": "pinned_monitor_only"},
+                            )
+                            continue
                         if row.get("price_stale"):
                             append_signal_event(
                                 "blocked",
@@ -1103,6 +1147,15 @@ async def run_tick(
                             and broadcaster is not None
                             and armed_setup
                         ):
+                            if hunt_auto_confirm_blocked(symbol):
+                                append_signal_event(
+                                    "blocked",
+                                    symbol=symbol,
+                                    direction=direction,
+                                    detail="pinned_monitor_only",
+                                    payload={"block_code": "pinned_monitor_only"},
+                                )
+                                continue
                             armed_gate, armed_tier = _evaluate_delivery_row(
                                 row,
                                 hot_path=hot_path,
@@ -1639,9 +1692,9 @@ async def run_tick(
                 )
         if send_telegram and broadcaster is not None:
             await get_advisory_digest().maybe_flush(broadcaster)
-        from hunt_core.runtime.tick_state import last_tick_store
+        from hunt_core.runtime.tick_state import hunt_scan_store
 
-        last_tick_store().put_many(rows)
+        hunt_scan_store().put_many(rows)
         return rows
     finally:
         _save_state(state)

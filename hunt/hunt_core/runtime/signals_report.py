@@ -374,7 +374,7 @@ def _format_active_block(
     extra = collect_report_blockers(
         setup, direction=direction, symbol=sym, lifecycle=lc, row=row
     )
-    secondary = [b for b in extra if b.code != primary.code][:2]
+    secondary = [b for b in extra if b.code != primary][:2] if primary else extra[:2]
     advice = evaluate_stale_advice(
         symbol=sym, direction=direction, lifecycle=lc, setup=setup, sig=sig
     )

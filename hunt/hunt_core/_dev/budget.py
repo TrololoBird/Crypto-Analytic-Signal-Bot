@@ -9,9 +9,9 @@ from pathlib import Path
 
 CORE_ROOT = Path(__file__).resolve().parents[1]
 ENTRY = CORE_ROOT / "__main__.py"
-# Hot-path only — _dev/ is dev gate (see HUNT_ARCHITECTURE.md).
+# Hot-path only — _dev/ and legacy gate/ (_dev/check_logic compat; fusion runtime bypasses gate).
 LOC_BUDGET = 58_000  # pre-launch expansion: gate splits, EV shadow, cycle tick (~57.8k, 2026-06-18)
-LOC_SKIP_DIRS = frozenset({"_dev"})
+LOC_SKIP_DIRS = frozenset({"_dev", "gate"})
 
 FORBIDDEN_IMPORTS: frozenset[str] = frozenset(
     {

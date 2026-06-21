@@ -75,9 +75,26 @@ def effective_min_rr_for_delivery(setup: dict[str, Any], *_a: Any, **_k: Any) ->
 
 
 # --- former filters: no veto beyond the fusion gate -------------------------
-def mission_delivery_block(*_a: Any, **_k: Any) -> None:
-    """PRE/MID is decided inside the fusion engine — no separate mission veto."""
-    return None
+def mission_delivery_block(
+    *,
+    direction: str,
+    lifecycle: dict[str, Any] | None = None,
+    setup: dict[str, Any] | None = None,
+    symbol: str = "",
+    **_k: Any,
+) -> GateResult | None:
+    """PRE/MID mission gate for Module 1 hunt scan TG — blocks mid-leg chase."""
+    from hunt_core.gate._mission import mission_delivery_block as _mission
+
+    result = _mission(
+        direction=direction,
+        lifecycle=lifecycle,
+        setup=setup,
+        symbol=symbol,
+    )
+    if result is None:
+        return None
+    return GateResult(ok=result.ok, code=result.code, message=result.message)
 
 
 def delivery_freshness_block(*_a: Any, **_k: Any) -> None:
@@ -115,16 +132,16 @@ def evaluate_formation(setup: dict[str, Any], **_k: Any) -> SimpleNamespace:
     )
 
 
-def collect_report_blockers(setup: dict[str, Any] | None = None, **_k: Any) -> list[str]:
+def collect_report_blockers(setup: dict[str, Any] | None = None, **_k: Any) -> list[GateResult]:
     if isinstance(setup, dict) and not setup.get("confirmed"):
         reason = str(setup.get("gate_reason") or "not_confirmed")
-        return [reason]
+        return [GateResult(ok=False, code=reason, message=reason)]
     return []
 
 
 def primary_block_for_report(setup: dict[str, Any] | None = None, **_k: Any) -> str | None:
     blockers = collect_report_blockers(setup)
-    return blockers[0] if blockers else None
+    return blockers[0].code if blockers else None
 
 
 def evaluate_stale_advice(*_a: Any, **_k: Any) -> None:

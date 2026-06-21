@@ -302,6 +302,7 @@ async def snapshot_symbol(
     kline_map_override: dict[str, Any] | None = None,
     enrichment_pack_override: dict[str, Any] | None = None,
     btc_work_1m: Any | None = None,
+    hunt_fusion: bool = True,
 ) -> dict[str, Any]:
     meta = exchange_by_sym.get(symbol)
     ticker = ticker_by_sym.get(symbol)
@@ -649,6 +650,15 @@ async def snapshot_symbol(
             ),
             "1d": tf_1d,
         }
+        from hunt_core.features.snapshot import enrich_tf_research_fields
+
+        if prepared.work_4h is not None and not prepared.work_4h.is_empty():
+            enrich_tf_research_fields(tf["4h"], prepared.work_4h)
+            enrich_tf_research_fields(tf["4h_closed"], prepared.work_4h)
+        if kline_map.get("1d") is not None:
+            work_1d_m = _prepare_frame(kline_map["1d"], active_groups=prep_groups)
+            if work_1d_m is not None and not work_1d_m.is_empty():
+                enrich_tf_research_fields(tf["1d"], work_1d_m)
         if "1w" in limits and kline_map.get("1w") is not None:
             work_1w = _prepare_frame(kline_map["1w"], active_groups=prep_groups)
             tf["1w"] = (
@@ -968,62 +978,87 @@ async def snapshot_symbol(
 
     apply_cross_exchange_flat(result)
 
-    # --- Fusion detection engine (replaces scan/* + regime FSM + gate scoring) ---
-    leg_gain_pct = round((hunt_h - hunt_l) / hunt_l * 100.0, 1) if hunt_l > 0 else 0.0
-    fall_from_high_pct = round((hunt_h - price) / hunt_h * 100.0, 2) if hunt_h > 0 else 0.0
-    structure_bias = str(structure.get("structure_bias") or "")
-    from hunt_core.detect.delivery_setup import build_delivery_setup
-    from hunt_core.detect.live import build_live_detection
-    from hunt_core.features.feature_engine import build_feature_vector
+    if not hunt_fusion:
+        from hunt_core.runtime.tick_jsonl import ensure_fusion_lifecycle_fields
 
-    detection = None
-    try:
-        _vector = build_feature_vector(prepared, result, symbol=symbol, tf="15m")
-        detection = build_live_detection(symbol, _vector.to_dict())
-    except Exception as exc:  # data gaps must not crash the tick
-        LOG.debug("fusion_detection_skipped | symbol=%s error=%s", symbol, exc)
-
-    side = detection.side if detection is not None else "none"
-    phase_val = detection.phase if detection is not None else "neutral"
-    from hunt_core.detect.phase_compat import fusion_lifecycle_dict
-
-    lifecycle_dict = fusion_lifecycle_dict(
-        detection,
-        structure_bias=structure_bias,
-        fall_from_high_pct=fall_from_high_pct,
-        leg_gain_pct=leg_gain_pct,
-    )
-    from hunt_core.runtime.tick_jsonl import ensure_fusion_lifecycle_fields
-
-    lifecycle_dict = ensure_fusion_lifecycle_fields(lifecycle_dict)
-    result["lifecycle"] = lifecycle_dict
-
-    def _stub_setup(direction: str) -> dict[str, Any]:
-        return {
+        result["plane"] = "deep"
+        neutral_lc = ensure_fusion_lifecycle_fields({"phase": "neutral", "phase_fusion": "neutral"})
+        result["lifecycle"] = neutral_lc
+        stub = {
             "symbol": symbol,
-            "direction": direction,
             "confirmed": False,
-            "phase": phase_val,
-            "lifecycle_phase": phase_val,
-            "lifecycle": lifecycle_dict,
+            "phase": "neutral",
+            "lifecycle_phase": "neutral",
+            "lifecycle": neutral_lc,
         }
-
-    if detection is not None and side in {"long", "short"}:
-        active = build_delivery_setup(detection, result)
-        active["lifecycle"] = lifecycle_dict
-        if side == "short":
-            dump, long_setup = active, _stub_setup("long")
-        else:
-            long_setup, dump = active, _stub_setup("short")
+        result["dump"] = {**stub, "direction": "short"}
+        result["long"] = {**stub, "direction": "long"}
     else:
-        dump, long_setup = _stub_setup("short"), _stub_setup("long")
+        # --- Fusion detection engine (replaces scan/* + regime FSM + gate scoring) ---
+        leg_gain_pct = round((hunt_h - hunt_l) / hunt_l * 100.0, 1) if hunt_l > 0 else 0.0
+        fall_from_high_pct = round((hunt_h - price) / hunt_h * 100.0, 2) if hunt_h > 0 else 0.0
+        structure_bias = str(structure.get("structure_bias") or "")
+        from hunt_core.detect.delivery_setup import build_delivery_setup
+        from hunt_core.detect.live import build_live_detection
+        from hunt_core.features.feature_engine import build_feature_vector
 
-    dump["young_listing"] = young_listing
-    dump["bars_1h"] = bars_1h
-    long_setup["young_listing"] = young_listing
-    long_setup["bars_1h"] = bars_1h
-    result["dump"] = dump
-    result["long"] = long_setup
+        detection = None
+        try:
+            _vector = build_feature_vector(prepared, result, symbol=symbol, tf="15m")
+            detection = build_live_detection(symbol, _vector.to_dict())
+        except Exception as exc:  # data gaps must not crash the tick
+            LOG.debug("fusion_detection_skipped | symbol=%s error=%s", symbol, exc)
+
+        side = detection.side if detection is not None else "none"
+        phase_val = detection.phase if detection is not None else "neutral"
+        from hunt_core.detect.phase_compat import fusion_lifecycle_dict
+
+        lifecycle_dict = fusion_lifecycle_dict(
+            detection,
+            structure_bias=structure_bias,
+            fall_from_high_pct=fall_from_high_pct,
+            leg_gain_pct=leg_gain_pct,
+        )
+        from hunt_core.runtime.tick_jsonl import ensure_fusion_lifecycle_fields
+
+        lifecycle_dict = ensure_fusion_lifecycle_fields(lifecycle_dict)
+        result["lifecycle"] = lifecycle_dict
+        result["plane"] = "hunt"
+
+        def _stub_setup(direction: str) -> dict[str, Any]:
+            return {
+                "symbol": symbol,
+                "direction": direction,
+                "confirmed": False,
+                "phase": phase_val,
+                "lifecycle_phase": phase_val,
+                "lifecycle": lifecycle_dict,
+            }
+
+        if detection is not None and side in {"long", "short"}:
+            active = build_delivery_setup(detection, result)
+            active["lifecycle"] = lifecycle_dict
+            if side == "short":
+                dump, long_setup = active, _stub_setup("long")
+            else:
+                long_setup, dump = active, _stub_setup("short")
+        else:
+            dump, long_setup = _stub_setup("short"), _stub_setup("long")
+
+        dump["young_listing"] = young_listing
+        dump["bars_1h"] = bars_1h
+        long_setup["young_listing"] = young_listing
+        long_setup["bars_1h"] = bars_1h
+        result["dump"] = dump
+        result["long"] = long_setup
+        merge_hunt_extremes(
+            symbol,
+            price=price,
+            rest_hunt_high=rest_h,
+            rest_hunt_low=rest_l,
+            lifecycle_phase=phase_val,
+            market=market,
+        )
     try:
         from hunt_core.confluence.mtf import build_mtf_confluence
 
@@ -1047,15 +1082,15 @@ async def snapshot_symbol(
                 }
     except Exception as exc:
         LOG.debug("mtf_confluence_skipped | symbol=%s error=%s", symbol, exc)
-    merge_hunt_extremes(
-        symbol,
-        price=price,
-        rest_hunt_high=rest_h,
-        rest_hunt_low=rest_l,
-        lifecycle_phase=phase_val,
-        market=market,
-    )
-
+    if hunt_fusion:
+        merge_hunt_extremes(
+            symbol,
+            price=price,
+            rest_hunt_high=rest_h,
+            rest_hunt_low=rest_l,
+            lifecycle_phase=str((result.get("lifecycle") or {}).get("phase") or "neutral"),
+            market=market,
+        )
 
     from hunt_core.features.factors import build_factor_panel
 
@@ -1084,6 +1119,16 @@ async def snapshot_symbol(
                     setup_block["entry_archetype"] = arch
     except Exception as exc:
         LOG.warning("fusion_forecast_stamp_failed | symbol=%s error=%s", symbol, exc)
+
+    try:
+        from hunt_core.analysis.expansion_engine.config import load_expansion_config
+        from hunt_core.runtime.deep_assembly import stamp_expansion_on_row
+
+        exp_cfg = load_expansion_config()
+        if exp_cfg.enabled and exp_cfg.watch_stamp and tier in exp_cfg.watch_stamp_tiers:
+            stamp_expansion_on_row(result)
+    except Exception as exc:
+        LOG.debug("expansion_watch_stamp_failed | symbol=%s error=%s", symbol, exc)
 
     _ensure_kinematic_row_fields(result, ticker)
 

@@ -74,6 +74,18 @@ def hunt_confirmed_direction(row: dict[str, Any]) -> str:
     return ""
 
 
+def prepare_anticipation_delivery(
+    row: dict[str, Any],
+    setup: dict[str, Any],
+    *,
+    direction: str,
+    ws_feed: Any = None,
+) -> None:
+    """Legacy anticipation enricher removed with fusion cutover — no-op."""
+    _ = (row, setup, direction, ws_feed)
+    return None
+
+
 def btc_market_context(btc_work_1h: Any | None) -> dict[str, Any]:
     if btc_work_1h is None or getattr(btc_work_1h, "is_empty", lambda: True)():
         return {}
@@ -97,6 +109,7 @@ __all__ = [
     "btc_market_context",
     "forming_confirm_gaps",
     "hunt_confirmed_direction",
+    "prepare_anticipation_delivery",
     "probe_header",
     "resolve_trade_direction",
     "scenario_summary",

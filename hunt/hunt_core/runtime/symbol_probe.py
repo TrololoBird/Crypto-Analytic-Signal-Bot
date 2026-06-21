@@ -250,6 +250,16 @@ def format_signal_probe_telegram(
             "ℹ️ Уже в watchlist — уведомлю при pre-setup (<code>dump_imminent</code> / "
             "<code>long_imminent</code>)."
         )
+    try:
+        from hunt_core.analysis.expansion_engine.format import format_expansion_section_from_dict
+
+        exp = row.get("expansion")
+        if isinstance(exp, dict):
+            exp_block = format_expansion_section_from_dict(exp)
+            if exp_block:
+                lines.extend(["", exp_block])
+    except Exception:
+        pass
     lines.append("<i>On-demand probe · staggered REST · не прерывает hunt loop</i>")
     return "\n".join(lines)
 
@@ -512,6 +522,13 @@ async def probe_symbol_signal(
         if not delivery_probe:
             append_audit_log(audit)
         row["_signal_audit"] = audit
+        if not catalog_probe and not row.get("error"):
+            try:
+                from hunt_core.runtime.deep_assembly import stamp_expansion_on_row
+
+                stamp_expansion_on_row(row)
+            except Exception:
+                LOG.debug("signal_probe_expansion_stamp_failed", symbol=sym, exc_info=True)
         if delivery_probe:
             row["_probe_kind"] = "delivery"
         elif catalog_probe:
@@ -573,71 +590,27 @@ async def probe_pinned_deep(
     client: HuntCcxtClient | None = None,
 ) -> dict[str, Any]:
     """Extended REST + full prepare + microstructure for pinned anchors."""
-    import os
-
-    from hunt_core.features.microstructure import build_microstructure_context
     from hunt_core.data.universe import cache_is_fresh, load_pinned_cache
+    from hunt_core.runtime.deep_assembly import assemble_deep_tick
     from hunt_core.runtime.query_service import STORE_STALE_S, row_age_seconds
-    from hunt_core.runtime.tick_state import last_tick_store
+    from hunt_core.runtime.tick_state import deep_query_store
 
     sym = normalize_symbol(symbol)
-    cached = last_tick_store().resolve(sym)
-    if isinstance(cached, dict) and not cached.get("error") and cached.get("pinned_verdict"):
+    cached = deep_query_store().resolve(sym)
+    if isinstance(cached, dict) and not cached.get("error") and (
+        cached.get("verdict_v2_summary") or cached.get("pinned_verdict")
+    ):
         age = row_age_seconds(cached)
         if age is not None and age <= STORE_STALE_S:
             out = dict(cached)
-            out["_query_source"] = "tick_store"
+            out["_query_source"] = "deep_store"
             if cache_is_fresh(sym):
                 out["_pinned_cache"] = load_pinned_cache(sym)
             return out
-    old_full = os.environ.get("HUNT_FULL_PREPARE")
-    os.environ["HUNT_FULL_PREPARE"] = "1"
-    try:
-        row = await probe_symbol_signal(
-            sym,
-            stagger_ms=stagger_ms,
-            auto_watchlist=auto_watchlist,
-            client=client,
-        )
-        if row.get("error"):
-            return row
-        market = dict(row.get("market") or {})
-        market["symbol"] = sym
-        ms_by_dir: dict[str, Any] = {}
-        for direction in ("long", "short"):
-            try:
-                ms_by_dir[direction] = build_microstructure_context(
-                    {**market, "direction": direction}
-                )
-            except Exception as exc:
-                LOG.warning(
-                    "microstructure_failed | sym=%s dir=%s error=%s", sym, direction, exc
-                )
-        if ms_by_dir:
-            row["microstructure_by_direction"] = ms_by_dir
-            pick = resolve_trade_direction(row)[0]
-            row["microstructure"] = ms_by_dir.get(pick) or ms_by_dir.get("long")
-        row["_deep_analysis"] = True
-        price = float(row.get("price") or 0)
-        if tf and price > 0 and row.get("mtf") is None:
-            from hunt_core.confluence.mtf import build_mtf_confluence
-
-            row["mtf"] = build_mtf_confluence(
-                sym,
-                tf,
-                price,
-                market=row.get("market"),
-                indicator_panel=row.get("indicator_panel"),
-                row=row,
-            )
-        if cache_is_fresh(sym):
-            row["_pinned_cache"] = load_pinned_cache(sym)
-        return row
-    finally:
-        if old_full is None:
-            os.environ.pop("HUNT_FULL_PREPARE", None)
-        else:
-            os.environ["HUNT_FULL_PREPARE"] = old_full
+    row = await assemble_deep_tick(sym, client, stagger_ms=max(stagger_ms, 200))
+    if cache_is_fresh(sym):
+        row["_pinned_cache"] = load_pinned_cache(sym)
+    return row
 
 
 async def probe_deep_only(

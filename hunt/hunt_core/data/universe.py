@@ -136,6 +136,26 @@ def effective_watch_mode(
     return base
 
 
+
+
+def resolve_hunt_scan_universe(
+    settings: BotSettings,
+    *,
+    static_modes: dict[str, WatchMode] | None = None,
+    watchlist_path: Path = WATCHLIST_PATH,
+    ignited: dict[str, dict[str, Any]] | None = None,
+) -> tuple[tuple[str, ...], dict[str, WatchMode]]:
+    """Module 1 hunt fusion batch — pinned anchors excluded (Module 2 deep plane)."""
+    symbols, modes = resolve_watch_universe(
+        settings,
+        static_modes=static_modes,
+        watchlist_path=watchlist_path,
+        ignited=ignited,
+    )
+    pinned_set = set(PINNED_SYMBOLS)
+    hunt_symbols = tuple(s for s in symbols if s not in pinned_set)
+    return hunt_symbols, modes
+
 __all__ = [
     "DEFAULT_MODES",
     "DEFAULT_SYMBOLS",
@@ -146,6 +166,7 @@ __all__ = [
     "effective_watch_mode",
     "load_watchlist_rows",
     "load_watchlist_symbols",
+    "resolve_hunt_scan_universe",
     "resolve_watch_universe",
 ]
 

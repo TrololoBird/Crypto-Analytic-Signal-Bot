@@ -66,6 +66,20 @@ def _setup_conviction(setup: dict[str, Any], direction: str) -> float:
 
 
 def _pick_focus(row: dict[str, Any]) -> Literal["short", "long"]:
+    v2 = row.get("verdict_v2")
+    if v2 is not None:
+        action = str(getattr(getattr(v2, "signal_decision", None), "action", "") or "")
+        if action == "short":
+            return "short"
+        if action == "long":
+            return "long"
+    summary = row.get("verdict_v2_summary")
+    if isinstance(summary, dict):
+        action = str(summary.get("action") or "")
+        if action == "short":
+            return "short"
+        if action == "long":
+            return "long"
     pv = row.get("pinned_verdict")
     if pv is not None:
         kind = str(getattr(pv, "kind", "") or "")
@@ -197,13 +211,10 @@ async def resolve_query_row(
     stagger_ms: int = 200,
     client: HuntCcxtClient | None = None,
 ) -> tuple[dict[str, Any], str, bool, float | None]:
-    """Return ``(row, source, from_store, age_s)`` — store-first unless ``live``."""
-    from hunt_core.runtime.symbol_probe import (
-        normalize_symbol,
-        probe_pinned_deep,
-        probe_symbol_signal,
-    )
-    from hunt_core.runtime.tick_state import last_tick_store
+    """Return ``(row, source, from_store, age_s)`` — DeepQueryStore first unless ``live``."""
+    from hunt_core.runtime.deep_assembly import assemble_deep_tick
+    from hunt_core.runtime.symbol_probe import normalize_symbol
+    from hunt_core.runtime.tick_state import deep_query_store
 
     sym = normalize_symbol(symbol)
     row: dict[str, Any] | None = None
@@ -212,41 +223,23 @@ async def resolve_query_row(
     source = "live_rest"
 
     if live:
-        if sym in PINNED_SYMBOLS:
-            row = await probe_pinned_deep(
-                sym, stagger_ms=max(stagger_ms, 200), auto_watchlist=True, client=client
-            )
-            source = "pinned_deep_live"
-        else:
-            row = await probe_symbol_signal(
-                sym, stagger_ms=stagger_ms, auto_watchlist=True, client=client
-            )
-            row["_deep_analysis"] = True
-            source = "live_rest"
-    elif not live:
-        cached = last_tick_store().resolve(sym)
+        row = await assemble_deep_tick(sym, client, stagger_ms=max(stagger_ms, 200))
+        source = "deep_live"
+    else:
+        cached = deep_query_store().resolve(sym)
         if isinstance(cached, dict) and not cached.get("error"):
             age_s = row_age_seconds(cached)
             if age_s is None or age_s <= STORE_STALE_S:
                 row = cached
                 from_store = True
-                source = str(cached.get("tick_path") or "tick_store")
+                source = str(cached.get("tick_path") or "deep_store")
                 if age_s is not None and age_s > STORE_FRESH_S:
                     row = dict(cached)
                     row["_stale_store"] = True
 
     if row is None:
-        if sym in PINNED_SYMBOLS:
-            row = await probe_pinned_deep(
-                sym, stagger_ms=max(stagger_ms, 200), auto_watchlist=True, client=client
-            )
-            source = "pinned_deep"
-        else:
-            row = await probe_symbol_signal(
-                sym, stagger_ms=stagger_ms, auto_watchlist=True, client=client
-            )
-            row["_deep_analysis"] = True
-            source = "live_rest"
+        row = await assemble_deep_tick(sym, client, stagger_ms=max(stagger_ms, 200))
+        source = "deep_assembly"
 
     if row.get("maps") and not row.get("maps_forecast"):
         from hunt_core.maps.forecast import stamp_forecasts_on_row
@@ -305,31 +298,39 @@ def _format_blockers_section(dq: DirectionQuery) -> list[str]:
 
 
 def format_query_telegram(q: QueryResult, *, added_watch: bool = False) -> str:
-    """Deep-first /signal — structure/MTF/maps; watch hunter collapsed at bottom."""
-    from hunt_core.detect.deep import build_deep_report_from_lake
+    """Deep-first /signal — analysis/deep structure/MTF/maps; hunt scan collapsed footer."""
+    from hunt_core.analysis.deep.build import build_deep_report
+    from hunt_core.analysis.deep.format_telegram import format_deep_analysis_telegram
+    from hunt_core.runtime.tick_state import hunt_scan_store
 
     focus = q.focus()
-    report = build_deep_report_from_lake(q.symbol)
-    parts: list[str] = [report.text if report is not None else "нет данных для анализа"]
+    try:
+        analysis = build_deep_report(q.row, include_watch_appendix=False)
+        parts: list[str] = [format_deep_analysis_telegram(analysis)]
+    except Exception:
+        parts = [
+            f"🔎 <b>Deep analysis — {html.escape(q.symbol)}</b>\n"
+            "<i>deep assembly failed — /signal SYM --live для REST</i>"
+        ]
 
     watch_lines: list[str] = []
     if added_watch:
         watch_lines.append("<i>+ watchlist</i>")
-    setup = (q.row.get("dump") if focus.direction == "short" else q.row.get("long")) or {}
-    phase = str(setup.get("phase") or "—")
-    if focus.confirmed:
-        watch_lines.append(f"<i>Watch: {focus.direction} confirmed · tier={focus.delivery_tier or '—'}</i>")
+    hunt_row = hunt_scan_store().get(q.symbol)
+    if isinstance(hunt_row, dict) and not hunt_row.get("error"):
+        setup = (hunt_row.get("dump") if focus.direction == "short" else hunt_row.get("long")) or {}
+        phase = str(setup.get("phase") or "—")
+        confirmed = bool(setup.get("confirmed"))
+        if confirmed:
+            watch_lines.append(f"<i>Scan: {focus.direction} confirmed · phase={html.escape(phase)}</i>")
+        else:
+            watch_lines.append(
+                f"<i>Scan: {focus.direction} forming · {html.escape(phase)} · separate plane</i>"
+            )
     else:
-        watch_lines.append(
-            f"<i>Watch: {focus.direction} forming · {html.escape(phase)} · not confirmed</i>"
-        )
-    blockers = [b.code for b in focus.blockers if not b.ok][:4]
-    if blockers:
-        watch_lines.append(
-            "<i>gates: " + ", ".join(html.escape(c) for c in blockers) + "</i>"
-        )
+        watch_lines.append("<i>Scan plane: no hunt tick for symbol (dynamic scan only)</i>")
     if watch_lines:
-        parts.extend(["", "—", "<b>Watch hunter</b> (auto-scan, optional)", *watch_lines])
+        parts.extend(["", "—", "<b>Hunt scan</b> (Module 1, optional)", *watch_lines])
 
     if q.from_store:
         stale = bool(q.row.get("_stale_store"))
@@ -358,7 +359,7 @@ def spawn_background_refresh(
     """Non-blocking REST refresh after a stale store hit — updates LastTickStore only."""
     import asyncio
 
-    from hunt_core.runtime.tick_state import last_tick_store
+    from hunt_core.runtime.tick_state import deep_query_store
 
     async def _run() -> None:
         try:
@@ -366,7 +367,7 @@ def spawn_background_refresh(
                 symbol, live=True, stagger_ms=stagger_ms, client=client
             )
             if isinstance(row, dict) and not row.get("error"):
-                last_tick_store().put(symbol.upper(), row)
+                deep_query_store().put(symbol.upper(), row)
         except Exception:
             pass
 

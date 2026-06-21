@@ -503,6 +503,43 @@ def merge_research_tf_fields(out: dict[str, Any], df: Any) -> dict[str, Any]:
     return out
 
 
+def enrich_tf_maturity_fields(out: dict[str, Any], df: Any) -> dict[str, Any]:
+    """Derive bars_since_cross, trend_age, ema_separation_pct for verdict_v2 maturity."""
+    if df is None or getattr(df, "is_empty", lambda: True)():
+        return out
+    if not isinstance(df, pl.DataFrame):
+        return out
+    if "ema20" not in df.columns or "ema50" not in df.columns:
+        return out
+    e20 = df["ema20"].tail(80)
+    e50 = df["ema50"].tail(80)
+    if e20.len() < 2:
+        return out
+    diff = (e20 - e50).to_list()
+    sign = 1 if diff[-1] >= 0 else -1
+    bars_cross = 0
+    trend_age = 0
+    for i in range(len(diff) - 1, 0, -1):
+        s = 1 if diff[i] >= 0 else -1
+        if s == sign:
+            trend_age += 1
+        else:
+            bars_cross = len(diff) - 1 - i
+            break
+    price = float(df["close"][-1]) if "close" in df.columns else 0.0
+    ema_sep = abs(float(diff[-1])) / price * 100.0 if price > 0 else 0.0
+    out["bars_since_cross"] = float(bars_cross)
+    out["trend_age"] = float(trend_age)
+    out["ema_separation_pct"] = round(ema_sep, 4)
+    return out
+
+
+def enrich_tf_research_fields(out: dict[str, Any], df: Any) -> dict[str, Any]:
+    merge_research_tf_fields(out, df)
+    enrich_tf_maturity_fields(out, df)
+    return out
+
+
 def attach_research_setup_fields(setup: dict[str, Any], *, tf: dict[str, Any], regime: dict[str, Any]) -> None:
     block = tf.get("15m_closed") or tf.get("15m") or {}
     if isinstance(block, dict):

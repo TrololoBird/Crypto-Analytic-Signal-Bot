@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from hunt_core.gate._phase_matrix import export_phase_calibration
+from hunt_core.calibration.phase_matrix import export_phase_calibration
 from hunt_core.params.store import save_calibration_payload
 from hunt_core.paths import HUNT_CALIBRATION, SIGNAL_HISTORY
 from hunt_core.track.outcomes import genuine_closed, is_polluted, outcome_archive_key

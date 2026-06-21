@@ -636,15 +636,16 @@ def _humanize_micro_bias(raw: str) -> str:
 
 
 def format_pinned_deep_analysis(row: dict[str, Any]) -> str:
-    """Deep /signal block via the fusion deep-analysis path (detect/deep)."""
+    """Deep /signal block via analysis/deep (Module 2 — not detect/deep fusion)."""
     sym = str(row.get("symbol") or "")
     if not sym:
         return ""
     try:
-        from hunt_core.detect.deep import build_deep_report_from_lake
+        from hunt_core.analysis.deep.build import build_deep_report
+        from hunt_core.analysis.deep.format_telegram import format_deep_analysis_telegram
 
-        report = build_deep_report_from_lake(sym)
-        return report.text if report is not None else ""
+        analysis = build_deep_report(row, include_watch_appendix=False)
+        return format_deep_analysis_telegram(analysis)
     except Exception:
         return ""
 

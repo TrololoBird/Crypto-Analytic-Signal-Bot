@@ -3,6 +3,7 @@ from __future__ import annotations
 
 
 
+import html
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -513,13 +514,16 @@ def _squeeze_note(row: dict[str, Any], *, direction: str) -> str | None:
             bits.append(f"top-traders long-heavy ({float(top_ls):.2f})")
     except (TypeError, ValueError):
         pass
-    funding = market.get("funding_pct")
-    if funding is None:
-        funding = market.get("funding_rate")
+    funding_pct_raw = market.get("funding_pct")
+    funding_rate_raw = market.get("funding_rate")
     try:
-        fr = float(funding) if funding is not None else None
-        if fr is not None and abs(fr) >= 0.00005:
-            bits.append(f"funding {fr * 100.0:+.3f}%")
+        pct: float | None = None
+        if funding_pct_raw is not None:
+            pct = float(funding_pct_raw)
+        elif funding_rate_raw is not None:
+            pct = float(funding_rate_raw) * 100.0
+        if pct is not None and abs(pct) >= 0.005:
+            bits.append(f"funding {pct:+.3f}%")
     except (TypeError, ValueError):
         pass
     if not bits:

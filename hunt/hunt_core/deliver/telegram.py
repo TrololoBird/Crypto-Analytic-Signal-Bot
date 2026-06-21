@@ -641,8 +641,12 @@ class TelegramBroadcaster:
 
     async def close(self) -> None:
         """Close aiogram bot session."""
-        if self.bot:
+        if not self.bot:
+            return
+        try:
             await self.bot.session.close()
+        finally:
+            self.bot = None  # type: ignore[assignment]
             LOG.info("telegram bot session closed")
 
 

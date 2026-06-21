@@ -10,11 +10,12 @@ from pathlib import Path
 
 from hunt_core.paths import (
     DATA,
+    HUNT_SCAN_JSONL,
+    LEGACY_TICK_JSONL,
     PREP_SHADOW_EVENTS,
     SETUP_CANDIDATES_EVENTS,
     SENT_MESSAGES,
     SIGNAL_EVENTS,
-    TICK_JSONL,
 )
 
 RETENTION_DAYS = 14
@@ -28,43 +29,49 @@ _TELEMETRY_JSONL = (
 
 def rotate_hunt_ticks(*, retention_days: int = RETENTION_DAYS, dry_run: bool = False) -> dict[str, int]:
     today = datetime.now(UTC).strftime("%Y-%m-%d")
-    daily = DATA / f"dump_minute_watch-{today}.jsonl"
+    daily = DATA / f"hunt_scan-{today}.jsonl"
+    legacy_daily = DATA / f"dump_minute_watch-{today}.jsonl"
     stats = {"appended_lines": 0, "archived": 0, "pruned": 0}
 
-    if not TICK_JSONL.exists():
+    source = HUNT_SCAN_JSONL
+    if not source.exists() and LEGACY_TICK_JSONL.exists():
+        source = LEGACY_TICK_JSONL
+
+    if not source.exists():
         return stats
 
-    size = TICK_JSONL.stat().st_size
+    size = source.stat().st_size
     if size < 1024:
         return stats
 
     if daily.exists():
-        with TICK_JSONL.open(encoding="utf-8") as src, daily.open("a", encoding="utf-8") as dst:
+        with source.open(encoding="utf-8") as src, daily.open("a", encoding="utf-8") as dst:
             for line in src:
                 dst.write(line)
                 stats["appended_lines"] += 1
     else:
         if not dry_run:
-            shutil.move(str(TICK_JSONL), str(daily))
+            shutil.move(str(source), str(daily))
         stats["archived"] = 1
 
-    if not dry_run:
-        TICK_JSONL.write_text("", encoding="utf-8")
+    if not dry_run and source == HUNT_SCAN_JSONL:
+        HUNT_SCAN_JSONL.write_text("", encoding="utf-8")
 
     cutoff = datetime.now(UTC) - timedelta(days=retention_days)
-    for path in sorted(DATA.glob("dump_minute_watch-*.jsonl")):
-        stem = path.stem.replace("dump_minute_watch-", "")
-        try:
-            day = datetime.strptime(stem, "%Y-%m-%d").replace(tzinfo=UTC)
-        except ValueError:
-            continue
-        if day < cutoff:
-            gz = path.with_suffix(path.suffix + ".gz")
-            if not dry_run:
-                with path.open("rb") as f_in, gzip.open(gz, "wb") as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-                path.unlink()
-            stats["pruned"] += 1
+    for pattern in ("hunt_scan-*.jsonl", "dump_minute_watch-*.jsonl"):
+        for path in sorted(DATA.glob(pattern)):
+            stem = path.stem.replace("hunt_scan-", "").replace("dump_minute_watch-", "")
+            try:
+                day = datetime.strptime(stem, "%Y-%m-%d").replace(tzinfo=UTC)
+            except ValueError:
+                continue
+            if day < cutoff:
+                gz = path.with_suffix(path.suffix + ".gz")
+                if not dry_run:
+                    with path.open("rb") as f_in, gzip.open(gz, "wb") as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                    path.unlink()
+                stats["pruned"] += 1
 
     return stats
 

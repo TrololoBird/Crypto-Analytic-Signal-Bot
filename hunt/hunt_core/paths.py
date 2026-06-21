@@ -13,7 +13,17 @@ SNAPSHOTS = DATA / "snapshots"
 WATCHLIST = DATA / "hunt_watchlist.json"
 SIGNAL_STATE = DATA / "hunt_signal_state.json"
 TELEGRAM_COOLDOWN = DATA / "dump_watch_telegram_state.json"
-TICK_JSONL = DATA / "dump_minute_watch.jsonl"
+HUNT_SCAN_JSONL = DATA / "hunt_scan.jsonl"
+DEEP_TICKS_JSONL = DATA / "deep_ticks.jsonl"
+# Expansion Engine — advisory PRE-PUMP/PRE-DUMP scan + outcome learning ledger.
+EXPANSION_SCAN_JSONL = DATA / "expansion_scan.jsonl"
+EXPANSION_OUTCOMES_JSONL = DATA / "expansion_outcomes.jsonl"
+EXPANSION_CALIBRATION_JSON = DATA / "expansion_calibration.json"
+EXPANSION_ALERT_STATE = DATA / "expansion_alert_state.json"
+EXPANSION_RUNTIME_STATE_JSON = DATA / "expansion_runtime_state.json"
+# Legacy alias — writers use HUNT_SCAN_JSONL; readers fall back to dump_minute_watch.jsonl
+TICK_JSONL = HUNT_SCAN_JSONL
+LEGACY_TICK_JSONL = DATA / "dump_minute_watch.jsonl"
 WATCH_LOG = DATA / "dump_minute_watch.log"
 IGNITION_STATE = DATA / "hunt_ignition_state.json"
 PUMP_HISTORY = DATA / "pump_history.json"
@@ -48,6 +58,10 @@ LAKE = DATA / "lake"
 LAKE_DB = LAKE / "hunt_lake.sqlite"
 LAKE_PARQUET = LAKE / "parquet"
 MAPS_LAKE_JSONL = LAKE / "maps_bundles.jsonl"
+VERDICT_V2_PATTERN_AUDIT_JSONL = DATA / "verdict_v2_patterns.jsonl"
+VERDICT_V2_CALIBRATION_JSON = DATA / "verdict_v2_calibration.json"
+VERDICT_V2_GATE_OVERRIDES_JSON = DATA / "verdict_v2_gate_overrides.json"
+VERDICT_V2_SIGNAL_QUEUE_JSON = DATA / "verdict_v2_signal_queue.json"
 UNIFIED_LABELS = DATA / "unified_labels.jsonl"
 BASELINE_DIR = DATA / "baseline"
 
@@ -57,11 +71,19 @@ __all__ = [
     "BACKTEST_OUTCOMES_ENRICHED",
     "BASELINE_DIR",
     "DATA",
+    "DEEP_TICKS_JSONL",
     "DEEP_WATCH_GLOB",
+    "EXPANSION_ALERT_STATE",
+    "EXPANSION_CALIBRATION_JSON",
+    "EXPANSION_OUTCOMES_JSONL",
+    "EXPANSION_RUNTIME_STATE_JSON",
+    "EXPANSION_SCAN_JSONL",
     "DUMP_HUNT_ALERT_STATE",
     "EWMA_THRESHOLDS",
     "GATE_EDGE_OUTCOMES",
     "HUNT_CALIBRATION",
+    "HUNT_SCAN_JSONL",
+    "LEGACY_TICK_JSONL",
     "IGNITION_STATE",
     "INTEL_DOSSIER_JSON",
     "INTEL_DOSSIER_MD",
@@ -86,6 +108,10 @@ __all__ = [
     "TELEGRAM_COOLDOWN",
     "TICK_JSONL",
     "UNIFIED_LABELS",
+    "VERDICT_V2_CALIBRATION_JSON",
+    "VERDICT_V2_GATE_OVERRIDES_JSON",
+    "VERDICT_V2_PATTERN_AUDIT_JSONL",
+    "VERDICT_V2_SIGNAL_QUEUE_JSON",
     "WATCHLIST",
     "WATCH_LOG",
 ]

@@ -2,13 +2,15 @@
 
 Standalone **crypto-hunter** package (`hunt/`, import `hunt_core`). No `engine.*`, no `bot.*`, no `hunt/scripts/` on hot path.
 
-## Product — three runtime modes
+## Product — two independent planes (+ catalog)
 
-| Mode | Trigger | Pipeline branch | Telegram |
-|------|---------|-----------------|----------|
-| **Hunt scan** | `python -m hunt_core watch` every N sec | fusion detect → delivery bridge → gates | ARMED / TRIGGERED confirm |
-| **Deep analysis** | pinned tick + `/signal SYM` | `detect/deep` + maps forecasts | Brief + 2 scenarios |
-| **Catalog** | `/signals [SYMS]` | 7 setup detectors + probability | Setup list + tracker block |
+| Plane | Trigger | Pipeline | Artifacts | Telegram |
+|-------|---------|----------|-----------|----------|
+| **Module 1 — Hunt scan** | `watch` tick (dynamic universe only) | fusion detect → delivery → gates | `data/hunt_scan.jsonl`, `plane=hunt` | ARMED / CONFIRM for **alts only** (pinned blocked) |
+| **Module 2 — Deep analysis** | `deep_pinned_loop` + `/signal` / `/analyze` | `analysis/deep` + `pinned_deep` + maps | `data/deep_ticks.jsonl`, `pinned_cache/` | Change-only for pinned; on-demand for user symbols |
+| **Catalog** | `/signals [SYMS]` | 7 setup detectors + probability | setup candidates | Setup list + tracker block |
+
+Pinned anchors (BTC/ETH/XAU/XAG) stay on WS for market context but are **excluded** from Module 1 fusion ticks. Module 2 never calls `build_live_detection` or hunt delivery gates for TG.
 
 **North star (short):** gate_edge hold-to-target SL ≤30%, TP1+ ≥50% (n≥30). Long TG off by default until n≥30.
 
@@ -46,15 +48,17 @@ hunt/
 
 Fusion migration **done** (2026-06-20): legacy `scan/{predump,prepump,…}` and `regime/leg_fsm` deleted; detection is `detect/*` only.
 
-## Hot path (one watch tick)
+## Hot path (watch tick — Module 1 only)
 
 ```
-run_loop → market.factory → data.collect.snapshot_symbol
-  → features.prepare + lake append
-  → detect.live.build_live_detection → detect.delivery_bridge
-  → track (prep_shadow, candidates, reconcile)
-  → [confirmed] validate_signal_contract → gate.delivery → deliver.dispatch → deliver.telegram
-  → [pinned] detect/deep or analysis.pinned_deep
+run_loop → resolve_hunt_scan_universe (no pinned fusion)
+  → data.collect.snapshot_symbol (hunt_fusion=True, plane=hunt)
+  → detect.live.build_live_detection → delivery bridge → gates
+  → hunt_scan.jsonl + HuntScanStore
+  → [confirmed alt] deliver.telegram (pinned blocked via hunt_auto_confirm_blocked)
+
+deep_pinned_loop (background, Module 2):
+  assemble_deep_tick (hunt_fusion=False, plane=deep) → analysis/deep → change-only TG
 ```
 
 ### Delivery invariant

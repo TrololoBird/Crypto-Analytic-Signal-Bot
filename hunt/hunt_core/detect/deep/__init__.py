@@ -1,10 +1,7 @@
-"""Independent deep-analysis path on the fusion factor layer.
+"""Offline/dev fusion deep reports — NOT for operator Telegram.
 
-Reuses the same calibrated factors as the watch detector but is **decoupled from the
-watch gate**: it runs on any symbol in any phase (no MID block, no gate requirement),
-producing a rich human-readable read — directional lean, per-factor breakdown,
-ATR-scaled forecast scenarios, and a verdict — for ``/signal <SYMBOL>`` and pinned
-symbols. Analysis only; it never delivers a signal.
+Operator TG and ``/signal`` use ``hunt_core.analysis.deep`` (Module 2).
+This package reuses watch fusion factors for regression and ``_dev`` replay only.
 """
 from __future__ import annotations
 

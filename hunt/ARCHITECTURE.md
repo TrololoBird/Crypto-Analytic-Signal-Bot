@@ -381,24 +381,25 @@ Hard confirms (любой набор):
 
 ---
 
-## 11. Default pinned universe
+## 11. Default pinned universe (Module 2 — deep only)
 
-| Symbol | Mode | Rationale |
-|--------|------|-----------|
-| JCTUSDT | short | memecoin pump fade |
-| BEATUSDT | both | lifecycle flips post-dump |
-| VELVETUSDT | long | post-dump bounce hunt |
-| HYPEUSDT | long | bounce |
-| BTCUSDT | both | context anchor |
+| Symbol | Hunt scan TG | Deep continuous |
+|--------|--------------|-----------------|
+| BTCUSDT | blocked | `deep_pinned_loop` change-only |
+| ETHUSDT | blocked | same |
+| XAUUSDT | blocked | same |
+| XAGUSDT | blocked | same |
 
-Scanner может добавить до 12 dynamic symbols; pinned modes **не перезаписываются** scanner bias для DEFAULT_SYMBOLS.
+Module 1 (`hunt_scan.jsonl`) processes **dynamic alts only**. Pinned stay on WS for BTC context; fusion + confirm TG never fire for anchors (`HUNT_PINNED_AUTO_CONFIRM=0`).
+
+Scanner может добавить до 12 dynamic symbols.
 
 ---
 
 ## 12. Independent verification
 
 Repo root `scripts/hunt_probe_independent.py` — CCXT sync probe (raw REST removed).  
-Hunt runtime: `python -m hunt_core._dev.smoke_signals`, `ccxt_plane_smoke`.
+Hunt runtime: `python -m hunt_core._dev.smoke_signals`, `python -m hunt_core._dev.smoke_deep_pinned`, `ccxt_plane_smoke`.
 
 ---
 

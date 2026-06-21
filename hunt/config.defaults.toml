@@ -67,8 +67,102 @@ squeeze_top_fall_max_pct = 8.0
 [pinned.defaults]
 symbols = ["BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT"]
 modes = { BTCUSDT = "both", ETHUSDT = "both", XAUUSDT = "both", XAGUSDT = "both" }
+deep_continuous = true
+hunt_confirm = false
 # Deep /signal uses HUNT_FULL_PREPARE=1 + microstructure for these anchors.
 deep_analysis = { BTCUSDT = true, ETHUSDT = true, XAUUSDT = true, XAGUSDT = true }
+
+[deep.pinned]
+interval_s = 300
+tg_on_change = true
+tg_stale_hours = 4
+
+[hunt.expansion]
+# PRE-PUMP / PRE-DUMP engine — separate from Verdict V2 and fusion delivery.
+enabled = true
+watch_stamp = true
+history_persist = true
+history_persist_samples = 40
+history_persist_max_symbols = 64
+runtime_save_interval_s = 300
+review_loop = true
+review_interval_s = 3600
+apply_calibration = true
+delta_lookback_bars = 120
+persistence_threshold = 0.80
+forecast_min_quality = 0.55
+execution_min_trigger = 0.50
+fake_breakout_block = 0.55
+scan_top_n = 50
+state_strong_prob = 0.62
+state_dominance_ratio = 1.20
+state_pivot_prob = 0.45
+# Pinned TG alerts — separate messages from Verdict deep change TG
+tg_pinned_alerts = true
+tg_on_change = true
+tg_min_quality = 0.45
+tg_min_trigger = 0.50
+tg_stale_hours = 4
+tg_cooldown_min = 45
+# Watch-universe scan alerts (batched digest, excludes pinned anchors)
+tg_universe_scan = true
+tg_universe_interval_s = 900
+tg_universe_top_n = 5
+tg_universe_min_opp = 0.35
+
+[deep.verdict_v2]
+enabled = true
+horizon_primary = "B"
+pattern_ambiguity_spread = 0.08
+fragility_high_threshold = 0.65
+disagreement_high_threshold = 0.65
+trade_rr_favorable = 1.2
+trade_rr_poor = 0.8
+auto_tune_gates = true
+auto_tune_min_samples = 8
+target_signal_rate = 0.20
+signal_queue_enabled = true
+signal_queue_top_n = 3
+signal_queue_tg_footer = true
+signal_queue_tg_batch = true
+signal_queue_tg_min_rank = 2
+
+[deep.verdict_v2.signal_gates]
+strength_min = 0.50
+fragility_max = 0.65
+trade_quality_min = 0.45
+rr_primary_min = 0.75
+data_coverage_min = 0.50
+require_timing_c = true
+
+[deep.verdict_v2.trade_plan]
+entry_atr_pad = 0.25
+stop_atr_fallback = 1.5
+min_rr_tp1 = 0.8
+
+[deep.verdict_v2.priorities_a]
+macro_trend = 0.28
+structural = 0.24
+positioning = 0.22
+derivatives = 0.16
+flow = 0.10
+execution_pressure = 0.0
+
+[deep.verdict_v2.priorities_b]
+macro_trend = 0.18
+structural = 0.18
+positioning = 0.22
+derivatives = 0.15
+flow = 0.15
+execution_pressure = 0.06
+
+[deep.verdict_v2.priorities_c]
+macro_trend = 0.08
+structural = 0.10
+positioning = 0.20
+derivatives = 0.12
+flow = 0.22
+execution_pressure = 0.18
 
 [market_regime]
 refresh_hours = 4

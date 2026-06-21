@@ -149,10 +149,24 @@ def _confirm_blocked_bias_wait(
 
 
 
+def hunt_auto_confirm_blocked(symbol: str) -> bool:
+    """Pinned anchors never receive Module 1 hunt TG confirm (override via env)."""
+    if os.environ.get("HUNT_PINNED_AUTO_CONFIRM", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return False
+    from hunt_core.data.universe import PINNED_SYMBOLS
+
+    return str(symbol or "").upper() in PINNED_SYMBOLS
+
+
 __all__ = [
     "_advisory_tg_enabled",
     "_confirm_blocked_bias_wait",
     "_confirm_delivery_suppressed",
     "_maybe_emit_scanner_continuation_wait",
     "_should_emit_blocked_telemetry",
+    "hunt_auto_confirm_blocked",
 ]

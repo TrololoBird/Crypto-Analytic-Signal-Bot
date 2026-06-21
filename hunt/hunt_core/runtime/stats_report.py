@@ -380,8 +380,55 @@ def build_stats_report_text() -> str:
     bt = _backtest_snippet()
     if bt:
         blocks.append(bt)
+    exp = _expansion_stats_block()
+    if exp:
+        blocks.append(exp)
     blocks.append("<i>Hunt stats · read-only · не auto-trade</i>")
     return "\n\n".join(blocks)
+
+
+def _expansion_stats_block() -> str | None:
+    """Compact expansion ledger + cache — separate product from fusion WR."""
+    try:
+        from hunt_core.analysis.expansion_engine.config import load_expansion_config
+        from hunt_core.analysis.expansion_engine.learning import (
+            load_expansion_outcomes,
+            summarize_outcomes,
+        )
+        from hunt_core.analysis.expansion_engine.learning.review import pending_review_horizons
+        from hunt_core.paths import EXPANSION_CALIBRATION_JSON, EXPANSION_RUNTIME_STATE_JSON
+        from hunt_core.runtime.expansion_universe_scan import collect_universe_rows
+
+        cfg = load_expansion_config()
+        if not cfg.enabled:
+            return None
+        records = load_expansion_outcomes()
+        summary = summarize_outcomes(records)
+        pending = sum(1 for r in records if pending_review_horizons(r))
+        cache = collect_universe_rows()
+        stamped = sum(1 for r in cache.values() if isinstance(r.get("expansion"), dict))
+        cal = "yes" if EXPANSION_CALIBRATION_JSON.is_file() else "no"
+        runtime = "yes" if EXPANSION_RUNTIME_STATE_JSON.is_file() else "no"
+        lines = [
+            "<b>Expansion Engine</b>",
+            (
+                f"cache <code>{len(cache)}</code> (stamped <code>{stamped}</code>) · "
+                f"ledger <code>{len(records)}</code> · graded <code>{summary.get('graded') or 0}</code> · "
+                f"pending <code>{pending}</code>"
+            ),
+            (
+                f"watch_stamp <code>{cfg.watch_stamp}</code> · "
+                f"pinned TG <code>{cfg.tg_pinned_alerts}</code> · "
+                f"universe TG <code>{cfg.tg_universe_scan}</code>"
+            ),
+            f"calibration <code>{cal}</code> · runtime_state <code>{runtime}</code>",
+        ]
+        hit = summary.get("real_hit_rate")
+        if hit is not None:
+            lines.append(f"outcome hit rate <code>{float(hit) * 100:.1f}%</code>")
+        return "\n".join(lines)
+    except Exception:
+        return None
 
 
 async def deliver_stats_report(broadcaster: TelegramBroadcaster) -> None:

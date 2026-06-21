@@ -198,6 +198,21 @@ def _brief_reason(row: dict[str, Any]) -> str:
     if lc_phase == "no_setup":
         return "Нет structural setup — оба сценария справочные, вход только по confirm"
 
+    summary = row.get("verdict_v2_summary")
+    if isinstance(summary, dict) and summary.get("action"):
+        action = str(summary.get("action") or "wait").upper()
+        path = str(summary.get("path") or "")
+        reason = str(summary.get("reason") or "")
+        if action in {"LONG", "SHORT"}:
+            base = f"{action} · {path.replace('_', ' ')}"
+        else:
+            gates = summary.get("gates_failed") or []
+            gate_txt = ", ".join(str(g) for g in gates[:3]) if gates else "gates ok"
+            base = f"WAIT · {path.replace('_', ' ')} · {gate_txt}"
+        if reason and action == "WAIT":
+            return base[:160]
+        return base[:160]
+
     verdict = row.get("pinned_verdict")
     if verdict is not None:
         reason = str(getattr(verdict, "reason", "") or "")
