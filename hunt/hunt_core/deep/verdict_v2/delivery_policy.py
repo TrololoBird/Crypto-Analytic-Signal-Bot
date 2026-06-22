@@ -119,11 +119,21 @@ def format_cycle_peers_footer(
         if not sym or sym == hero_sym:
             continue
         summary = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else {}
-        action = str(summary.get("action") or "wait").upper()
+        _ACTION_RU = {"LONG": "ЛОНГ", "SHORT": "ШОРТ", "WAIT": "ЖДЁМ"}
+        _ACT_RU = {
+            "in_entry_zone": "в зоне",
+            "above_zone": "выше зоны",
+            "below_zone": "ниже зоны",
+            "approaching": "подходит",
+            "breakout": "пробой",
+        }
+        action_raw = str(summary.get("action") or "wait").upper()
+        action_ru = _ACTION_RU.get(action_raw, action_raw)
         strength = float(summary.get("strength") or 0)
         act = str(summary.get("activation") or "")
-        act_bit = f" · {act.replace('_', ' ')}" if act and act != "idle" else ""
-        peers.append(f"{html.escape(sym)} {action} ({strength:.2f}{act_bit})")
+        act_ru = _ACT_RU.get(act, act.replace("_", " ")) if act and act != "idle" else ""
+        act_bit = f" · {act_ru}" if act_ru else ""
+        peers.append(f"{html.escape(sym.replace('USDT', '-USDT'))} {action_ru} ({strength:.2f}{act_bit})")
     if not peers:
         return ""
-    return f"<i>Also updated: {' · '.join(peers)}</i>"
+    return f"<i>Также обновлено: {' · '.join(peers)}</i>"

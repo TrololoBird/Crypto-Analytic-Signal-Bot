@@ -260,21 +260,35 @@ def format_queue_telegram(queue: dict[str, Any] | None = None) -> str:
     top3 = data.get("top3") or []
     if not top3:
         return ""
-    lines = ["📋 <b>Opportunity queue</b> (TOP3)"]
+    _ACTION_RU = {"LONG": "ЛОНГ", "SHORT": "ШОРТ", "WAIT": "ЖДЁМ"}
+    _LIFE_RU = {"WAITING": "ожидание", "ACTIVE": "активен", "WATCHING": "наблюдение"}
+    _ACT_RU = {
+        "in_entry_zone": "в зоне",
+        "above_zone": "выше зоны",
+        "below_zone": "ниже зоны",
+        "approaching": "подходит",
+        "breakout": "пробой",
+        "idle": "",
+    }
+    lines = ["📋 <b>Очередь сигналов</b> (TOP3)"]
     for item in top3:
         if not isinstance(item, dict):
             continue
-        sym = html.escape(str(item.get("symbol") or ""))
-        action = str(item.get("action") or "wait").upper()
-        life = str(item.get("lifecycle") or "waiting").upper()
+        sym = html.escape(str(item.get("symbol") or "").replace("USDT", "-USDT"))
+        action_raw = str(item.get("action") or "wait").upper()
+        action_ru = _ACTION_RU.get(action_raw, action_raw)
+        life_raw = str(item.get("lifecycle") or "waiting").upper()
+        life_ru = _LIFE_RU.get(life_raw, life_raw.lower())
         score = float(item.get("opportunity_score") or 0)
         path = html.escape(str(item.get("path") or "").replace("_", " "))
         act = str(item.get("activation") or "idle")
+        act_ru = _ACT_RU.get(act, act.replace("_", " "))
         rank = int(item.get("rank") or 0)
-        promo = " · ⬆ promoted" if item.get("promoted") else ""
+        promo = " · ⬆" if item.get("promoted") else ""
+        act_bit = f" · {html.escape(act_ru)}" if act_ru else ""
         lines.append(
-            f"{rank}. <b>{sym}</b> {action} · {life} · "
-            f"score <code>{score:.2f}</code> · {path} · {html.escape(act)}{promo}"
+            f"{rank}. <b>{sym}</b> {action_ru} · {life_ru} · "
+            f"ранг <code>{score:.2f}</code> · {path}{act_bit}{promo}"
         )
-    lines.append("<i>rank only — not win probability</i>")
+    lines.append("<i>ранг, не вероятность</i>")
     return "\n".join(lines)
