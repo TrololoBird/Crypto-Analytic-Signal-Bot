@@ -10,7 +10,7 @@ from pathlib import Path
 CORE_ROOT = Path(__file__).resolve().parents[1]
 ENTRY = CORE_ROOT / "__main__.py"
 # Hot-path only — _dev/ and legacy gate/ (_dev/check_logic compat; fusion runtime bypasses gate).
-LOC_BUDGET = 59_800  # two-module rebuild + P0' geometry validator + backfill OI helpers (2026-06-22)
+LOC_BUDGET = 60_100  # + lake_warmup for cold scanner candidates (2026-06-22)
 LOC_SKIP_DIRS = frozenset({"_dev", "gate"})
 LOC_SKIP_PREFIXES = (
     "analysis/expansion_engine/",  # thin shims → _dev/expansion_lab

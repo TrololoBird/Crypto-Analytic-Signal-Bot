@@ -221,6 +221,7 @@ async def run_loop(
     prescan_engine = PrescanEngine()
     load_planner = HuntLoadPlanner()
     digest_scheduler = get_digest_scheduler()
+    _lake_warmed_syms: set[str] = set()
     pump_store = load_pump_history()
     if not pump_store.symbols and not pump_store.event_log:
         backfill_from_jsonl(pump_store)
@@ -525,6 +526,26 @@ async def run_loop(
                         LOG.info("watch_tracker_pin", symbols=pinned_n)
                 merged = gate_symbol_list(merged, exchange=ex, label="watch_universe")
                 active = tuple(dict.fromkeys(merged))
+                # Warm the feature lake for any symbol that has never been backfilled.
+                # Needed so the phase classifier (requires close × 30+) does not return
+                # NEUTRAL on every tick for freshly-promoted scanner candidates.
+                _cold = [
+                    s for s in active
+                    if s not in _lake_warmed_syms
+                ]
+                if _cold:
+                    from hunt_core.data.lake import query_features as _qf
+                    from hunt_core.data.lake_warmup import ensure_lake_warm
+                    _really_cold = [
+                        s for s in _cold
+                        if _qf(s, tf="15m", limit=31).height < 30
+                    ]
+                    if _really_cold:
+                        LOG.info("lake_warmup_start", symbols=_really_cold)
+                        _warmup_writer = FeatureLakeWriter()
+                        await ensure_lake_warm(client, _really_cold, writer=_warmup_writer)
+                        _warmup_writer.close()
+                    _lake_warmed_syms.update(_cold)
                 hunt_active = tuple(
                     s
                     for s in active
