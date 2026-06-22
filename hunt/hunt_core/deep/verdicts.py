@@ -85,7 +85,10 @@ def _verdict_from_v2(v2: Any) -> dict[str, Any]:
         side_raw = max(side_raw, 1.0 - v2.signal_strength.score)
 
     scores = {"long": long_raw, "short": short_raw, "sideways": side_raw}
-    dominant = action if action in {"long", "short"} else "sideways"
+    # Dominant = highest-scoring verdict so the panel is internally consistent.
+    # A WAIT action does NOT force "sideways": the directional lean (e.g. short 0.68)
+    # is still shown as dominant; the WAIT/gates line communicates "don't trade yet".
+    dominant = max(scores, key=scores.get)  # type: ignore[arg-type]
     gap = max(scores.values()) - sorted(scores.values())[-2]
 
     def _pack(raw: float) -> dict[str, Any]:

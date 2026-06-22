@@ -264,6 +264,9 @@ def format_queue_telegram(queue: dict[str, Any] | None = None) -> str:
     _LIFE_RU = {"WAITING": "ожидание", "ACTIVE": "активен", "WATCHING": "наблюдение"}
     _ACT_RU = {
         "in_entry_zone": "в зоне",
+        "at_catalyst": "на катализаторе",
+        "near_catalyst": "близко к катализатору",
+        "near_entry": "подходит",
         "above_zone": "выше зоны",
         "below_zone": "ниже зоны",
         "approaching": "подходит",

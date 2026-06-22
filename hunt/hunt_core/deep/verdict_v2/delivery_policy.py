@@ -122,6 +122,9 @@ def format_cycle_peers_footer(
         _ACTION_RU = {"LONG": "ЛОНГ", "SHORT": "ШОРТ", "WAIT": "ЖДЁМ"}
         _ACT_RU = {
             "in_entry_zone": "в зоне",
+            "at_catalyst": "на катализаторе",
+            "near_catalyst": "близко к катализатору",
+            "near_entry": "подходит",
             "above_zone": "выше зоны",
             "below_zone": "ниже зоны",
             "approaching": "подходит",

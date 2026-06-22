@@ -321,16 +321,18 @@ def format_query_telegram(q: QueryResult, *, added_watch: bool = False) -> str:
         setup = (hunt_row.get("dump") if focus.direction == "short" else hunt_row.get("long")) or {}
         phase = str(setup.get("phase") or "—")
         confirmed = bool(setup.get("confirmed"))
+        _DIR_RU = {"short": "шорт", "long": "лонг"}
+        dir_ru = _DIR_RU.get(focus.direction, focus.direction)
         if confirmed:
-            watch_lines.append(f"<i>Scan: {focus.direction} confirmed · phase={html.escape(phase)}</i>")
+            watch_lines.append(f"<i>Сканер: {dir_ru} подтверждён · фаза={html.escape(phase)}</i>")
         else:
             watch_lines.append(
-                f"<i>Scan: {focus.direction} forming · {html.escape(phase)} · separate plane</i>"
+                f"<i>Сканер: {dir_ru} формируется · {html.escape(phase)} · отдельный контур</i>"
             )
     else:
-        watch_lines.append("<i>Scan plane: no hunt tick for symbol (dynamic scan only)</i>")
+        watch_lines.append("<i>Сканер: нет тика по символу (динамический скан)</i>")
     if watch_lines:
-        parts.extend(["", "—", "<b>Hunt scan</b> (Module 1, optional)", *watch_lines])
+        parts.extend(["", "—", "<b>Сканер</b> (Модуль 2, справочно)", *watch_lines])
 
     if q.from_store:
         stale = bool(q.row.get("_stale_store"))

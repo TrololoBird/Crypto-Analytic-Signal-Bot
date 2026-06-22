@@ -55,7 +55,7 @@ def format_telegram_confirm(
         delivery_tier=delivery_tier,
         confirm_reasons=confirm_reasons,
     )
-    if "Level map" not in body:
+    if "Карта уровней" not in body:
         grid = build_confluence_grid(row)
         if grid:
             body = f"{body}\n{format_grid_telegram(grid)}"

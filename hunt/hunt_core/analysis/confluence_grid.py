@@ -31,11 +31,12 @@ def format_grid_telegram(grid: list[dict[str, Any]]) -> str:
         return ""
     from hunt_core.deliver._labels import fmt_price  # noqa: PLC0415
 
-    lines = ["<b>Level map</b> <i>(POC/structure · не стакан и не ликвидации)</i>"]
+    lines = ["<b>Карта уровней</b> <i>(POC/структура · не стакан и не ликвидации)</i>"]
+    _K_RU = {"poc": "POC", "support": "поддержка", "resistance": "сопротивл", "vah": "VAH", "val": "VAL"}
     for g in grid[:6]:
         tf = g.get("tf", "?")
         # fmt_price avoids float noise like poc=0.42266075000000003 (MLIVE-9).
-        parts = [f"{k}={fmt_price(g[k])}" for k in ("poc", "support", "resistance", "vah", "val") if g.get(k)]
+        parts = [f"{_K_RU.get(k, k)}={fmt_price(g[k])}" for k in ("poc", "support", "resistance", "vah", "val") if g.get(k)]
         lines.append(f"· {tf}: " + ", ".join(parts[:4]))
     return "\n".join(lines)
 

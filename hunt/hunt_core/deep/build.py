@@ -31,7 +31,9 @@ class DeepAnalysis:
         mtf = self.row.get("mtf")
         if mtf is None:
             return ""
-        lines = ["📐 <b>MTF structure</b>"]
+        _TREND_RU = {"bull": "вверх", "bear": "вниз", "neutral": "нейтр", "long": "вверх", "short": "вниз"}
+        _SIDE_RU = {"long": "лонг", "short": "шорт", "neutral": "боковик", "sideways": "боковик"}
+        lines = ["📐 <b>МТФ структура</b>"]
         tf_signals = getattr(mtf, "tf_signals", None) or {}
         for tf_key in ("1w", "1d", "4h", "1h", "15m", "5m"):
             sig = tf_signals.get(tf_key)
@@ -41,39 +43,58 @@ class DeepAnalysis:
                 sig.get("trend") if isinstance(sig, dict) else None
             )
             if trend:
-                lines.append(f"  {tf_key}: <b>{html.escape(str(trend))}</b>")
+                trend_ru = _TREND_RU.get(str(trend), str(trend))
+                lines.append(f"  {tf_key}: <b>{html.escape(trend_ru)}</b>")
         long_s = getattr(mtf, "long_scenario", None)
         short_s = getattr(mtf, "short_scenario", None)
         if long_s and short_s:
             lines.append(
-                f"  long {float(getattr(long_s, 'score', 0)):.2f} "
+                f"  лонг {float(getattr(long_s, 'score', 0)):.2f} "
                 f"({getattr(long_s, 'htf_count', 0)}/{getattr(long_s, 'htf_total', 0)} HTF) · "
-                f"short {float(getattr(short_s, 'score', 0)):.2f} "
+                f"шорт {float(getattr(short_s, 'score', 0)):.2f} "
                 f"({getattr(short_s, 'htf_count', 0)}/{getattr(short_s, 'htf_total', 0)} HTF)"
             )
         dom = getattr(mtf, "dominant", None)
         if dom:
-            lines.append(f"  dominant: <b>{html.escape(str(dom))}</b>")
+            dom_ru = _SIDE_RU.get(str(dom), str(dom))
+            lines.append(f"  преобладает: <b>{html.escape(dom_ru)}</b>")
         return "\n".join(lines) if len(lines) > 1 else ""
 
     def verdicts_text(self) -> str:
         v = self.verdicts
-        lines = ["📊 <b>Verdicts</b> (structure-first)"]
+        _SIDE_RU = {"long": "лонг", "short": "шорт", "sideways": "боковик", "neutral": "нет"}
+        lines = ["📊 <b>Вердикты</b> (структура-сначала)"]
         for key in ("long", "short", "sideways"):
             block = v.get(key) or {}
             score = block.get("score", 0)
             conf = block.get("confidence", 0)
-            lines.append(f"  {key}: score <code>{score:.2f}</code> conf <code>{conf:.0%}</code>")
+            key_ru = _SIDE_RU.get(key, key)
+            lines.append(f"  {key_ru}: оценка <code>{score:.2f}</code> увер. <code>{conf:.0%}</code>")
         dom = v.get("dominant") or "neutral"
-        lines.append(f"Dominant: <b>{dom}</b>")
+        dom_ru = _SIDE_RU.get(str(dom), str(dom))
+        lines.append(f"Преобладает: <b>{dom_ru}</b>")
         reason = v.get("reason")
         if reason:
             clean = _sanitize_deep_reason(str(reason))
             if clean:
+                _GATE_RU = {
+                    "timing_c": "ждём подтверждения",
+                    "timing_a": "рано — ждём",
+                    "timing_b": "нет триггера",
+                    "rr_primary": "R:R недостаточный",
+                    "conviction": "низкая убеждённость",
+                    "structure": "структура не подтверждена",
+                    "confluence": "нет слияния факторов",
+                    "strength": "сила сигнала низкая",
+                    "fragility": "высокая хрупкость",
+                }
+                clean = clean.replace("WAIT:", "ЖДЁМ:")
+                for code, ru in _GATE_RU.items():
+                    clean = clean.replace(code, ru)
                 lines.append(f"<i>{html.escape(clean)}</i>")
         src = v.get("source")
         if src:
-            lines.append(f"<i>source: {src}</i>")
+            lines.append(f"<i>источник: {src}</i>")
         return "\n".join(lines)
 
     def indicator_panel_text(self) -> str:

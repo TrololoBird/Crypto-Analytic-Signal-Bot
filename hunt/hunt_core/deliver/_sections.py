@@ -357,24 +357,24 @@ def format_liquidation_map_section(row: dict[str, Any]) -> str:
     venues = market.get("liq_venues") or []
     if nearest_long is None and nearest_short is None and not cascade:
         return ""
-    lines = ["💥 <b>Карта ликвидаций</b> <i>(margin call pools · не стакан)</i>"]
+    lines = ["💥 <b>Карта ликвидаций</b> <i>(пулы маржин-коллов · не стакан)</i>"]
     if venues:
         lines[0] += f" <i>({', '.join(str(v)[:3].upper() for v in venues)})</i>"
     if nearest_long is not None:
         pull = market.get("liq_magnet_pull_long_pct")
         tail = f" ({pull:.2f}%)" if pull is not None else ""
-        lines.append(f"Long liq magnet ↓ <code>{_fmt_price(float(nearest_long))}</code>{tail}")
+        lines.append(f"Магнит лонг-ликвидаций ↓ <code>{_fmt_price(float(nearest_long))}</code>{tail}")
     if nearest_short is not None:
         pull = market.get("liq_magnet_pull_short_pct")
         tail = f" ({pull:.2f}%)" if pull is not None else ""
-        lines.append(f"Short squeeze ↑ <code>{_fmt_price(float(nearest_short))}</code>{tail}")
+        lines.append(f"Шорт-сквиз ↑ <code>{_fmt_price(float(nearest_short))}</code>{tail}")
     if cascade:
-        label = "long flush" if cascade == "long_flush" else "short squeeze"
-        lines.append(f"Cascade risk: <b>{label}</b>")
+        label = "лонг-флаш" if cascade == "long_flush" else "шорт-сквиз"
+        lines.append(f"Риск каскада: <b>{label}</b>")
     if conf is not None:
-        lines.append(f"Forward confidence: <code>{float(conf):.2f}</code>")
+        lines.append(f"Прогнозная уверенность: <code>{float(conf):.2f}</code>")
     if events is not None and int(events) > 0:
-        lines.append(f"Realized events (5m window): <code>{int(events)}</code>")
+        lines.append(f"Событий за 5m: <code>{int(events)}</code>")
     zones = market.get("liq_density_zones") or []
     hot = [z for z in zones if isinstance(z, dict) and float(z.get("intensity") or 0) >= 0.5][:2]
     if hot:
@@ -384,7 +384,7 @@ def format_liquidation_map_section(row: dict[str, Any]) -> str:
             if z.get("price_center") is not None
         ]
         if bits:
-            lines.append("Hot zones: " + " · ".join(bits))
+            lines.append("Горячие зоны: " + " · ".join(bits))
     return "\n".join(lines)
 
 
@@ -534,15 +534,17 @@ def format_book_walls_section(row: dict[str, Any]) -> str:
     venues = walls.get("venues")
     if isinstance(venues, list) and len(venues) > 1:
         lines[0] += f" <i>({len(venues)} бирж)</i>"
-    bid_line = _wall_line("Bid", bids, "🟢")
-    ask_line = _wall_line("Ask", asks, "🔴")
+    bid_line = _wall_line("Покупка", bids, "🟢")
+    ask_line = _wall_line("Продажа", asks, "🔴")
     if bid_line:
         lines.append(bid_line)
     if ask_line:
         lines.append(ask_line)
     imb = walls.get("depth_imbalance")
     if imb is not None:
-        lines.append(f"Imbalance: <code>{float(imb):+.3f}</code>")
+        imb_f = float(imb)
+        lean = "перевес покупателей" if imb_f > 0.15 else ("перевес продавцов" if imb_f < -0.15 else "баланс")
+        lines.append(f"Дисбаланс стакана: <code>{imb_f:+.3f}</code> ({lean})")
     maps = row.get("maps") or {}
     ob = maps.get("orderbook") if isinstance(maps, dict) else None
     if isinstance(ob, dict):

@@ -9,7 +9,7 @@ from hunt_core.deep.verdict_v2.types import ScenarioVerdict
 _ACTION_RU = {"LONG": "ЛОНГ", "SHORT": "ШОРТ", "WAIT": "ЖДЁМ"}
 _STRENGTH_RU = {"strong": "сильный", "moderate": "средний", "weak": "слабый"}
 _FRAG_RU = {"low": "низкая", "medium": "средняя", "high": "высокая"}
-_TRADE_RU = {"good": "хорошая", "marginal": "слабая", "not trade": "не торговать", "not_trade": "не торговать"}
+_TRADE_RU = {"favorable": "благоприятная", "marginal": "слабая", "poor": "плохая"}
 _GATE_RU = {
     "timing_c": "ждём подтверждения",
     "timing_a": "рано — ждём",
@@ -18,9 +18,62 @@ _GATE_RU = {
     "structure": "структура не подтверждена",
     "confluence": "нет слияния факторов",
     "rr": "R:R недостаточный",
+    "rr_primary": "R:R недостаточный",
+    "strength": "сила сигнала низкая",
+    "fragility": "высокая хрупкость",
     "regime": "рыночный режим против",
 }
 _ENTRY_TYPE_RU = {"market": "рынок", "pullback_limit": "лимит на откате", "limit": "лимит"}
+
+# Path-type and pattern vocabulary → Russian (display only; raw keys drive logic).
+_PATH_RU = {
+    "continuation_down": "продолжение вниз",
+    "continuation_up": "продолжение вверх",
+    "breakout_down": "пробой вниз",
+    "breakout_up": "пробой вверх",
+    "pullback_down": "откат вниз",
+    "pullback_up": "откат вверх",
+    "squeeze_down": "сжатие вниз",
+    "squeeze_up": "сжатие вверх",
+    "bull_pullback": "бычий откат",
+    "bear_rally": "медвежий отскок",
+    "long_squeeze": "сквиз лонгов",
+    "short_squeeze": "сквиз шортов",
+    "liquidity_sweep": "снятие ликвидности",
+    "stop_hunt": "охота за стопами",
+    "distribution": "распределение",
+    "accumulation": "накопление",
+    "range": "боковик",
+}
+_CATALYST_RU = {
+    "Sweep highs then reject": "снятие хаёв и отказ",
+    "Sweep lows then reclaim": "снятие лоёв и возврат",
+    "Lose POC": "потеря POC",
+    "Reclaim POC": "возврат над POC",
+    "Key level break": "пробой ключевого уровня",
+    "Funding flush": "сброс фандинга",
+    "Flow confirmation": "подтверждение потока",
+}
+
+
+def _ru_path(token: str) -> str:
+    key = token.strip().lower().replace(" ", "_")
+    return _PATH_RU.get(key, token.strip())
+
+
+def _ru_narrative(narrative: str) -> str:
+    """Translate engine narrative '<path> via <pattern>' to Russian."""
+    narrative = narrative.strip()
+    if narrative.startswith("via "):
+        return f"через {_ru_path(narrative[4:])}"
+    if " via " in narrative:
+        left, right = narrative.split(" via ", 1)
+        return f"{_ru_path(left)} через {_ru_path(right)}"
+    return _ru_path(narrative)
+
+
+def _ru_catalyst(label: str) -> str:
+    return _CATALYST_RU.get(label.strip(), label.strip())
 
 
 def _px(v: float) -> str:
@@ -64,20 +117,21 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
     action_ru = _ACTION_RU.get(action, action)
     emoji = {"LONG": "🟢", "SHORT": "🔴", "WAIT": "⏳"}.get(action, "⏳")
 
-    path_type_str = html.escape(path.type.replace("_", " "))
+    path_type_str = html.escape(_ru_path(path.type))
     narr = _dedup_narrative(path.type, path.narrative[:80])
-    narr_str = html.escape(narr) if narr else ""
+    narr_str = html.escape(_ru_narrative(narr)) if narr else ""
 
     lines = [f"{emoji} <b>{sym} — {action_ru}</b>"]
-    if narr_str:
+    if narr_str and narr_str != path_type_str:
         lines.append(f"Сценарий: <b>{path_type_str}</b> · {narr_str}")
     else:
         lines.append(f"Сценарий: <b>{path_type_str}</b>")
 
+    cat_label_ru = html.escape(_ru_catalyst(cat.label))
     if cat.trigger_level:
-        lines.append(f"Катализатор: {html.escape(cat.label)} @ <code>{_px(cat.trigger_level)}</code>")
+        lines.append(f"Катализатор: {cat_label_ru} @ <code>{_px(cat.trigger_level)}</code>")
     else:
-        lines.append(f"Катализатор: {html.escape(cat.label)}")
+        lines.append(f"Катализатор: {cat_label_ru}")
 
     if plan and action in {"LONG", "SHORT"}:
         lo, hi = plan.entry_zone
@@ -91,8 +145,9 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
                 f"TP3: <code>{_px(plan.take_profit_3)}</code> ({plan.rr_tp3:.1f}R)",
             ]
         )
-    elif plan and tq.verdict not in {"marginal", "not trade", "not_trade"}:
-        # Only show advisory levels for WAIT if trade quality is acceptable
+    elif plan and tq.verdict == "favorable":
+        # Only show advisory levels for WAIT when trade quality is favorable;
+        # marginal/poor WAITs must not surface actionable SL/TP (R:R often < 1).
         lines.append(
             f"Уровни (справочно): SL <code>{_px(plan.stop_loss)}</code> · "
             f"TP1 <code>{_px(plan.take_profit_1)}</code>"
@@ -100,7 +155,7 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
 
     move = path.expected_move_pct
     time_h = path.expected_time_h
-    lines.append(f"Движение: {move[0]:.1f}–{move[1]:.1f}% · {time_h[0]:.0f}–{time_h[1]:.0f}h")
+    lines.append(f"Движение: {move[0]:.1f}–{move[1]:.1f}% · {time_h[0]:.0f}–{time_h[1]:.0f}ч")
 
     strength_ru = _STRENGTH_RU.get(strength.label, strength.label)
     frag_ru = _FRAG_RU.get(frag.label, frag.label)
@@ -123,6 +178,9 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
         act = str(assess_activation(row, summary).get("state") or "")
     _ACT_RU = {
         "in_entry_zone": "в зоне входа",
+        "at_catalyst": "на уровне катализатора",
+        "near_catalyst": "близко к катализатору",
+        "near_entry": "подходит к зоне",
         "above_zone": "выше зоны",
         "below_zone": "ниже зоны",
         "approaching": "подходит к зоне",
@@ -141,7 +199,8 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
         if str(p).lower().replace("_", " ") != main_path_key
     ]
     if unique_alts:
-        lines.append(f"<i>Альт. сценарий: {html.escape(', '.join(str(p) for p in unique_alts))}</i>")
+        alt_ru = ", ".join(_ru_path(str(p)) for p in unique_alts)
+        lines.append(f"<i>Альт. сценарий: {html.escape(alt_ru)}</i>")
 
     from hunt_core.deep.verdict_v2.config import load_verdict_v2_config
 

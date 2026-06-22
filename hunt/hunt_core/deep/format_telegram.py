@@ -24,7 +24,7 @@ def _expansion_text(row: dict[str, Any]) -> str:
 def format_deep_analysis_telegram(analysis: DeepAnalysis) -> str:
     sym = html.escape(analysis.symbol.replace("USDT", "-USDT"))
     price = float(analysis.row.get("price") or 0)
-    header = f"🔬 <b>Deep analysis</b> — <code>{sym}</code>"
+    header = f"🔬 <b>Глубокий анализ</b> — <code>{sym}</code>"
     if price > 0:
         header += f" · <code>{fmt_price(price)}</code>"
 
@@ -45,14 +45,14 @@ def format_deep_analysis_telegram(analysis: DeepAnalysis) -> str:
     if fc_txt:
         parts.extend(["", fc_txt])
     if analysis.include_watch_appendix:
-        parts.extend(["", "<i>Watch hunter status — appendix only (PRE-only auto-scan)</i>"])
-        wd = "would deliver" if analysis.would_deliver else "would NOT deliver"
+        parts.extend(["", "<i>Статус сканера — справочно (только PRE-автоскан)</i>"])
+        wd = "сигнал прошёл бы" if analysis.would_deliver else "сигнал НЕ прошёл бы"
         parts.append(f"<i>{wd}</i>")
         if analysis.blockers:
             bl = ", ".join(html.escape(str(b)) for b in analysis.blockers[:5])
-            parts.append(f"<i>blockers: {bl}</i>")
+            parts.append(f"<i>блокеры: {bl}</i>")
     parts.append("")
-    parts.append("<i>Structure / MTF / maps · manual entry · not financial advice</i>")
+    parts.append("<i>Структура / МТФ / карты · вход вручную · не инвестрекомендация</i>")
     return "\n".join(parts)
 
 
