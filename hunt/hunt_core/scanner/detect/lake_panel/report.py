@@ -11,10 +11,10 @@ from dataclasses import dataclass, field
 
 import polars as pl
 
-from hunt_core.scanner.detect.deep.forecast import Scenario, forecast_scenarios
-from hunt_core.scanner.detect.deep.format import format_deep_telegram
-from hunt_core.scanner.detect.deep.panel import DeepPanel, build_panel
-from hunt_core.scanner.detect.deep.verdict import Verdict, build_verdict
+from hunt_core.scanner.detect.lake_panel.forecast import Scenario, forecast_scenarios
+from hunt_core.scanner.detect.lake_panel.format import format_deep_telegram
+from hunt_core.scanner.detect.lake_panel.panel import DeepPanel, build_panel
+from hunt_core.scanner.detect.lake_panel.verdict import Verdict, build_verdict
 from hunt_core.scanner.detect.windows import DEFAULT_LOOKBACK, FeatureWindow, build_window
 
 

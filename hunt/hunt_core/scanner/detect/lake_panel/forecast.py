@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from hunt_core.scanner.detect.deep.panel import DeepPanel
+from hunt_core.scanner.detect.lake_panel.panel import DeepPanel
 from hunt_core.scanner.detect.windows import FeatureWindow
 
 # (bars, label) — 15m bars to a human horizon.

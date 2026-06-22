@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from hunt_core.scanner.detect import phase as Ph
-from hunt_core.scanner.detect.deep.panel import DeepPanel
+from hunt_core.scanner.detect.lake_panel.panel import DeepPanel
 from hunt_core.scanner.detect.fusion import MIN_ACTIVE_DIRECTIONAL
 
 # Presentation-only confidence bands for the strength word (display, not a gate).

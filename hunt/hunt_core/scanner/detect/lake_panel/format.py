@@ -1,9 +1,9 @@
 """Telegram HTML rendering for the deep-analysis report."""
 from __future__ import annotations
 
-from hunt_core.scanner.detect.deep.forecast import Scenario
-from hunt_core.scanner.detect.deep.panel import DeepPanel
-from hunt_core.scanner.detect.deep.verdict import Verdict
+from hunt_core.scanner.detect.lake_panel.forecast import Scenario
+from hunt_core.scanner.detect.lake_panel.panel import DeepPanel
+from hunt_core.scanner.detect.lake_panel.verdict import Verdict
 
 _SIDE_EMOJI = {"long": "🟢 LONG lean", "short": "🔴 SHORT lean", "none": "⚪ no lean"}
 
