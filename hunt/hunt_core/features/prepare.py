@@ -17,8 +17,8 @@ from typing import Any, cast
 import polars as pl
 import structlog
 
-from hunt_core.analysis.adx_thresholds import ADX_RANGE_MAX, ADX_TREND_MIN
-from hunt_core.analysis.trend_engine import bias_from_ema_row
+from hunt_core.shared.facts.adx_thresholds import ADX_RANGE_MAX, ADX_TREND_MIN
+from hunt_core.shared.facts.trend import bias_from_ema_row
 from hunt_core.features.pivots import _swing_points
 
 from ..domain.schemas import PreparedSymbol, SymbolFrames, UniverseSymbol
@@ -489,6 +489,24 @@ def _sanity_check_all_frames(prepared: PreparedSymbol) -> dict[str, list[str]]:
     return report
 
 
+def _log_frame_defect(symbol: str, interval: str, warning: str) -> None:
+    """Optional 4h defects are debug-only; required TFs stay at warning."""
+    if interval == "4h":
+        LOG.debug(
+            "prepared frame quality defect | symbol=%s interval=%s defect=%s",
+            symbol,
+            interval,
+            warning,
+        )
+        return
+    LOG.warning(
+        "prepared frame quality defect | symbol=%s interval=%s defect=%s",
+        symbol,
+        interval,
+        warning,
+    )
+
+
 def _cached_prepare_frame(
     frame: pl.DataFrame,
     *,
@@ -506,12 +524,7 @@ def _cached_prepare_frame(
             fallback_book=enrich_book,
         )
         for warning in _sanity_check_prepared_frame(result, symbol, interval):
-            LOG.warning(
-                "prepared frame quality defect | symbol=%s interval=%s defect=%s",
-                symbol,
-                interval,
-                warning,
-            )
+            _log_frame_defect(symbol, interval, warning)
         return result
 
     last = frame.row(-1, named=True)
@@ -522,12 +535,7 @@ def _cached_prepare_frame(
     except KeyError, TypeError, ValueError, OverflowError:
         result = _prepare_frame(frame, active_groups=active_groups)
         for warning in _sanity_check_prepared_frame(result, symbol, interval):
-            LOG.warning(
-                "prepared frame quality defect | symbol=%s interval=%s defect=%s",
-                symbol,
-                interval,
-                warning,
-            )
+            _log_frame_defect(symbol, interval, warning)
         return result
 
     tail_signature = _tail_value_signature(last)
@@ -552,12 +560,7 @@ def _cached_prepare_frame(
         fallback_book=enrich_book,
     )
     for warning in _sanity_check_prepared_frame(result, symbol, interval):
-        LOG.warning(
-            "prepared frame quality defect | symbol=%s interval=%s defect=%s",
-            symbol,
-            interval,
-            warning,
-        )
+        _log_frame_defect(symbol, interval, warning)
     target_cache.put(key, result)
     return result
 
@@ -702,10 +705,22 @@ def prepare_symbol(
         prepared_frames.append(("4h", work_4h))
     for interval, frame in prepared_frames:
         if frame is None:
+            if interval == "4h":
+                work_4h = None
+                _log.debug("%s: optional 4h frame skipped | frame=None", sym)
+                continue
             _log.warning("%s: prepare rejected | interval=%s frame=None", sym, interval)
             return None
         defects = _sanity_check_prepared_frame(frame, sym, interval)
         if defects:
+            if interval == "4h":
+                work_4h = None
+                _log.debug(
+                    "%s: optional 4h frame skipped | defects=%s",
+                    sym,
+                    defects,
+                )
+                continue
             _log.warning(
                 "%s: prepare rejected - frame quality defects | interval=%s defects=%s",
                 sym,

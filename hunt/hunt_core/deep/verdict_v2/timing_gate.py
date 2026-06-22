@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from hunt_core.analysis.trend_engine import trend_from_snapshot
+from hunt_core.shared.facts.trend import trend_from_snapshot
 from hunt_core.deep.verdict_v2._helpers import direction_bias, safe_float
 from hunt_core.deep.verdict_v2.types import HorizonForecast
 

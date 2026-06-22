@@ -13,7 +13,7 @@ from hunt_core.deep.verdict_v2._helpers import (
     trend_scores_from_snap,
 )
 from hunt_core.deep.verdict_v2.types import DataQualityReport, EngineOutput
-from hunt_core.analysis.trend_engine import trend_from_snapshot
+from hunt_core.shared.facts.trend import trend_from_snapshot
 from hunt_core.shared.primitives.targets import (
     collect_downward_targets as _collect_downward_targets,
     collect_upward_targets as _collect_upward_targets,
@@ -297,6 +297,43 @@ def run_execution_pressure(row: dict[str, Any]) -> EngineOutput:
     return _pack(long, short, coverage=coverage_ratio(present, 4), info=info, evidence=evidence, used=present, avail=4, base_priority=0.12)
 
 
+def run_cross_consensus(row: dict[str, Any]) -> EngineOutput:
+    """Cross-venue taker + book consensus (R1)."""
+    cx = row.get("cross_microstructure") if isinstance(row.get("cross_microstructure"), dict) else {}
+    market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    evidence: list[str] = []
+    long, short = 0.5, 0.5
+    used = avail = 0
+    taker = cx.get("taker_flow") if isinstance(cx.get("taker_flow"), dict) else {}
+    consensus = taker.get("consensus")
+    if consensus is not None:
+        avail += 1
+        used += 1
+        c = float(consensus)
+        if c > 1.02:
+            long += min(0.18, (c - 1.0) * 0.5)
+            evidence.append(f"cross_taker_bull={c:.2f}")
+        elif c < 0.98:
+            short += min(0.18, (1.0 - c) * 0.5)
+            evidence.append(f"cross_taker_bear={c:.2f}")
+    walls = cx.get("book_walls") if isinstance(cx.get("book_walls"), dict) else {}
+    imb = walls.get("depth_imbalance")
+    if imb is None:
+        imb = market.get("depth_imbalance")
+    if imb is not None:
+        avail += 1
+        used += 1
+        iv = float(imb)
+        if iv > 0.08:
+            long += min(0.12, iv)
+            evidence.append("cross_book_bid")
+        elif iv < -0.08:
+            short += min(0.12, abs(iv))
+            evidence.append("cross_book_ask")
+    info = clamp01(0.38 + used * 0.14)
+    return _pack(long, short, coverage=coverage_ratio(used, max(avail, 2)), info=info, evidence=evidence, used=used, avail=max(avail, 2), base_priority=0.14)
+
+
 def run_data_quality(row: dict[str, Any]) -> DataQualityReport:
     market = row.get("market") if isinstance(row.get("market"), dict) else {}
     maps = row.get("maps") if isinstance(row.get("maps"), dict) else {}
@@ -323,4 +360,5 @@ def run_all_engines(row: dict[str, Any]) -> dict[str, EngineOutput]:
         "derivatives": run_derivatives(row),
         "flow": run_flow(row),
         "execution_pressure": run_execution_pressure(row),
+        "cross_consensus": run_cross_consensus(row),
     }

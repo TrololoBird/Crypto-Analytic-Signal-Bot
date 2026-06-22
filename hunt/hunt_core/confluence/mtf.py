@@ -46,7 +46,7 @@ def _trend_from_snap(snap: dict[str, Any]) -> Literal["bull", "bear", "neutral"]
     # The cached value may be "mixed" (neutral) even when close < ema20 < ema50
     # (post-pump dump: ema200 still below due to pre-pump history, so the full
     # 4-EMA bear stack fails despite a clear 3-EMA bearish alignment).
-    from hunt_core.analysis.trend_engine import trend_from_snapshot
+    from hunt_core.shared.facts.trend import trend_from_snapshot
 
     recomputed = trend_from_snapshot(snap, require_adx=False)
     if recomputed in ("bull", "bear"):

@@ -27,7 +27,7 @@ from hunt_core.features.polars_ta_bridge import rsi_series as _rsi_series
 from hunt_core.features.prepare_columns import patch_work_4h, resolve_prepare_groups_for_symbol
 from hunt_core.features.prepare_frame import _prepare_frame
 from hunt_core.features.research_plugins import enrich_research_columns, research_snapshot_fields
-from hunt_core.analysis.trend_engine import legacy_trend_label, trend_from_snapshot
+from hunt_core.shared.facts.trend import legacy_trend_label, trend_from_snapshot
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.features.structure import detect_pp
 from hunt_core.market.client import depth_imbalance_from_book, microprice_bias_from_book
