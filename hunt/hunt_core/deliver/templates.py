@@ -33,8 +33,10 @@ def format_advisory_early(row: dict[str, Any], *, note: str) -> str:
 
 def format_pinned_summary(row: dict[str, Any]) -> str:
     sym = str(row.get("symbol") or "").replace("USDT", "-USDT")
-    verdict = row.get("pinned_verdict") or row.get("pinned_scenario") or {}
-    direction = verdict.get("direction") or verdict.get("primary_direction") or "—"
+    summary = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else {}
+    _ACTION_RU = {"long": "ЛОНГ", "short": "ШОРТ", "wait": "ЖДЁМ"}
+    action = str(summary.get("action") or "wait").lower()
+    direction = _ACTION_RU.get(action, "—")
     return f"📌 <b>{sym}</b> · {direction}"
 
 

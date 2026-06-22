@@ -84,11 +84,6 @@ def deep_change_fingerprint(row: dict[str, Any]) -> str:
         except (TypeError, ValueError, IndexError):
             pass
 
-    # Legacy fallback when verdict_v2 absent
-    if not action:
-        pv = row.get("pinned_verdict")
-        action = str(getattr(pv, "kind", "") or "")
-
     return json.dumps(
         {
             "action": action,

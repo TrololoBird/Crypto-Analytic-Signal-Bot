@@ -213,14 +213,10 @@ def _brief_reason(row: dict[str, Any]) -> str:
             return base[:160]
         return base[:160]
 
-    verdict = row.get("pinned_verdict")
-    if verdict is not None:
-        reason = str(getattr(verdict, "reason", "") or "")
-    else:
-        reason = (
-            f"phase={lc.get('phase') or '—'}"
-            f" · bias={lc.get('recommended_bias') or '—'}"
-        )
+    reason = (
+        f"phase={lc.get('phase') or '—'}"
+        f" · bias={lc.get('recommended_bias') or '—'}"
+    )
     parts = [p.strip() for p in reason.replace(";", "·").split("·") if p.strip()]
     short = " · ".join(parts[:2]) if parts else "ждём closed-bar confirm"
     return short[:160] + ("…" if len(short) > 160 else "")

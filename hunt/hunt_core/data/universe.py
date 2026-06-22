@@ -235,30 +235,20 @@ def save_pinned_cache(symbol: str, row: dict[str, Any]) -> None:
             }
         except (TypeError, ValueError, AttributeError):
             mtf_payload = None
-    panel = row.get("indicator_panel")
-    panel_payload: dict[str, Any] | None = None
-    if panel is not None:
-        try:
-            panel_payload = {
-                "dominant": getattr(panel, "dominant", None),
-                "long_votes": int(getattr(panel, "long_votes", 0)),
-                "short_votes": int(getattr(panel, "short_votes", 0)),
-                "total_votes": int(getattr(panel, "total_votes", 0)),
-                "long_score": float(getattr(panel, "long_score", 0)),
-                "short_score": float(getattr(panel, "short_score", 0)),
-            }
-        except (TypeError, ValueError, AttributeError):
-            panel_payload = None
-    verdict = row.get("pinned_verdict")
+    # Verdict V2 summary is the single verdict source (legacy pinned_verdict /
+    # indicator_panel removed). Map action→kind, strength→confidence.
+    summary = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else None
     verdict_payload: dict[str, Any] | None = None
-    if verdict is not None:
+    if summary:
+        action = str(summary.get("action") or "wait").lower()
+        kind = action if action in {"long", "short"} else "sideways"
         try:
             verdict_payload = {
-                "kind": getattr(verdict, "kind", None),
-                "confidence": float(getattr(verdict, "confidence", 0)),
-                "reason": str(getattr(verdict, "reason", ""))[:240],
+                "kind": kind,
+                "confidence": float(summary.get("strength") or 0),
+                "reason": str(summary.get("reason") or "")[:240],
             }
-        except (TypeError, ValueError, AttributeError):
+        except (TypeError, ValueError):
             verdict_payload = None
     poc_pack = row.get("poc_level_scenarios")
     poc_payload: dict[str, Any] | None = None
@@ -302,8 +292,7 @@ def save_pinned_cache(symbol: str, row: dict[str, Any]) -> None:
         "market": row.get("market"),
         "timeframes": {k: tf.get(k) for k in ("1w", "1d", "4h", "1h", "15m") if tf.get(k)},
         "mtf_summary": mtf_payload,
-        "indicator_panel": panel_payload,
-        "pinned_verdict": verdict_payload,
+        "verdict_v2": verdict_payload,
         "poc_level_scenario": poc_payload,
         "liquidity_scenarios": liq_payload,
         "cross_exchange": row.get("cross_exchange"),

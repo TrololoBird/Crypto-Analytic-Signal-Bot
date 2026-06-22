@@ -128,8 +128,9 @@ def format_signal_probe_telegram(
     regime = row.get("regime") or {}
     corr = regime.get("btc_corr_1h")
 
-    verdict = row.get("pinned_verdict")
-    verdict_kind = getattr(verdict, "kind", None) if verdict is not None else None
+    _vsum = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else {}
+    _vaction = str(_vsum.get("action") or "").lower()
+    verdict_kind = _vaction if _vaction in {"long", "short"} else ("sideways" if _vsum else None)
     if compact and verdict_kind == "sideways":
         header = (
             f"🔍 <b>/signal {sym}</b> · контекст {badge} <b>{dir_label}</b> "
@@ -597,9 +598,7 @@ async def probe_pinned_deep(
 
     sym = normalize_symbol(symbol)
     cached = deep_query_store().resolve(sym)
-    if isinstance(cached, dict) and not cached.get("error") and (
-        cached.get("verdict_v2_summary") or cached.get("pinned_verdict")
-    ):
+    if isinstance(cached, dict) and not cached.get("error") and cached.get("verdict_v2_summary"):
         age = row_age_seconds(cached)
         if age is not None and age <= STORE_STALE_S:
             out = dict(cached)
