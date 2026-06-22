@@ -1207,7 +1207,7 @@ def is_deep_analysis_context(row: dict[str, Any]) -> bool:
     if row.get("_deep_analysis") or row.get("_pinned_reference") or row.get("_signals_catalog"):
         return True
     sym = str(row.get("symbol") or "").strip().upper()
-    from hunt_core.deep.pinned import is_pinned_symbol
+    from hunt_core.data.universe import is_pinned_symbol
 
     return is_pinned_symbol(sym)
 

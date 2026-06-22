@@ -45,9 +45,9 @@ def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
     }
     if levels:
         out["levels"] = levels
-    pinned = row.get("pinned_scenario") or row.get("pinned_verdict")
-    if pinned:
-        out["pinned"] = pinned
+    verdict_summary = row.get("verdict_v2_summary")
+    if verdict_summary:
+        out["verdict_v2"] = verdict_summary
     return out
 
 

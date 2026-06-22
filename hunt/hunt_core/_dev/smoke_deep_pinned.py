@@ -1,4 +1,4 @@
-"""Smoke: deep assembly for all pinned anchors (Module 2, no Telegram)."""
+"""Smoke: deep assembly for all pinned anchors (Module 1 Deep, no Telegram)."""
 from __future__ import annotations
 
 import asyncio
@@ -24,9 +24,6 @@ async def _main() -> int:
         if row.get("plane") != "deep":
             print(f"FAIL {sym}: plane={row.get('plane')}", file=sys.stderr)
             continue
-        if not row.get("pinned_verdict"):
-            print(f"FAIL {sym}: missing pinned_verdict", file=sys.stderr)
-            continue
         v2 = row.get("verdict_v2")
         if v2 is None:
             print(f"FAIL {sym}: missing verdict_v2", file=sys.stderr)
@@ -38,7 +35,6 @@ async def _main() -> int:
             print(f"FAIL {sym}: missing expansion stamp", file=sys.stderr)
             continue
         ok += 1
-        pv = row["pinned_verdict"]
         dec = v2.signal_decision
         path = v2.expected_path
         plan = v2.trade_plan
@@ -47,12 +43,10 @@ async def _main() -> int:
                 {
                     "symbol": sym,
                     "plane": row.get("plane"),
-                    "verdict": getattr(pv, "kind", None),
                     "action": dec.action,
                     "path": path.type,
                     "strength": v2.signal_strength.score,
                     "has_plan": plan is not None,
-                    "confidence": getattr(pv, "confidence", None),
                     "expansion_state": exp.get("state"),
                     "expansion_score": exp.get("expansion_score"),
                     "trigger_probability": exp.get("trigger_probability"),

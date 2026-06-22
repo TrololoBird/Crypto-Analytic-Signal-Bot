@@ -622,7 +622,7 @@ def main() -> int:
     if q.focus_direction != "short":
         issues.append("query focus must prefer short on distribution forming")
     tg = format_query_telegram(q)
-    if "Deep analysis" not in tg:
+    if "Глубокий анализ" not in tg:
         issues.append("format_query_telegram must lead with deep analysis block")
     if "Pre-dump" in tg or "Manipulation fusion" in tg:
         issues.append("format_query_telegram must not expose watch fusion/predump narrative")
@@ -883,7 +883,7 @@ def main() -> int:
         btc_market_context as _btc_shim,
         resolve_trade_direction as _rtd_shim,
     )
-    from hunt_core.analysis.pinned_deep import is_pinned_symbol as _pin_shim  # noqa: F401
+    from hunt_core.data.universe import is_pinned_symbol as _pin_shim  # noqa: F401
 
     dir_row = {
         "symbol": "TESTUSDT",
@@ -1083,8 +1083,8 @@ def main() -> int:
         issues.append("squeeze fixture must block predump")
 
     deep = build_deep_analysis(dist_row, full=False)
-    if deep.verdicts.get("dominant") not in {"long", "short", "sideways"}:
-        issues.append("deep verdicts missing dominant")
+    if not isinstance(deep.forecasts, dict):
+        issues.append("deep report missing forecasts")
 
     if pwin_gate_enabled():
         issues.append("pwin_gate should default off")
@@ -1268,20 +1268,6 @@ def main() -> int:
     )
     if not ok_long or long_reason != "env_override":
         issues.append("long_tg_allowed must pass with HUNT_LONG_TG without wide_hunter")
-
-    from hunt_core.deep.verdicts import build_three_verdicts
-
-    mid_deep_row = {
-        "symbol": "TESTUSDT",
-        "price": 1.0,
-        "lifecycle": {"phase": "dump_active"},
-        "dump": {"dump_score": 99, "dump_fuel": 99},
-        "structure": {"structure_bias": "wait"},
-        "timeframes": {},
-    }
-    deep_v = build_three_verdicts(mid_deep_row)
-    if deep_v.get("dominant") == "short":
-        issues.append("deep verdict must not follow dump_score on mid-leg row")
 
     if issues:
         for item in issues:

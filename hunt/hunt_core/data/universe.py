@@ -45,6 +45,10 @@ def load_pinned_symbols() -> tuple[str, ...]:
 
 PINNED_SYMBOLS: tuple[str, ...] = load_pinned_symbols()
 DEFAULT_SYMBOLS = PINNED_SYMBOLS
+
+
+def is_pinned_symbol(symbol: str) -> bool:
+    return str(symbol or "").upper() in PINNED_SYMBOLS
 DEFAULT_MODES: dict[str, WatchMode] = {sym: "both" for sym in PINNED_SYMBOLS}
 MAX_DYNAMIC_SYMBOLS = 12
 # Debounced prescan outliers merged per tick (on top of resolve_watch_universe cap).
@@ -200,6 +204,7 @@ __all__ = [
     "PINNED_SYMBOLS",
     "WatchMode",
     "effective_watch_mode",
+    "is_pinned_symbol",
     "load_watchlist_rows",
     "load_watchlist_symbols",
     "resolve_hunt_scan_universe",
