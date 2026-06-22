@@ -9,7 +9,9 @@ Historical audit documents retained for reference. Canonical architecture:
 
 | File | Notes |
 |------|-------|
-| `AUDIT_REPORT.md` | Pre-rebuild baseline (copied from docs/) |
-| `AUDIT_HUNT_2026-06-13.md` | June 2026 hunt audit |
+| `BINANCE_API_AUDIT.md` | Binance API surface audit |
+| `CRITICAL_AUDIT_REPORT_2026-06-10.md` | Critical pre-rebuild report |
+| `HUNT_TRUTH_AUDIT.md` | Truth audit snapshot |
+| `MIGRATION_PLAN.md` | Pre-rebuild migration notes |
 
 These files are **not** operational runbooks — see `IMPLEMENTATION_STATUS.md` for current phase state.

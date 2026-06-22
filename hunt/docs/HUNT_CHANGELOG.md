@@ -1,5 +1,12 @@
 # Hunt Changelog (session notes)
 
+## 2026-06-22 — abstract-chasing-cerf plan complete
+
+- **Module 1 Deep R1–R11:** reconcile gate, plan geometry, activation lifecycle, cross-venue DOM, gold equivalence, liq honesty, queue TOP-N, live E2E `BTCUSDT`.
+- **Two-module rebuild:** `deep⊥scanner` lint; shims removed; `detect/deep` → `scanner/detect/lake_panel`; trend facts → `shared/facts/`.
+- **Phase 8 longs ramp:** uncalibrated long delivery → lab lane (`long_ramp_reason`) with full geometry; production unlock via `gate_edge` n≥30 or `HUNT_LONG_TG=1`.
+- **Verification:** `verify_hunt_rebuild.sh`, `check_plan_complete`, `check_deep_e2e` (+ live).
+
 ## 2026-06-20 (d) — TZ review: explicit params, gate floor, phase hysteresis
 
 - **Honest scope**: `docs/FUSION_PARAMS.md` + `detect/config.py` — official fusion tunables.

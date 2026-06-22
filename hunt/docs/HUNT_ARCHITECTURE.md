@@ -7,12 +7,12 @@ Standalone **crypto-hunter** package (`hunt/`, import `hunt_core`). No `engine.*
 | Plane | Trigger | Pipeline | Artifacts | Telegram |
 |-------|---------|----------|-----------|----------|
 | **Module 2 — Scanner** | `watch` tick (dynamic universe only) | fusion detect → delivery → gates | `data/hunt_scan.jsonl`, `plane=hunt` | ARMED / CONFIRM for **alts only** (pinned blocked) |
-| **Module 1 — Deep** | `deep_pinned_loop` + `/signal` / `/analyze` | `analysis/deep` + `pinned_deep` + maps | `data/deep_ticks.jsonl`, `pinned_cache/` | Change-only for pinned; on-demand for user symbols |
+| **Module 1 — Deep** | `deep_pinned_loop` + `/signal` / `/analyze` | `deep/` + maps + `verdict_v2` | `data/deep_ticks.jsonl`, `pinned_cache/` | Change-only for pinned; on-demand for user symbols |
 | **Catalog** | `/signals [SYMS]` | 7 setup detectors + probability | setup candidates | Setup list + tracker block |
 
 Pinned anchors stay on WS for market context but are **excluded** from Module 2 fusion ticks. Module 1 never calls `build_live_detection` or scanner delivery gates for TG.
 
-**North star (short):** gate_edge hold-to-target SL ≤30%, TP1+ ≥50% (n≥30). Long TG off by default until n≥30.
+**North star (short):** gate_edge hold-to-target SL ≤30%, TP1+ ≥50% (n≥30). Uncalibrated **long** signals route to **lab lane** (`long_ramp_reason`) until `gate_edge` long n≥30 passes; `HUNT_LONG_TG=1` overrides for production.
 
 ## Metrics (fusion cutover, 2026-06-20)
 
@@ -34,14 +34,10 @@ hunt/
 │   ├── features/           # prepare, snapshot, lake append
 │   ├── shared/             # mathlib, facts, primitives, shadow ledger
 │   ├── scanner/            # Module 2: detect, gate, setups, delivery, telegram
-│   ├── deep/               # Module 1: engine façade, arbiter, telegram
-│   ├── detect/             # (legacy shim → scanner.detect)
-│   ├── gate/               # (legacy shim → scanner.gate)
-│   ├── setups/             # (legacy shim → scanner.setups)
+│   ├── deep/               # Module 1: verdict_v2, plan, engine façade, telegram
 │   ├── deliver/            # dispatch, telegram, digest
 │   ├── track/              # tracker, events, outcomes, …
-│   ├── analysis/           # pinned_deep, deep_signal (query plane)
-│   ├── setups/             # detectors, catalog
+│   ├── analysis/           # playbook, fusion helpers (scanner-owned via playbook shim)
 │   ├── runtime/            # cycle/_impl, tick_assembly, telegram_commands
 │   ├── domain/             # config, schemas, policy
 │   └── _dev/               # budget, check_*, replay_fusion, watch_once_smoke
@@ -61,7 +57,7 @@ run_loop → resolve_hunt_scan_universe (no pinned fusion)
   → [confirmed alt] deliver.telegram (pinned blocked via hunt_auto_confirm_blocked)
 
 deep_pinned_loop (background, Module 1 Deep):
-  assemble_deep_tick (hunt_fusion=False, plane=deep) → analysis/deep → change-only TG
+  assemble_deep_tick (hunt_fusion=False, plane=deep) → deep/verdict_v2 → change-only TG
 ```
 
 ### Delivery invariant
@@ -234,7 +230,7 @@ FUSION gate_open  →  setup.confirmed  →  route_tick candidate
 | Who picks side? | Fusion (`detect/fusion.py`) |
 | Who sets `confirmed`? | Fusion `gate_open` via `delivery_bridge` |
 | Who blocks mid-leg TG? | Mission gate (`gate/_mission.py`) + cross-module arbiter |
-| Who is default delivery authority? | Playbook N-of-M when `HUNT_PWIN_GATE=0` ([ENGINE_DESIGN.md](ENGINE_DESIGN.md)) |
+| Who is default delivery authority? | Playbook N-of-M when `HUNT_PWIN_GATE=0` ([AUTHORITY_MAP_v2.md](AUTHORITY_MAP_v2.md)) |
 | Is `fusion_score` the gate? | No — magnitude quantile opens gate; score is strength index |
 | PRE phase source | CUSUM only (`detect/phase.py`); legacy FSM removed from tick writer |
 | Cross-module conflict | `shared/delivery/cross_module.py` blocks opposing Deep/Expansion vs Scanner |
