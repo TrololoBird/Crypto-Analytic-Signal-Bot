@@ -102,7 +102,10 @@ def _gate_label(code: str) -> str:
 
 def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = None) -> str:
     v2 = verdict or row.get("verdict_v2")
-    if v2 is None:
+    # Defensive: a JSONL-roundtripped row carries verdict_v2 as a plain dict, which
+    # has no ``.signal_decision``. Callers should use the summary fallback; bail here
+    # rather than raising AttributeError mid-render.
+    if not isinstance(v2, ScenarioVerdict):
         return ""
     sym = html.escape(str(row.get("symbol") or "").replace("USDT", "-USDT"))
     dec = v2.signal_decision

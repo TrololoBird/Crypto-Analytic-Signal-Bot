@@ -308,9 +308,16 @@ def format_query_telegram(q: QueryResult, *, added_watch: bool = False) -> str:
         analysis = build_deep_report(q.row, include_watch_appendix=False)
         parts: list[str] = [format_deep_analysis_telegram(analysis)]
     except Exception:
+        # Fail-loud: surface the real traceback to logs (was silently swallowed,
+        # masking the verdict_v2-dict crash). User still gets a graceful card.
+        import structlog
+
+        structlog.get_logger("hunt_core.runtime.query_service").exception(
+            "deep_report_build_failed", symbol=q.symbol, from_store=q.from_store
+        )
         parts = [
-            f"🔎 <b>Deep analysis — {html.escape(q.symbol)}</b>\n"
-            "<i>deep assembly failed — /signal SYM --live для REST</i>"
+            f"🔬 <b>Глубокий анализ — {html.escape(q.symbol)}</b>\n"
+            "<i>анализ временно недоступен · /signal SYM --live для REST</i>"
         ]
 
     watch_lines: list[str] = []

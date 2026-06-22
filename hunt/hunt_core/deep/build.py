@@ -101,23 +101,36 @@ class DeepAnalysis:
         return ""
 
     def verdict_v2_text(self) -> str:
+        from hunt_core.deep.verdict_v2.types import ScenarioVerdict
+
         v2 = self.row.get("verdict_v2")
         summary = self.row.get("verdict_v2_summary")
-        if v2 is None and isinstance(summary, dict):
-            action = str(summary.get("action") or "wait").upper()
-            path = summary.get("path", "")
-            strength = summary.get("strength", 0)
-            lines = [
-                f"🎯 <b>Signal</b> · <b>{html.escape(action)}</b> · "
-                f"path <code>{html.escape(str(path))}</code> · "
-                f"strength <code>{float(strength):.2f}</code>",
-            ]
-            if summary.get("gates_failed"):
-                lines.append(
-                    f"<i>gates: {html.escape(', '.join(str(g) for g in summary['gates_failed']))}</i>"
+        # After a store/JSONL round-trip ``verdict_v2`` survives only as a plain
+        # dict (the dataclass is stripped on encode). The rich renderer needs the
+        # ScenarioVerdict object, so anything that is NOT one falls back to the
+        # JSONL-safe summary block instead of crashing on ``v2.signal_decision``.
+        if not isinstance(v2, ScenarioVerdict):
+            if isinstance(summary, dict) and summary:
+                from hunt_core.deep.format_pinned_signal import (
+                    _ACTION_RU,
+                    _ru_narrative,
                 )
-            return "\n".join(lines)
-        if v2 is None:
+
+                action_raw = str(summary.get("action") or "wait").upper()
+                action_ru = _ACTION_RU.get(action_raw, action_raw)
+                emoji = {"LONG": "🟢", "SHORT": "🔴", "WAIT": "⏳"}.get(action_raw, "⏳")
+                path = _ru_narrative(str(summary.get("path", "")))
+                strength = summary.get("strength", 0)
+                lines = [
+                    f"{emoji} <b>Сигнал</b> · <b>{action_ru}</b> · "
+                    f"сценарий <code>{html.escape(path)}</code> · "
+                    f"сила <code>{float(strength):.2f}</code>",
+                ]
+                if summary.get("gates_failed"):
+                    gates = ", ".join(str(g) for g in summary["gates_failed"])
+                    lines.append(f"<i>ожидаем: {html.escape(gates)}</i>")
+                lines.append("<i>ранг, не вероятность</i>")
+                return "\n".join(lines)
             return ""
         from hunt_core.deep.format_pinned_signal import format_pinned_signal
 

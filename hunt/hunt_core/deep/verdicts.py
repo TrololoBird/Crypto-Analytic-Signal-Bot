@@ -116,8 +116,13 @@ def build_three_verdicts(
     fusion: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Structure-first verdict panel — verdict_v2 / pinned / MTF fallback."""
+    from hunt_core.deep.verdict_v2.types import ScenarioVerdict
+
     v2 = row.get("verdict_v2")
-    if v2 is not None:
+    # Only the live ScenarioVerdict dataclass exposes ``.signal_decision``; a
+    # store/JSONL-roundtripped row carries verdict_v2 as a plain dict, so we fall
+    # through to the pinned/MTF/structure rebuild path instead of crashing.
+    if isinstance(v2, ScenarioVerdict):
         return _verdict_from_v2(v2)
 
     pv = row.get("pinned_verdict")
