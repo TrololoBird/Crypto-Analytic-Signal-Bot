@@ -105,7 +105,7 @@ class HuntCcxtRestGate:
         if remaining <= 0:
             return 0.0
         sleep_s = min(remaining, cap_s)
-        LOG.warning(
+        LOG.info(
             "hunt_ccxt_rate_pause | remaining_s=%.0f sleep_s=%.0f",
             remaining,
             sleep_s,
@@ -194,7 +194,7 @@ class HuntCcxtRestGate:
             )
             self.pending_proxy_failover = True
         elif kind == "rate_limit":
-            LOG.warning(
+            LOG.info(
                 "hunt_ccxt_rate_limit | context=%s pause_s=%.0f error=%s",
                 context,
                 pause_s,

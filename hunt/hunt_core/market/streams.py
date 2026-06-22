@@ -311,8 +311,9 @@ class HuntCcxtStreams:
         return (
             "1006" in text
             or "4004" in text
-            or name in {"NetworkError", "RequestTimeout", "ExchangeNotAvailable"}
+            or name in {"NetworkError", "RequestTimeout", "ExchangeNotAvailable", "ChecksumError"}
             or "ConnectionClosed" in name
+            or "ChecksumError" in text
         )
 
     def _spawn_pro_tasks(self, specs: list[tuple[str, Any]]) -> list[asyncio.Task[None]]:
@@ -366,7 +367,10 @@ class HuntCcxtStreams:
             )
 
     async def _on_ws_loop_error(self, label: str, exc: Exception) -> None:
-        LOG.warning("hunt_ccxt_%s_error | %s", label, repr(exc))
+        if self._ws_transport_fatal(exc):
+            LOG.debug("hunt_ccxt_%s_error | %s", label, repr(exc))
+        else:
+            LOG.warning("hunt_ccxt_%s_error | %s", label, repr(exc))
         if is_ccxt_rate_limited(exc):
             self.client.rest_gate.record_error(exc, context=f"ws:{label}")
             return
@@ -1372,12 +1376,17 @@ class HuntCcxtStreams:
                         exc,
                     )
                     return
-                LOG.warning("secondary_funding_ws_error | exchange=%s error=%s", name, exc)
                 if self._ws_transport_fatal(exc):
+                    LOG.debug(
+                        "secondary_funding_ws_error | exchange=%s error=%s",
+                        name,
+                        exc,
+                    )
                     await self._reset_secondary_pro(name)
                     backoff_s = 5.0
                     await asyncio.sleep(2.0)
                     continue
+                LOG.warning("secondary_funding_ws_error | exchange=%s error=%s", name, exc)
                 await asyncio.sleep(min(60.0, backoff_s))
                 backoff_s = min(60.0, backoff_s * 1.5)
 
@@ -1437,7 +1446,7 @@ class HuntCcxtStreams:
                     t.cancel()
                 raise
             except Exception as exc:
-                LOG.warning("secondary_funding_ws_init_failed | exchange=%s error=%s", name, exc)
+                LOG.debug("secondary_funding_ws_init_failed | exchange=%s error=%s", name, exc)
                 await self._dispose_secondary_pro_ex(ex, label=f"secondary_pro_init:{name}")
                 ex = None
         if not tasks:

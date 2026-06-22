@@ -1532,7 +1532,7 @@ class HuntCcxtClient:
                 await close_exchange_async(ex, label=f"secondary_rest_cancel:{name}")
                 raise
             except Exception as exc:
-                LOG.warning("secondary_load_markets_failed | exchange=%s error=%s", name, exc)
+                LOG.debug("secondary_load_markets_failed | exchange=%s error=%s", name, exc)
                 await close_exchange_async(ex, label=f"secondary_rest_init:{name}")
                 self._secondary_failed.add(name)
                 return None
@@ -1597,7 +1597,7 @@ class HuntCcxtClient:
         except ccxt.NotSupported:
             result = {"fundingRate": None}
         except ccxt.BaseError as exc:
-            LOG.warning(
+            LOG.debug(
                 "secondary_funding_failed | exchange=%s sym=%s error=%s",
                 name,
                 ccxt_sym,
@@ -1644,7 +1644,7 @@ class HuntCcxtClient:
         except ccxt.NotSupported:
             result = {"oi_usd": None}
         except ccxt.BaseError as exc:
-            LOG.warning(
+            LOG.debug(
                 "secondary_oi_failed | exchange=%s sym=%s error=%s",
                 name,
                 ccxt_sym,
@@ -1673,7 +1673,7 @@ class HuntCcxtClient:
         except ccxt.NotSupported:
             return {"mark_price": None}
         except ccxt.BaseError as exc:
-            LOG.warning(
+            LOG.debug(
                 "secondary_ticker_failed | exchange=%s sym=%s error=%s",
                 name,
                 ccxt_sym,

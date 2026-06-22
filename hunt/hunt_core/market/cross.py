@@ -353,6 +353,9 @@ async def fetch_cross_exchange_book_walls(
     if not per_ex:
         return {"venues": [], "bid_levels": [], "ask_levels": [], "source": "cross_exchange"}
     merged = aggregate_cross_exchange_walls(per_ex)
+    from datetime import UTC, datetime
+
+    merged["fetched_at"] = datetime.now(UTC).isoformat()
     try:
         from hunt_core.maps.config import load_maps_config
         from hunt_core.maps.orderbook import merge_full_depth_bins

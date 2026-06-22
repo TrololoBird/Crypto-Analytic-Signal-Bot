@@ -136,13 +136,13 @@ class HuntCcxtSpotCompanion:
         except ccxt.BaseError as exc:
             if is_ccxt_rate_limited(exc):
                 raise
-            LOG.warning("spot_fetch_failed | symbol=%s error=%s", sym, exc)
+            LOG.debug("spot_fetch_failed | symbol=%s error=%s", sym, exc)
             return None
         except DEFENSIVE_EXC as exc:
-            LOG.warning("spot_fetch_failed | symbol=%s error=%s", sym, exc)
+            LOG.debug("spot_fetch_failed | symbol=%s error=%s", sym, exc)
             return None
         except Exception as exc:
-            LOG.warning("spot_fetch_failed | symbol=%s error=%s", sym, exc)
+            LOG.debug("spot_fetch_failed | symbol=%s error=%s", sym, exc)
             return None
 
     async def refresh_symbols(
