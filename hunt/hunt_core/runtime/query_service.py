@@ -329,19 +329,25 @@ def format_query_telegram(q: QueryResult, *, added_watch: bool = False) -> str:
 
     if q.from_store:
         stale = bool(q.row.get("_stale_store"))
+        as_of = q.row.get("as_of") or (q.row.get("freshness") or {}).get("as_of")
+        as_of_txt = ""
+        if as_of:
+            as_of_txt = f" · снимок {html.escape(str(as_of)[:19].replace('T', ' '))} UTC"
         age_txt = f"{q.age_s:.0f}s назад" if q.age_s is not None else "watch-тик"
         if stale:
             parts.append(
-                f"\n<i>📊 данные {age_txt} (устарели) · обновляю в фоне · "
+                f"\n<i>📊 данные {age_txt}{as_of_txt} (устарели) · обновляю в фоне · "
                 f"/signal {q.symbol.replace('USDT', '')} --live для немедленного REST</i>"
             )
         else:
             parts.append(
-                f"\n<i>📊 из watch-тика ({age_txt}) · "
+                f"\n<i>📊 из watch-тика ({age_txt}{as_of_txt}) · "
                 f"/signal {q.symbol.replace('USDT', '')} --live для REST</i>"
             )
     else:
-        parts.append(f"\n<i>🛰 {html.escape(q.source)}</i>")
+        as_of = q.row.get("as_of")
+        tail = f" · {html.escape(str(as_of)[:19].replace('T', ' '))} UTC" if as_of else ""
+        parts.append(f"\n<i>🛰 {html.escape(q.source)}{tail}</i>")
     return "\n".join(parts)
 
 

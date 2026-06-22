@@ -390,12 +390,12 @@ def build_stats_report_text() -> str:
 def _expansion_stats_block() -> str | None:
     """Compact expansion ledger + cache — separate product from fusion WR."""
     try:
-        from hunt_core.analysis.expansion_engine.config import load_expansion_config
-        from hunt_core.analysis.expansion_engine.learning import (
+        from hunt_core._dev.expansion_lab.config import load_expansion_config
+        from hunt_core._dev.expansion_lab.learning import (
             load_expansion_outcomes,
             summarize_outcomes,
         )
-        from hunt_core.analysis.expansion_engine.learning.review import pending_review_horizons
+        from hunt_core._dev.expansion_lab.learning.review import pending_review_horizons
         from hunt_core.paths import EXPANSION_CALIBRATION_JSON, EXPANSION_RUNTIME_STATE_JSON
         from hunt_core.runtime.expansion_universe_scan import collect_universe_rows
 

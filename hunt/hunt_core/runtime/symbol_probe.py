@@ -252,7 +252,7 @@ def format_signal_probe_telegram(
             "<code>long_imminent</code>)."
         )
     try:
-        from hunt_core.analysis.expansion_engine.format import format_expansion_section_from_dict
+        from hunt_core._dev.expansion_lab.format import format_expansion_section_from_dict
 
         exp = row.get("expansion")
         if isinstance(exp, dict):

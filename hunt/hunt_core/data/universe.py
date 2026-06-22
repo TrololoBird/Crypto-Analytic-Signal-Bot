@@ -492,6 +492,47 @@ def register_signal_notify(
 
 # Market I/O: HuntCcxtClient / HuntCcxtSpotCompanion (see hunt/docs/CCXT.md).
 
+
+_GOLD_EQUIVALENTS: frozenset[str] = frozenset({"XAUUSDT", "PAXGUSDT"})
+
+
+def asset_equivalence_key(symbol: str) -> str:
+    """Collapse correlated instruments for queue/concentration (R8)."""
+    sym = str(symbol or "").upper()
+    if sym in _GOLD_EQUIVALENTS:
+        return "GOLD"
+    return sym
+
+
+def correlated_asset_tag(symbol: str) -> str | None:
+    sym = str(symbol or "").upper()
+    if sym == "XAGUSDT":
+        return "корр. золото"
+    return None
+
+
+def collapse_equivalent_opportunities(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep highest opportunity_score per equivalence group."""
+    best: dict[str, dict[str, Any]] = {}
+    for item in items:
+        sym = str(item.get("symbol") or "").upper()
+        if not sym:
+            continue
+        key = asset_equivalence_key(sym)
+        prev = best.get(key)
+        if prev is None or float(item.get("opportunity_score") or 0) > float(prev.get("opportunity_score") or 0):
+            merged = dict(item)
+            tag = correlated_asset_tag(sym)
+            if tag:
+                merged["correlation_tag"] = tag
+            if sym in _GOLD_EQUIVALENTS:
+                merged["equivalence"] = "gold"
+            best[key] = merged
+    return sorted(best.values(), key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
+
+
 class OfflineEnricher:
     """Pass-through enricher for offline replay — no synthetic fields."""
 

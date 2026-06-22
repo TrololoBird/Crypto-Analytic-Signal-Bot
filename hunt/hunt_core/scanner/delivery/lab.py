@@ -17,6 +17,8 @@ def is_lab_delivery(*, setup: dict[str, Any], row: dict[str, Any] | None = None)
     if os.environ.get("HUNT_EV_BOOTSTRAP", "0").strip().lower() in {"1", "true", "yes"}:
         if setup.get("ev_primary") or setup.get("ev_bootstrap"):
             return True
+    if setup.get("long_ramp_reason"):
+        return True
     if setup.get("delivery_lane") == "lab":
         return True
     row = row or {}

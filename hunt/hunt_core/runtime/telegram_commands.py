@@ -170,7 +170,7 @@ class HuntTelegramCommands:
 
     async def _handle_expand(self, chat_id: int, parts: list[str]) -> None:
         """Expansion Engine — /expand BTC | scan | stats | calibrate | review."""
-        from hunt_core.analysis.expansion_engine.config import load_expansion_config
+        from hunt_core._dev.expansion_lab.config import load_expansion_config
 
         exp_cfg = load_expansion_config()
         if not exp_cfg.enabled or not exp_cfg.operator_commands:
@@ -219,7 +219,7 @@ class HuntTelegramCommands:
             try:
                 await broadcaster.send_html(f"⏳ <b>/expand {sym_label}</b> — expansion state…")
                 from hunt_core.runtime.expansion_probe import probe_symbol_expansion
-                from hunt_core.analysis.expansion_engine import format_expansion_card
+                from hunt_core._dev.expansion_lab import format_expansion_card
 
                 row = await probe_symbol_expansion(sym, client=self._client, stagger_ms=250)
                 if row.get("error"):
@@ -240,8 +240,8 @@ class HuntTelegramCommands:
                     and float(meta.get("expansion_quality") or 0) >= 0.45
                 ):
                     try:
-                        from hunt_core.analysis.expansion_engine import build_expansion_opportunity
-                        from hunt_core.analysis.expansion_engine.learning import (
+                        from hunt_core._dev.expansion_lab import build_expansion_opportunity
+                        from hunt_core._dev.expansion_lab.learning import (
                             record_expansion_signal,
                         )
 
@@ -264,8 +264,8 @@ class HuntTelegramCommands:
         broadcaster = TelegramBroadcaster(self._token, str(chat_id))
         try:
             await broadcaster.send_html("⏳ <b>/expand scan</b> — ранжирую вселенную…")
-            from hunt_core.analysis.expansion_engine import format_scan, rank_universe
-            from hunt_core.analysis.expansion_engine.config import load_expansion_config
+            from hunt_core._dev.expansion_lab import format_scan, rank_universe
+            from hunt_core._dev.expansion_lab.config import load_expansion_config
             from hunt_core.runtime.tick_state import deep_query_store, hunt_scan_store
 
             rows: dict[str, dict] = {}
@@ -297,12 +297,12 @@ class HuntTelegramCommands:
     async def _handle_expand_stats(self, chat_id: int) -> None:
         broadcaster = TelegramBroadcaster(self._token, str(chat_id))
         try:
-            from hunt_core.analysis.expansion_engine.format import format_outcome_stats
-            from hunt_core.analysis.expansion_engine.learning import (
+            from hunt_core._dev.expansion_lab.format import format_outcome_stats
+            from hunt_core._dev.expansion_lab.learning import (
                 load_expansion_outcomes,
                 summarize_outcomes,
             )
-            from hunt_core.analysis.expansion_engine.learning.review import pending_review_horizons
+            from hunt_core._dev.expansion_lab.learning.review import pending_review_horizons
 
             records = load_expansion_outcomes()
             summary = summarize_outcomes(records)
@@ -323,8 +323,8 @@ class HuntTelegramCommands:
         broadcaster = TelegramBroadcaster(self._token, str(chat_id))
         try:
             await broadcaster.send_html("⏳ <b>/expand calibrate</b> — rollup block weights…")
-            from hunt_core.analysis.expansion_engine.format import format_calibration_report
-            from hunt_core.analysis.expansion_engine.learning import write_calibration_rollup
+            from hunt_core._dev.expansion_lab.format import format_calibration_report
+            from hunt_core._dev.expansion_lab.learning import write_calibration_rollup
 
             report = write_calibration_rollup()
             await broadcaster.send_html(format_calibration_report(report), no_split=True)
@@ -340,8 +340,8 @@ class HuntTelegramCommands:
         broadcaster = TelegramBroadcaster(self._token, str(chat_id))
         try:
             await broadcaster.send_html("⏳ <b>/expand review</b> — grading outcomes…")
-            from hunt_core.analysis.expansion_engine.format import format_review_summary
-            from hunt_core.analysis.expansion_engine.learning.review import review_expansion_outcomes
+            from hunt_core._dev.expansion_lab.format import format_review_summary
+            from hunt_core._dev.expansion_lab.learning.review import review_expansion_outcomes
 
             summary = await review_expansion_outcomes(self._client)
             await broadcaster.send_html(format_review_summary(summary), no_split=True)
