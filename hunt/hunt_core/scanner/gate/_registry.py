@@ -32,7 +32,16 @@ def _gate_edge_policy(
     symbol: str = "",
     sniper_config: SniperConfig | None = None,
 ) -> GateResult | None:
-    _ = setup, row, lifecycle, symbol, sniper_config
+    _ = row, lifecycle, symbol, sniper_config
+    if direction == "long":
+        from hunt_core.scanner.gate.policy import long_tg_allowed
+
+        ok, reason = long_tg_allowed()
+        if not ok:
+            # Phase 8: accrue geometry in lab until edge gate passes (n≥30 outcomes).
+            setup["delivery_lane"] = "lab"
+            setup["long_ramp_reason"] = reason
+        return None
     edge_block = direction_block_reason(direction)
     if edge_block:
         return GateResult(ok=False, code=edge_block, message=edge_block)
