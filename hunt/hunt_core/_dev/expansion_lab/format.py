@@ -50,10 +50,10 @@ def _format_expansion_card_obj(opp: ExpansionOpportunity) -> str:
         "",
         f"Opportunity Score: <b>{opp.meta.opportunity_score:.2f}</b>",
         f"Expansion Quality: {opp.meta.expansion_quality:.2f}",
-        f"Trigger Probability: {opp.trigger_probability:.2f}",
+        f"Trigger Score: {opp.trigger_probability:.2f}",
         f"Readiness: <b>{opp.readiness.upper()}</b>",
         f"Fake Breakout Risk: {opp.meta.fake_breakout_risk:.2f}",
-        f"P(Up) {p.p_up:.2f} · P(Down) {p.p_down:.2f} · P(None) {p.p_none:.2f}",
+        f"Side score: up {p.p_up:.2f} · down {p.p_down:.2f} · none {p.p_none:.2f}",
         "",
         f"Stage: {html.escape(opp.stage)} ({opp.lifecycle_stage}/6)",
     ]
@@ -106,12 +106,12 @@ def _format_expansion_card_dict(d: dict[str, Any]) -> str:
         "",
         f"Opportunity Score: <b>{float(meta.get('opportunity_score') or 0):.2f}</b>",
         f"Expansion Quality: {float(meta.get('expansion_quality') or 0):.2f}",
-        f"Trigger Probability: {float(d.get('trigger_probability') or 0):.2f}",
+        f"Trigger Score: {float(d.get('trigger_probability') or 0):.2f}",
         f"Readiness: <b>{str(d.get('readiness') or 'low').upper()}</b>",
         f"Fake Breakout Risk: {float(meta.get('fake_breakout_risk') or 0):.2f}",
-        f"P(Up) {float(probs.get('p_up') or 0):.2f} · "
-        f"P(Down) {float(probs.get('p_down') or 0):.2f} · "
-        f"P(None) {float(probs.get('p_none') or 0):.2f}",
+        f"Side score: up {float(probs.get('p_up') or 0):.2f} · "
+        f"down {float(probs.get('p_down') or 0):.2f} · "
+        f"none {float(probs.get('p_none') or 0):.2f}",
         "",
         f"Stage: {html.escape(str(d.get('stage') or ''))} ({int(d.get('lifecycle_stage') or 0)}/6)",
     ]

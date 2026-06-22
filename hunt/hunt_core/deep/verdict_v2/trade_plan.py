@@ -47,12 +47,18 @@ def build_trade_plan(
     if rr1 < cfg.min_rr_tp1 and atr > 0:
         if direction == "long":
             tp1 = entry + max(atr * 2.0, (tp1 - entry) * 1.5)
-            targets[0] = tp1
         else:
             tp1 = entry - max(atr * 2.0, (entry - tp1) * 1.5)
-            targets[0] = tp1
         rr1 = rr_ratio(entry, tp1, stop, direction)
-    tp2, tp3 = targets[1], targets[2]
+    # Re-sort after possible tp1 adjustment so the ladder stays monotonic
+    targets = (
+        sorted([tp1, tp2, tp3]) if direction == "long" else sorted([tp1, tp2, tp3], reverse=True)
+    )
+    tp1, tp2, tp3 = targets[0], targets[1], targets[2]
+    # Use zone width as ATR proxy if atr_from_row returned 0 — avoids 1.0 fallback
+    # blowing SL correction to +1.2 price units on low-price symbols.
+    zone_width = abs(zone[1] - zone[0])
+    atr_for_geom = atr if atr and atr > 0 else max(zone_width * 2.0, 1e-6)
     # Geometry validation: SL outside zone, monotonic TPs, no 0R/absurd R
     geom = validate_plan_geometry(
         {
@@ -63,7 +69,7 @@ def build_trade_plan(
             "tp3": tp3,
         },
         direction=direction,
-        atr=atr if atr and atr > 0 else 1.0,
+        atr=atr_for_geom,
     )
     stop = float(geom.get("stop_loss") or stop)
     tp1 = float(geom.get("tp1") or tp1)

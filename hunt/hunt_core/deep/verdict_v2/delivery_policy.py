@@ -15,7 +15,8 @@ def queue_fingerprint(queue: dict[str, Any] | None) -> str:
             item.get("action"),
             item.get("lifecycle"),
             item.get("rank"),
-            item.get("activation"),
+            # activation excluded — it's an entry price that drifts with market price every tick,
+            # causing spurious re-fires independent of any real setup change.
         )
         for item in top3
         if isinstance(item, dict)
