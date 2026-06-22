@@ -9,7 +9,6 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
@@ -43,67 +42,14 @@ def _is_structural_confirm_trigger(trigger: str) -> bool:
                  "peak_fade_confirm", "pre_dump_div_confirm"}
     )
 from hunt_core.track.events import append_signal_event as _append_event
-from hunt_core.track.events import record_phase_transition as _record_phase_transition
-
-_LOG = logging.getLogger(__name__)
-
-
-class SignalPhase(str, Enum):
-    REGISTERED = "registered"
-    ARMED = "armed"
-    TRIGGERED = "triggered"
-    TP1_MANAGED = "tp1_managed"
-    INVALIDATED = "invalidated"
-    CLOSED = "closed"
-
-
-_ACTIVE_PHASES = frozenset(
-    {
-        SignalPhase.REGISTERED,
-        SignalPhase.ARMED,
-        SignalPhase.TRIGGERED,
-        SignalPhase.TP1_MANAGED,
-    }
+from hunt_core.track._tracker_fsm import (
+    SignalPhase,
+    INVALIDATING_CLOSE_REASONS as _INVALIDATING_CLOSE_REASONS,
+    coerce_signal_phase as _coerce_signal_phase,
+    initial_signal_phase as _initial_signal_phase,
+    is_signal_active as _is_signal_active,
+    transition as _transition,
 )
-_ALLOWED_TRANSITIONS: dict[SignalPhase, frozenset[SignalPhase]] = {
-    SignalPhase.REGISTERED: frozenset(
-        {
-            SignalPhase.ARMED,
-            SignalPhase.TRIGGERED,
-            SignalPhase.INVALIDATED,
-            SignalPhase.CLOSED,
-        }
-    ),
-    SignalPhase.ARMED: frozenset(
-        {SignalPhase.TRIGGERED, SignalPhase.INVALIDATED, SignalPhase.CLOSED}
-    ),
-    SignalPhase.TRIGGERED: frozenset(
-        {SignalPhase.TP1_MANAGED, SignalPhase.INVALIDATED, SignalPhase.CLOSED}
-    ),
-    SignalPhase.TP1_MANAGED: frozenset(
-        {SignalPhase.INVALIDATED, SignalPhase.CLOSED}
-    ),
-    SignalPhase.INVALIDATED: frozenset({SignalPhase.CLOSED}),
-    SignalPhase.CLOSED: frozenset(),
-}
-_INVALIDATING_CLOSE_REASONS = frozenset(
-    {
-        "stop_hit",
-        "trailing_stop_profit",
-        "bounce_invalidate",
-        "trend_exhaustion",
-        "reclaim_invalidation",
-        "support_lost",
-        "bias_flip",
-        "lifecycle_stale",
-        "orphan_expired",
-        "time_stall",
-        "timeout",
-    }
-)
-
-FOLLOWUP_COOLDOWN_MINUTES = 5
-# Re-entry / burst caps live in hunt_core.track._cooldowns (re-exported below).
 from hunt_core.track._cooldowns import (
     global_confirm_burst_cap_reached,
     recent_stop_hit_cooldown,
@@ -113,7 +59,10 @@ from hunt_core.track._cooldowns import (
     symbol_repeat_loser_blocked,
 )
 from hunt_core.track._followups import evaluate_followups
-# No cosmetic phase_change TG right after entry (WLD: 2 flips in 60s post-confirm).
+
+_LOG = logging.getLogger(__name__)
+
+FOLLOWUP_COOLDOWN_MINUTES = 5
 PHASE_CHANGE_GRACE_MIN = 20.0
 RECLAIM_BUFFER = 1.001  # fallback; prefer tracker_thresholds().reclaim_buffer
 # A hunt setup is a momentum trade — after this long without SL/TP it is stale.
@@ -146,6 +95,17 @@ _SHORT_STALE_PHASES = frozenset(
 _LONG_STALE_PHASES = frozenset(
     {"distribution", "exhaustion_at_high", "dump_active"},
 )
+
+
+@dataclass(frozen=True, slots=True)
+class HuntFollowUp:
+    event: SignalEvent
+    symbol: str
+    direction: str
+    message_key: str
+    detail: str
+    price: float
+    payload: dict[str, Any]
 
 
 def _reclaim_buffer(symbol: str = "") -> float:
@@ -191,55 +151,8 @@ def _hold_short_through_dump_bounce(
     return opened_bias == "wait" and lc_bias == "long"
 
 
-@dataclass(frozen=True, slots=True)
-class HuntFollowUp:
-    event: SignalEvent
-    symbol: str
-    direction: str
-    message_key: str
-    detail: str
-    price: float
-    payload: dict[str, Any]
-
-
 def _key(symbol: str, direction: str) -> str:
     return f"{symbol.upper()}:{direction.lower()}"
-
-
-def _coerce_signal_phase(signal: dict[str, Any]) -> SignalPhase:
-    """Resolve tracker FSM phase; infer from legacy rows when ``phase`` is absent."""
-    raw = signal.get("phase")
-    if isinstance(raw, SignalPhase):
-        return raw
-    if isinstance(raw, str) and raw in SignalPhase._value2member_map_:
-        return SignalPhase(raw)
-    if signal.get("status") == "closed":
-        return SignalPhase.CLOSED
-    if signal.get("tp1_managed"):
-        return SignalPhase.TP1_MANAGED
-    if str(signal.get("delivery_tier") or "") == "armed":
-        return SignalPhase.ARMED
-    if signal.get("status") == "active":
-        return SignalPhase.TRIGGERED
-    return SignalPhase.REGISTERED
-
-
-def _sync_status_from_phase(signal: dict[str, Any]) -> None:
-    phase = _coerce_signal_phase(signal)
-    if phase in _ACTIVE_PHASES:
-        signal["status"] = "active"
-    elif phase in {SignalPhase.INVALIDATED, SignalPhase.CLOSED}:
-        signal["status"] = "closed"
-
-
-def _is_signal_active(signal: dict[str, Any]) -> bool:
-    """Backward compat: ``status=='active'`` ⇔ phase ∈ {REGISTERED..TP1_MANAGED}."""
-    phase = _coerce_signal_phase(signal)
-    if phase in _ACTIVE_PHASES:
-        return True
-    if phase in {SignalPhase.INVALIDATED, SignalPhase.CLOSED}:
-        return False
-    return signal.get("status") == "active"
 
 
 def signal_confirm_announced(
@@ -340,59 +253,6 @@ def _apply_early_breakeven_lock(
     active["stop_loss"] = new_stop
     active["sl_at_breakeven"] = True
     return True
-
-
-def _transition(
-    signal: dict[str, Any],
-    from_phase: SignalPhase | None,
-    to_phase: SignalPhase,
-    *,
-    strict: bool = True,
-) -> bool:
-    current = _coerce_signal_phase(signal)
-    if from_phase is not None and current != from_phase:
-        if strict:
-            _LOG.debug(
-                "phase transition rejected %s -> %s (current=%s)",
-                from_phase.value,
-                to_phase.value,
-                current.value,
-            )
-            return False
-    allowed = _ALLOWED_TRANSITIONS.get(current, frozenset())
-    if to_phase not in allowed and to_phase != current:
-        _LOG.debug(
-            "phase transition not allowed %s -> %s",
-            current.value,
-            to_phase.value,
-        )
-        return False
-    if to_phase == current:
-        return True
-    signal["phase"] = to_phase.value
-    _sync_status_from_phase(signal)
-    sym = str(signal.get("symbol") or "")
-    direction = str(signal.get("direction") or "")
-    if sym and direction:
-        try:
-            _record_phase_transition(
-                symbol=sym,
-                direction=direction,
-                from_phase=current.value,
-                to_phase=to_phase.value,
-            )
-        except Exception:  # noqa: BLE001
-            pass
-    return True
-
-
-def _initial_signal_phase(setup: dict[str, Any]) -> SignalPhase:
-    tier = str(setup.get("delivery_tier") or "triggered").lower()
-    if tier == "armed":
-        return SignalPhase.ARMED
-    if tier == "triggered":
-        return SignalPhase.TRIGGERED
-    return SignalPhase.REGISTERED
 
 
 def _backfill_signal_geometry(sig: dict[str, Any]) -> None:

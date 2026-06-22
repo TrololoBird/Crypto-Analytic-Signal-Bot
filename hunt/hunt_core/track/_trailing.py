@@ -209,11 +209,11 @@ def apply_tp1_management(
     apply_tp1_breakeven_trail(
         active, direction=direction, symbol=symbol, row=row
     )
-    from hunt_core.track.tracker import SignalPhase, _coerce_signal_phase, _transition
+    from hunt_core.track._tracker_fsm import SignalPhase, coerce_signal_phase, transition
 
-    _transition(
+    transition(
         active,
-        _coerce_signal_phase(active),
+        coerce_signal_phase(active),
         SignalPhase.TP1_MANAGED,
         strict=False,
     )
