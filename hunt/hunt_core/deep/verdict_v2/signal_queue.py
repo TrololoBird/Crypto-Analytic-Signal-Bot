@@ -32,6 +32,8 @@ class QueuedOpportunity:
     gates_failed: list[str] = field(default_factory=list)
     promoted: bool = False
     ts: str = ""
+    equivalence: str = ""
+    correlation_tag: str = ""
 
 
 def _parse_ts(raw: str | None) -> datetime | None:
@@ -105,6 +107,7 @@ def opportunity_from_row(
     *,
     rank: int = 0,
     promoted: bool = False,
+    for_ranking: bool = False,
 ) -> QueuedOpportunity | None:
     sym = str(row.get("symbol") or "").upper()
     if not sym or row.get("error"):
@@ -115,6 +118,11 @@ def opportunity_from_row(
     activation = assess_activation(row, summary)
     act_state = str(activation.get("state") or "idle")
     score = compute_opportunity_score(summary, activation_state=act_state)
+    if score <= 0 and for_ranking:
+        strength = float(summary.get("strength") or 0)
+        path = str(summary.get("path") or "")
+        if strength >= 0.25 and path not in {"", "range"}:
+            score = round(clamp01(strength * 0.55), 3)
     if score <= 0:
         return None
     action = str(summary.get("action") or "wait")
@@ -146,22 +154,61 @@ def opportunity_from_row(
 
 
 def build_top3(rows: dict[str, dict[str, Any]], *, top_n: int = 3) -> list[QueuedOpportunity]:
+    """Deterministic global TOP-N over pinned snapshot (R11)."""
+    from hunt_core.data.universe import PINNED_SYMBOLS, collapse_equivalent_opportunities
+
     candidates: list[QueuedOpportunity] = []
-    for row in rows.values():
+    for sym in PINNED_SYMBOLS:
+        row = rows.get(sym)
         if not isinstance(row, dict):
             continue
-        opp = opportunity_from_row(row)
+        opp = opportunity_from_row(row, for_ranking=True)
         if opp is not None:
             candidates.append(opp)
-    candidates.sort(key=lambda o: o.opportunity_score, reverse=True)
+    for sym, row in rows.items():
+        if sym in PINNED_SYMBOLS or not isinstance(row, dict):
+            continue
+        opp = opportunity_from_row(row, for_ranking=True)
+        if opp is not None:
+            candidates.append(opp)
+    candidates.sort(key=lambda o: (-o.opportunity_score, o.symbol))
+    deduped = collapse_equivalent_opportunities([asdict(o) for o in candidates])
     ranked: list[QueuedOpportunity] = []
-    for i, opp in enumerate(candidates[:top_n], 1):
-        ranked.append(
-            QueuedOpportunity(
-                **{**asdict(opp), "rank": i},
-            )
-        )
+    for i, item in enumerate(deduped[:top_n], 1):
+        ranked.append(QueuedOpportunity(**{**item, "rank": i}))
     return ranked
+
+
+def build_queue_peers(
+    rows: dict[str, dict[str, Any]],
+    top_symbols: set[str],
+    *,
+    min_score: float = 0.45,
+) -> list[dict[str, Any]]:
+    """In-zone / high-priority pinned symbols not shown in TOP-N (R11)."""
+    from hunt_core.data.universe import PINNED_SYMBOLS, asset_equivalence_key
+
+    seen_equiv: set[str] = set()
+    for sym in top_symbols:
+        seen_equiv.add(asset_equivalence_key(sym))
+    peers: list[dict[str, Any]] = []
+    for sym in PINNED_SYMBOLS:
+        if sym in top_symbols:
+            continue
+        eq = asset_equivalence_key(sym)
+        if eq in seen_equiv:
+            continue
+        row = rows.get(sym)
+        if not isinstance(row, dict):
+            continue
+        opp = opportunity_from_row(row, for_ranking=True)
+        if opp is None:
+            continue
+        if opp.activation in {"in_entry_zone", "at_catalyst"} or opp.opportunity_score >= min_score:
+            peers.append(asdict(opp))
+            seen_equiv.add(eq)
+    peers.sort(key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
+    return peers[:5]
 
 
 def _update_registry(
@@ -219,6 +266,8 @@ def refresh_pinned_signal_queue(
     registry = _prune_registry(prev_registry, ttl_hours=ttl)
     registry = _update_registry(rows, registry)
     raw_top = build_top3(rows, top_n=top_n)
+    top_syms = {str(o.symbol).upper() for o in raw_top}
+    peers = build_queue_peers(rows, top_syms)
     top3: list[dict[str, Any]] = []
     for opp in raw_top:
         item = asdict(opp)
@@ -232,8 +281,10 @@ def refresh_pinned_signal_queue(
     payload: dict[str, Any] = {
         "updated_at": datetime.now(UTC).isoformat(),
         "top3": top3,
+        "peers": peers,
         "registry": registry,
         "symbols_scanned": len(rows),
+        "priority_metric": "opportunity_score",
     }
     VERDICT_V2_SIGNAL_QUEUE_JSON.parent.mkdir(parents=True, exist_ok=True)
     VERDICT_V2_SIGNAL_QUEUE_JSON.write_text(
@@ -273,7 +324,9 @@ def format_queue_telegram(queue: dict[str, Any] | None = None) -> str:
         "breakout": "пробой",
         "idle": "",
     }
-    lines = ["📋 <b>Очередь сигналов</b> (TOP3)"]
+    lines = ["📋 <b>Очередь сигналов</b>"]
+    shown = len(top3)
+    lines[0] += f" (TOP{shown})" if shown else ""
     for item in top3:
         if not isinstance(item, dict):
             continue
@@ -289,9 +342,28 @@ def format_queue_telegram(queue: dict[str, Any] | None = None) -> str:
         rank = int(item.get("rank") or 0)
         promo = " · ⬆" if item.get("promoted") else ""
         act_bit = f" · {html.escape(act_ru)}" if act_ru else ""
+        tag = ""
+        if item.get("correlation_tag"):
+            tag = f" · <i>{html.escape(str(item['correlation_tag']))}</i>"
+        if item.get("equivalence") == "gold":
+            tag = " · <i>золото</i>"
         lines.append(
             f"{rank}. <b>{sym}</b> {action_ru} · {life_ru} · "
-            f"ранг <code>{score:.2f}</code> · {path}{act_bit}{promo}"
+            f"приоритет <code>{score:.2f}</code> · {path}{act_bit}{promo}{tag}"
         )
-    lines.append("<i>ранг, не вероятность</i>")
+    peers = data.get("peers") or []
+    if peers:
+        peer_bits: list[str] = []
+        for p in peers:
+            if not isinstance(p, dict):
+                continue
+            psym = html.escape(str(p.get("symbol") or "").replace("USDT", "-USDT"))
+            pscore = float(p.get("opportunity_score") or 0)
+            pact = str(p.get("activation") or "")
+            act = _ACT_RU.get(pact, pact.replace("_", " ")) if pact and pact != "idle" else ""
+            act_s = f" · {html.escape(act)}" if act else ""
+            peer_bits.append(f"{psym} <code>{pscore:.2f}</code>{act_s}")
+        if peer_bits:
+            lines.append("<i>В зоне / рядом: " + " · ".join(peer_bits) + "</i>")
+    lines.append("<i>приоритет очереди, не вероятность</i>")
     return "\n".join(lines)

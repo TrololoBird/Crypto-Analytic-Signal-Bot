@@ -52,34 +52,46 @@ class VerdictV2Config:
     trade_plan: TradePlanConfig = field(default_factory=TradePlanConfig)
     priorities_a: dict[str, float] = field(
         default_factory=lambda: {
-            "macro_trend": 0.28,
-            "structural": 0.24,
-            "positioning": 0.22,
-            "derivatives": 0.16,
+            "macro_trend": 0.26,
+            "structural": 0.22,
+            "positioning": 0.20,
+            "derivatives": 0.14,
             "flow": 0.10,
-            "execution_pressure": 0.0,
+            "execution_pressure": 0.04,
+            "cross_consensus": 0.04,
         }
     )
     priorities_b: dict[str, float] = field(
         default_factory=lambda: {
-            "macro_trend": 0.18,
-            "structural": 0.18,
-            "positioning": 0.22,
-            "derivatives": 0.15,
-            "flow": 0.15,
-            "execution_pressure": 0.06,
+            "macro_trend": 0.16,
+            "structural": 0.16,
+            "positioning": 0.20,
+            "derivatives": 0.14,
+            "flow": 0.14,
+            "execution_pressure": 0.08,
+            "cross_consensus": 0.08,
         }
     )
     priorities_c: dict[str, float] = field(
         default_factory=lambda: {
-            "macro_trend": 0.08,
-            "structural": 0.10,
-            "positioning": 0.20,
-            "derivatives": 0.12,
-            "flow": 0.22,
-            "execution_pressure": 0.18,
+            "macro_trend": 0.06,
+            "structural": 0.08,
+            "positioning": 0.18,
+            "derivatives": 0.10,
+            "flow": 0.20,
+            "execution_pressure": 0.16,
+            "cross_consensus": 0.14,
         }
     )
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def _defaults_path() -> Path:
@@ -185,8 +197,13 @@ def load_verdict_v2_config() -> VerdictV2Config:
         signal_queue_enabled=bool(root.get("signal_queue_enabled", True)),
         signal_queue_top_n=int(root.get("signal_queue_top_n", 3) or 3),
         signal_queue_tg_footer=bool(root.get("signal_queue_tg_footer", True)),
-        signal_queue_tg_batch=bool(root.get("signal_queue_tg_batch", True)),
-        signal_queue_tg_min_rank=int(root.get("signal_queue_tg_min_rank", 2) or 2),
+        signal_queue_tg_batch=_env_bool(
+            "HUNT_SIGNAL_QUEUE_TG_BATCH",
+            bool(root.get("signal_queue_tg_batch", True)),
+        ),
+        signal_queue_tg_min_rank=int(
+            os.getenv("HUNT_SIGNAL_QUEUE_TG_MIN_RANK", root.get("signal_queue_tg_min_rank", 2)) or 2
+        ),
         signal_queue_ttl_hours=float(root.get("signal_queue_ttl_hours", 2.5) or 2.5),
         gates=gates,
         trade_plan=tp,

@@ -1,6 +1,8 @@
 """Scenario fragility."""
 from __future__ import annotations
 
+from typing import Any
+
 from hunt_core.deep.verdict_v2._helpers import clamp01
 from hunt_core.deep.verdict_v2.config import VerdictV2Config
 from hunt_core.deep.verdict_v2.types import (
@@ -9,6 +11,7 @@ from hunt_core.deep.verdict_v2.types import (
     HorizonTopology,
     PatternConfidence,
     ScenarioFragility,
+    TradePlan,
 )
 
 
@@ -18,6 +21,9 @@ def compute_fragility(
     disagree: DisagreementState,
     patterns: PatternConfidence,
     cfg: VerdictV2Config,
+    *,
+    plan: TradePlan | None = None,
+    row: dict[str, Any] | None = None,
 ) -> ScenarioFragility:
     score = 0.25
     deps: list[str] = []
@@ -40,6 +46,20 @@ def compute_fragility(
         score += 0.2
         deps.append("directional_commit")
         breaks.append("range expansion without bias")
+
+    if plan is not None and row is not None and plan.direction in {"long", "short"}:
+        from hunt_core.deep.verdict_v2.levels import stop_structural_buffer_atr
+
+        entry_ref = plan.entry_reference or (plan.entry_zone[0] + plan.entry_zone[1]) / 2
+        buf_atr = stop_structural_buffer_atr(row, plan.direction, plan.stop_loss, entry_ref)
+        if buf_atr <= 0.05:
+            score += 0.22
+            deps.append("stop_buffer")
+            breaks.append("стоп без буфера за структурой")
+            evidence.append("stop_tight_vs_structure")
+        elif buf_atr < 0.2:
+            score += 0.10
+            evidence.append("stop_thin_buffer")
 
     score = clamp01(score)
     if score >= cfg.fragility_high_threshold:

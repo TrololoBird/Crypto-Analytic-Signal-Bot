@@ -54,3 +54,25 @@ def compute_signal_strength(
         label=label,  # type: ignore[arg-type]
         capped_by_data=capped,
     )
+
+
+def apply_reconcile_to_strength(
+    strength: SignalStrength,
+    reconcile: "ReconciliationResult",
+) -> SignalStrength:
+    from hunt_core.deep.verdict_v2.reconcile import ReconciliationResult
+
+    if reconcile.level == "coherent" or reconcile.strength_multiplier >= 1.0:
+        return strength
+    score = clamp01(strength.score * reconcile.strength_multiplier)
+    if score >= 0.72:
+        label = "strong"
+    elif score >= 0.52:
+        label = "moderate"
+    else:
+        label = "weak"
+    return SignalStrength(
+        score=round(score, 3),
+        label=label,  # type: ignore[arg-type]
+        capped_by_data=strength.capped_by_data,
+    )

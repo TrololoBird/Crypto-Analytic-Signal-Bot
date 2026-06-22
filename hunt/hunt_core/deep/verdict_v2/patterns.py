@@ -102,6 +102,19 @@ def _gen_distribution(row: dict[str, Any], ctx: str) -> PatternCandidate:
     return PatternCandidate(id="distribution", raw_score=clamp01(score), direction_hint=direction, evidence=evidence)  # type: ignore[arg-type]
 
 
+_PATTERN_EQUIV: dict[str, frozenset[str]] = {
+    "distribution": frozenset({"distribution", "trend_continuation"}),
+    "accumulation": frozenset({"accumulation", "trend_continuation"}),
+}
+
+
+def _pattern_equivalent(a: str, b: str) -> bool:
+    for group in _PATTERN_EQUIV.values():
+        if a in group and b in group:
+            return True
+    return a == b
+
+
 def generate_patterns(
     row: dict[str, Any],
     topo: HorizonTopology,
@@ -119,7 +132,9 @@ def generate_patterns(
     filtered = filter_patterns_by_driver(raw, driver)
     ranked = sorted(filtered, key=lambda c: c.raw_score, reverse=True)
     primary = ranked[0]
-    alts = tuple(ranked[1:3])
+    alts = tuple(
+        c for c in ranked[1:4] if c.id != primary.id and not _pattern_equivalent(c.id, primary.id)
+    )[:2]
     spread = primary.raw_score - (alts[0].raw_score if alts else 0)
     ambiguous = spread < cfg.pattern_ambiguity_spread
     resolved = PatternConfidence(

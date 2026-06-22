@@ -9,6 +9,7 @@ from hunt_core.deep.verdict_v2.types import (
     HorizonTopology,
     PathType,
     PatternConfidence,
+    TradePlan,
 )
 from hunt_core.shared.primitives.targets import (
     collect_downward_targets as _collect_downward_targets,
@@ -66,6 +67,38 @@ def _time_bounds(path: PathType) -> tuple[float, float]:
     return (8.0, 72.0)
 
 
+_CONTINUATION_PATTERNS = frozenset({"trend_continuation", "trend_acceleration"})
+
+
+def adjust_expected_move_from_plan(path: ExpectedPath, plan: TradePlan | None) -> ExpectedPath:
+    """Derive expected-move lower bound from nearest TP (R3)."""
+    if plan is None or path.direction == "neutral":
+        return path
+    from hunt_core.deep.verdict_v2.types import ExpectedPath as EP
+
+    entry = plan.entry_reference or (plan.entry_zone[0] + plan.entry_zone[1]) / 2
+    tp1 = plan.take_profit_1
+    if entry <= 0 or tp1 <= 0:
+        return path
+    nearest_pct = abs(pct_move(entry, tp1))
+    lo, hi = path.expected_move_pct
+    lo = min(lo, nearest_pct * 0.95)
+    hi = max(hi, nearest_pct)
+    if hi < lo:
+        hi = lo * 1.5
+    return EP(
+        type=path.type,
+        direction=path.direction,
+        expected_move_pct=(round(lo, 2), round(hi, 2)),
+        expected_time_h=path.expected_time_h,
+        invalidation=path.invalidation,
+        probability_rank=path.probability_rank,
+        narrative=path.narrative,
+        supporting_patterns=list(path.supporting_patterns),
+        topology=path.topology,
+    )
+
+
 def map_to_expected_path(
     row: dict[str, Any],
     patterns: PatternConfidence,
@@ -73,10 +106,11 @@ def map_to_expected_path(
 ) -> ExpectedPath:
     pid = patterns.primary.id
     path_type = _PATTERN_PATH.get(pid, "range")
-    if topo.kind == "aligned_trend" and topo.a_dominant == "long":
-        path_type = "continuation_up"
-    elif topo.kind == "aligned_trend" and topo.a_dominant == "short":
-        path_type = "continuation_down"
+    if topo.kind == "aligned_trend":
+        if topo.a_dominant == "long" and pid in _CONTINUATION_PATTERNS:
+            path_type = "continuation_up"
+        elif topo.a_dominant == "short" and pid in _CONTINUATION_PATTERNS:
+            path_type = "continuation_down"
     direction = _path_direction(path_type)
     move_lo, move_hi = _move_bounds(row, direction)
     time_lo, time_hi = _time_bounds(path_type)

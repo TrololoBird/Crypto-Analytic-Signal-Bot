@@ -40,12 +40,43 @@ def attach_verdict_v2_to_row(row: dict[str, Any]) -> dict[str, Any]:
     v2 = row.get("verdict_v2")
     summary = verdict_v2_to_summary(v2)
     if summary:
-        from hunt_core.deep.verdict_v2.activation import assess_activation
+        from hunt_core.deep.verdict_v2.activation import activation_event, assess_activation
+        from hunt_core.deep.verdict_v2.types import ScenarioVerdict
+
+        prev_summary = row.get("verdict_v2_summary")
+        prev_lifecycle = ""
+        prev_evt_id = ""
+        prev_evt: dict[str, Any] | None = None
+        if isinstance(prev_summary, dict):
+            prev_lifecycle = str(prev_summary.get("plan_lifecycle") or "")
+            prev_evt_id = str(prev_summary.get("activation_event_id") or "")
+            raw_evt = prev_summary.get("activation_event")
+            if isinstance(raw_evt, dict):
+                prev_evt = raw_evt
 
         act = assess_activation(row, summary)
         summary = dict(summary)
         summary["activation"] = act.get("state", "idle")
         summary["activation_detail"] = act.get("detail", "")
+
+        plan = v2.trade_plan if isinstance(v2, ScenarioVerdict) else None
+        if plan is not None:
+            evt = activation_event(row, plan, summary, prev_lifecycle=prev_lifecycle)
+            if evt is not None:
+                evt_id = (
+                    f"{evt.get('symbol')}:{evt.get('fill_reference')}:"
+                    f"{evt.get('rr_tp1')}"
+                )
+                if evt_id != prev_evt_id:
+                    row["activation_event"] = evt
+                    summary["activation_event"] = evt
+                    summary["activation_event_id"] = evt_id
+            elif prev_evt is not None:
+                summary["activation_event"] = prev_evt
+                if prev_evt_id:
+                    summary["activation_event_id"] = prev_evt_id
+                row["activation_event"] = prev_evt
+
         row["verdict_v2_summary"] = summary
     return row
 

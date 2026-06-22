@@ -185,6 +185,9 @@ class MaturityFeatures:
     evidence: list[str] = field(default_factory=list)
 
 
+PlanLifecycle = Literal["forming", "armed", "active"]
+
+
 @dataclass(frozen=True, slots=True)
 class TradePlan:
     direction: Literal["long", "short"]
@@ -200,6 +203,9 @@ class TradePlan:
     rr_primary: float
     invalidation_reason: str
     level_sources: list[str] = field(default_factory=list)
+    entry_reference: float = 0.0
+    rr_base_label: str = "≈R:R (от края зоны)"
+    plan_lifecycle: PlanLifecycle = "forming"
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +236,9 @@ class ScenarioVerdict:
     maturity: MaturityFeatures
     market_context: str
     evidence: list[str] = field(default_factory=list)
+    reconcile_level: str = "coherent"
+    reconcile_caveats: tuple[str, ...] = ()
+    factor_contributions: tuple[Any, ...] = ()
 
     def to_audit_dict(self) -> dict[str, Any]:
         pc = self.pattern_confidence
@@ -265,6 +274,12 @@ class ScenarioVerdict:
             out["tp1"] = plan.take_profit_1
             out["tp2"] = plan.take_profit_2
             out["tp3"] = plan.take_profit_3
+            out["rr_base_label"] = plan.rr_base_label
+            out["plan_lifecycle"] = plan.plan_lifecycle
+            out["entry_reference"] = plan.entry_reference
+        out["reconcile_level"] = self.reconcile_level
+        if self.reconcile_caveats:
+            out["reconcile_caveats"] = list(self.reconcile_caveats)
         h_b = self.horizons.get("B")
         if h_b:
             out["horizon_b_conviction"] = h_b.conviction

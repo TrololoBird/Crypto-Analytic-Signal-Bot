@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from hunt_core.deep.verdict_v2._helpers import clamp01
 from hunt_core.deep.verdict_v2.config import VerdictV2Config
+from hunt_core.deep.verdict_v2.reconcile import ReconciliationResult
 from hunt_core.deep.verdict_v2.types import TradePlan, TradeQuality
 
 
@@ -33,4 +34,30 @@ def compute_trade_quality(plan: TradePlan | None, cfg: VerdictV2Config) -> Trade
         rr_stretch=round(rr3, 2),
         verdict=verdict,  # type: ignore[arg-type]
         advisory=advisory,
+    )
+
+
+def apply_reconcile_to_trade_quality(
+    trade_q: TradeQuality,
+    reconcile: ReconciliationResult,
+) -> TradeQuality:
+    if reconcile.level == "coherent":
+        return trade_q
+    if reconcile.level == "strong_conflict":
+        caveat = reconcile.caveats[0] if reconcile.caveats else "контекст против"
+        return TradeQuality(
+            score=trade_q.score,
+            rr_nearest=trade_q.rr_nearest,
+            rr_stretch=trade_q.rr_stretch,
+            verdict="poor",
+            advisory=f"Контекст против — {caveat}",
+        )
+    caveat = reconcile.caveats[0] if reconcile.caveats else "частичный конфликт"
+    verdict = "marginal" if trade_q.verdict == "favorable" else trade_q.verdict
+    return TradeQuality(
+        score=round(trade_q.score * 0.85, 3),
+        rr_nearest=trade_q.rr_nearest,
+        rr_stretch=trade_q.rr_stretch,
+        verdict=verdict,  # type: ignore[arg-type]
+        advisory=f"{trade_q.advisory} · {caveat}",
     )

@@ -13,13 +13,14 @@ from hunt_core.deep.verdict_v2.features.maturity import extract_maturity
 from hunt_core.deep.verdict_v2.fragility import compute_fragility
 from hunt_core.deep.verdict_v2.horizon_topology import classify_topology
 from hunt_core.deep.verdict_v2.market_driver import infer_driver
-from hunt_core.deep.verdict_v2.path_mapper import map_to_expected_path
+from hunt_core.deep.verdict_v2.path_mapper import adjust_expected_move_from_plan, map_to_expected_path
 from hunt_core.deep.verdict_v2.patterns import generate_patterns
+from hunt_core.deep.verdict_v2.reconcile import reconcile_context
 from hunt_core.deep.verdict_v2.signal_decision import decide_signal
-from hunt_core.deep.verdict_v2.signal_strength import compute_signal_strength
+from hunt_core.deep.verdict_v2.signal_strength import apply_reconcile_to_strength, compute_signal_strength
 from hunt_core.deep.verdict_v2.timing_gate import assess_timing_gate
 from hunt_core.deep.verdict_v2.trade_plan import build_trade_plan
-from hunt_core.deep.verdict_v2.trade_quality import compute_trade_quality
+from hunt_core.deep.verdict_v2.trade_quality import apply_reconcile_to_trade_quality, compute_trade_quality
 from hunt_core.deep.verdict_v2.types import ScenarioVerdict
 
 
@@ -49,7 +50,11 @@ def build_scenario_verdict(
     driver = infer_driver(engine_evidence, patterns.primary.id)
     path = map_to_expected_path(row, patterns, topology)
     catalyst = build_catalyst(row, path)
-    fragility = compute_fragility(path, topology, disagreement, patterns, cfg)
+    plan = build_trade_plan(row, path, cfg.trade_plan)
+    path = adjust_expected_move_from_plan(path, plan)
+    fragility = compute_fragility(
+        path, topology, disagreement, patterns, cfg, plan=plan, row=row
+    )
     strength = compute_signal_strength(
         path,
         horizons,
@@ -59,11 +64,22 @@ def build_scenario_verdict(
         symbol=sym,
         topology_kind=topology.kind,
     )
-    plan = build_trade_plan(row, path, cfg.trade_plan)
+    reconcile = reconcile_context(row, path, plan, engines, patterns)
+    strength = apply_reconcile_to_strength(strength, reconcile)
     trade_q = compute_trade_quality(plan, cfg)
+    trade_q = apply_reconcile_to_trade_quality(trade_q, reconcile)
     timing = assess_timing_gate(row, path.direction, horizons=horizons)
     decision = decide_signal(
-        path, strength, fragility, trade_q, plan, data_quality, catalyst, cfg, timing=timing
+        path,
+        strength,
+        fragility,
+        trade_q,
+        plan,
+        data_quality,
+        catalyst,
+        cfg,
+        timing=timing,
+        reconcile=reconcile,
     )
 
     evidence = [
@@ -71,7 +87,10 @@ def build_scenario_verdict(
         f"topo={topology.kind}",
         f"path={path.type}",
         f"driver={driver.primary}",
+        f"reconcile={reconcile.level}",
     ]
+    if reconcile.caveats:
+        evidence.append(f"conflict={reconcile.caveats[0]}")
     if timing.evidence:
         evidence.append(f"timing={timing.evidence[0]}")
     h_c = horizons.get("C")
@@ -96,4 +115,7 @@ def build_scenario_verdict(
         maturity=maturity,
         market_context=market_context,
         evidence=evidence,
+        reconcile_level=reconcile.level,
+        reconcile_caveats=reconcile.caveats,
+        factor_contributions=reconcile.factor_contributions,
     )
