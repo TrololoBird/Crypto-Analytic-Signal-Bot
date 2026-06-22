@@ -21,6 +21,7 @@ from hunt_core.data.lake import (
 from hunt_core.data.universe import clear_signal_notify, load_pending_notify
 from hunt_core.deliver.digest import get_advisory_digest
 from hunt_core.deliver.dispatch import (
+    effective_top_ls,
     evaluate_forming_gate,
     mark_unified_sent,
     unified_cooldown_ok,
@@ -1401,6 +1402,8 @@ async def run_tick(
                                 direction=direction,
                                 message_id=result.message_id,
                                 delivery_tier=delivery_tier,
+                                setup_phase=setup.get("phase"),
+                                hunt_phase=(lifecycle_raw or {}).get("phase") if isinstance(lifecycle_raw, dict) else None,
                                 price=price_now,
                                 price_source=row.get("price_source"),
                                 snapshot_batch_s=snap_elapsed,
