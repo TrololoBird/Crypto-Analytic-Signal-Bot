@@ -877,12 +877,7 @@ def main() -> int:
     if 'setup.get("dump_score") or setup.get("long_score")' in eval_src:
         issues.append("evaluate_delivery must not use cross-direction score for family_vote")
 
-    from hunt_core.deep.signal import resolve_trade_direction
-
-    from hunt_core.analysis.deep_signal import (  # noqa: F401 — shim contract
-        btc_market_context as _btc_shim,
-        resolve_trade_direction as _rtd_shim,
-    )
+    from hunt_core.deep.signal import btc_market_context, resolve_trade_direction
     from hunt_core.data.universe import is_pinned_symbol as _pin_shim  # noqa: F401
 
     dir_row = {
@@ -1268,6 +1263,13 @@ def main() -> int:
     )
     if not ok_long or long_reason != "env_override":
         issues.append("long_tg_allowed must pass with HUNT_LONG_TG without wide_hunter")
+
+    from hunt_core.scanner.gate._registry import _gate_edge_policy
+
+    ramp_setup: dict[str, Any] = {}
+    _gate_edge_policy(direction="long", setup=ramp_setup, row={}, lifecycle=None)
+    if ramp_setup.get("delivery_lane") != "lab" or not ramp_setup.get("long_ramp_reason"):
+        issues.append("uncalibrated long must route to lab lane via edge_policy")
 
     if issues:
         for item in issues:

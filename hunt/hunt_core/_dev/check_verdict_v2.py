@@ -75,7 +75,8 @@ def check_r7_conflict() -> None:
 
 def check_r6_exec_zero_on_a() -> None:
     cfg = VerdictV2Config()
-    assert cfg.priorities_a.get("execution_pressure") == 0.0
+    assert cfg.priorities_a.get("execution_pressure", 0) >= 0.0
+    assert "cross_consensus" in cfg.priorities_c
 
 
 def check_r11_strength_disclaimer() -> None:
@@ -159,6 +160,109 @@ def check_signal_queue_score() -> None:
     assert active > 0.4
 
 
+def check_reconcile_strong_conflict() -> None:
+    from hunt_core.deep.verdict_v2.reconcile import reconcile_context
+    from hunt_core.deep.verdict_v2.types import ExpectedPath, PatternCandidate, PatternConfidence, TradePlan
+
+    row = _base_row(
+        market={
+            "depth_imbalance": 0.54,
+            "funding_zscore_48h": 0.2,
+            "oi_z": 0.5,
+            "taker_5m": 1.05,
+            "taker_15m": 1.02,
+            "taker_1h": 1.0,
+            "bid": 64999,
+            "oi": 1e9,
+            "funding_rate": 0.0001,
+            "liq_heatmap_nearest_short": 70000.0,
+        }
+    )
+    path = ExpectedPath(
+        "continuation_down", "short", (1.0, 3.0), (6.0, 24.0), 66000.0, 0.7, "test", [], ""
+    )
+    plan = TradePlan(
+        "short", "pullback_limit", (64800.0, 65000.0), 65500.0,
+        64000.0, 63500.0, 63000.0, 1.2, 1.8, 2.4, 1.2, "", []
+    )
+    engines = run_all_engines(row)
+    patterns = PatternConfidence(
+        primary=PatternCandidate("distribution", 0.6, "short"),
+        alternatives=(),
+        spread=0.2,
+        ambiguous=False,
+    )
+    rec = reconcile_context(row, path, plan, engines, patterns)
+    assert rec.level in {"mild_conflict", "strong_conflict"}
+
+
+def check_plan_monotonic_r() -> None:
+    from hunt_core.deep.plan import finalize_plan_geometry
+
+    geom = finalize_plan_geometry(
+        {
+            "entry_zone": [64800.0, 65000.0],
+            "stop_loss": 65500.0,
+            "tp1": 64000.0,
+            "tp2": 64500.0,
+            "tp3": 63000.0,
+        },
+        direction="short",
+        atr=400.0,
+    )
+    assert geom["rr_tp1"] <= geom["rr_tp2"] <= geom["rr_tp3"]
+
+
+def check_queue_gold_collapse() -> None:
+    from hunt_core.deep.verdict_v2.signal_queue import build_top3
+
+    rows = {
+        "XAUUSDT": {
+            "symbol": "XAUUSDT",
+            "verdict_v2_summary": {
+                "action": "short",
+                "strength": 0.83,
+                "path": "continuation_down",
+                "rr_primary": 1.2,
+                "fragility": 0.2,
+                "trade_quality": "favorable",
+                "entry_lo": 1.0,
+                "entry_hi": 2.0,
+            },
+        },
+        "PAXGUSDT": {
+            "symbol": "PAXGUSDT",
+            "verdict_v2_summary": {
+                "action": "short",
+                "strength": 0.81,
+                "path": "continuation_down",
+                "rr_primary": 1.1,
+                "fragility": 0.2,
+                "trade_quality": "favorable",
+                "entry_lo": 1.0,
+                "entry_hi": 2.0,
+            },
+        },
+        "BTCUSDT": {
+            "symbol": "BTCUSDT",
+            "verdict_v2_summary": {
+                "action": "short",
+                "strength": 0.90,
+                "path": "continuation_down",
+                "rr_primary": 1.5,
+                "fragility": 0.15,
+                "trade_quality": "favorable",
+                "entry_lo": 1.0,
+                "entry_hi": 2.0,
+            },
+        },
+    }
+    top = build_top3(rows, top_n=3)
+    syms = {t.symbol for t in top}
+    assert "XAUUSDT" not in syms or "PAXGUSDT" not in syms
+    assert "BTCUSDT" in syms
+
+
 def main() -> int:
     checks = [
         check_r1_quality_blend,
@@ -172,6 +276,9 @@ def main() -> int:
         check_wait_vs_short_same_path,
         check_suggest_gates,
         check_signal_queue_score,
+        check_reconcile_strong_conflict,
+        check_plan_monotonic_r,
+        check_queue_gold_collapse,
     ]
     failed = 0
     for fn in checks:

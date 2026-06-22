@@ -1,16 +1,15 @@
-"""Smoke for the deep-analysis path over the parquet lake (not pytest).
+"""Smoke for scanner lake_panel over parquet (not Module 1 /signal).
 
-Run as ``python -m hunt_core._dev.check_deep [--symbol SYM]``. Builds the deep report
-for each lake symbol and prints the Telegram-formatted output — the same report the
-``/signal`` command and pinned review will render. Verifies the path runs on any symbol
-in any phase (no gate), and is deterministic.
+Run as ``python -m hunt_core._dev.check_deep [--symbol SYM]``. Builds the fusion lake
+report for each symbol and prints formatted output. Verifies determinism on lake data.
+Operator ``/signal`` uses ``hunt_core.deep`` (verdict_v2), not this path.
 """
 from __future__ import annotations
 
 import argparse
 import sys
 
-from hunt_core.scanner.detect.deep import build_deep_report_from_lake
+from hunt_core.scanner.detect.lake_panel import build_deep_report_from_lake
 from hunt_core.paths import LAKE_PARQUET
 
 

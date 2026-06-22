@@ -8,7 +8,15 @@ from pathlib import Path
 CORE = Path(__file__).resolve().parents[1]
 
 FORBIDDEN = frozenset({"engine", "bot", "hunt_watch", "hunt_research", "intel"})
-STALE_MODULES = frozenset({"hunt_core.coercion", "hunt_core.gate", "hunt_core.detect", "hunt_core.setups"})
+STALE_MODULES = frozenset({
+    "hunt_core.coercion",
+    "hunt_core.gate",
+    "hunt_core.detect",
+    "hunt_core.setups",
+    "hunt_core.analysis.trend_engine",
+    "hunt_core.analysis.adx_thresholds",
+    "hunt_core.analysis.deep_signal",
+})
 STRICT_LOWER = frozenset({"market", "data", "shared"})
 FORBIDDEN_IN_STRICT = frozenset(
     {
@@ -73,6 +81,8 @@ def _violations() -> list[str]:
                 out.append(f"{rel}: shared imports decision module {mod}")
             if top == "deep" and sub_top == "scanner":
                 out.append(f"{rel}: deep→scanner {mod}")
+            if top == "deep" and sub_top == "analysis":
+                out.append(f"{rel}: deep→analysis {mod}")
             if top == "scanner" and sub_top == "analysis" and not rel_s.startswith(SCANNER_ANALYSIS_SHIM_PREFIX):
                 out.append(f"{rel}: scanner→analysis {mod} (use scanner.playbook shim)")
             if top == "analysis" and sub_top == "scanner":
