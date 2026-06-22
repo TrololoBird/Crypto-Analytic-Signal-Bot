@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hunt_core.deep.forecast_panel import build_structural_forecast_panel
-from hunt_core.deep.verdicts import build_three_verdicts
 import html
 
 
@@ -14,11 +13,9 @@ class DeepAnalysis:
     symbol: str
     row: dict[str, Any]
     fusion: dict[str, Any]
-    verdicts: dict[str, Any]
     forecasts: dict[str, dict[str, Any] | None]
     would_deliver: bool
     blockers: tuple[str, ...] = field(default_factory=tuple)
-    pinned_verdict: Any | None = None
     include_watch_appendix: bool = True
 
     def fusion_text(self) -> str:
@@ -31,9 +28,11 @@ class DeepAnalysis:
         mtf = self.row.get("mtf")
         if mtf is None:
             return ""
+        # Per-TF trend rows only — pure structural CONTEXT, not a verdict. The
+        # single trade verdict is Verdict V2 (verdict_v2_text); MTF scenario scores
+        # and a competing "dominant" were removed to keep one authority.
         _TREND_RU = {"bull": "вверх", "bear": "вниз", "neutral": "нейтр", "long": "вверх", "short": "вниз"}
-        _SIDE_RU = {"long": "лонг", "short": "шорт", "neutral": "боковик", "sideways": "боковик"}
-        lines = ["📐 <b>МТФ структура</b>"]
+        lines = ["📐 <b>МТФ структура</b> <i>(контекст)</i>"]
         tf_signals = getattr(mtf, "tf_signals", None) or {}
         for tf_key in ("1w", "1d", "4h", "1h", "15m", "5m"):
             sig = tf_signals.get(tf_key)
@@ -45,60 +44,7 @@ class DeepAnalysis:
             if trend:
                 trend_ru = _TREND_RU.get(str(trend), str(trend))
                 lines.append(f"  {tf_key}: <b>{html.escape(trend_ru)}</b>")
-        long_s = getattr(mtf, "long_scenario", None)
-        short_s = getattr(mtf, "short_scenario", None)
-        if long_s and short_s:
-            lines.append(
-                f"  лонг {float(getattr(long_s, 'score', 0)):.2f} "
-                f"({getattr(long_s, 'htf_count', 0)}/{getattr(long_s, 'htf_total', 0)} HTF) · "
-                f"шорт {float(getattr(short_s, 'score', 0)):.2f} "
-                f"({getattr(short_s, 'htf_count', 0)}/{getattr(short_s, 'htf_total', 0)} HTF)"
-            )
-        dom = getattr(mtf, "dominant", None)
-        if dom:
-            dom_ru = _SIDE_RU.get(str(dom), str(dom))
-            lines.append(f"  преобладает: <b>{html.escape(dom_ru)}</b>")
         return "\n".join(lines) if len(lines) > 1 else ""
-
-    def verdicts_text(self) -> str:
-        v = self.verdicts
-        _SIDE_RU = {"long": "лонг", "short": "шорт", "sideways": "боковик", "neutral": "нет"}
-        lines = ["📊 <b>Вердикты</b> (структура-сначала)"]
-        for key in ("long", "short", "sideways"):
-            block = v.get(key) or {}
-            score = block.get("score", 0)
-            conf = block.get("confidence", 0)
-            key_ru = _SIDE_RU.get(key, key)
-            lines.append(f"  {key_ru}: оценка <code>{score:.2f}</code> увер. <code>{conf:.0%}</code>")
-        dom = v.get("dominant") or "neutral"
-        dom_ru = _SIDE_RU.get(str(dom), str(dom))
-        lines.append(f"Преобладает: <b>{dom_ru}</b>")
-        reason = v.get("reason")
-        if reason:
-            clean = _sanitize_deep_reason(str(reason))
-            if clean:
-                _GATE_RU = {
-                    "timing_c": "ждём подтверждения",
-                    "timing_a": "рано — ждём",
-                    "timing_b": "нет триггера",
-                    "rr_primary": "R:R недостаточный",
-                    "conviction": "низкая убеждённость",
-                    "structure": "структура не подтверждена",
-                    "confluence": "нет слияния факторов",
-                    "strength": "сила сигнала низкая",
-                    "fragility": "высокая хрупкость",
-                }
-                clean = clean.replace("WAIT:", "ЖДЁМ:")
-                for code, ru in _GATE_RU.items():
-                    clean = clean.replace(code, ru)
-                lines.append(f"<i>{html.escape(clean)}</i>")
-        src = v.get("source")
-        if src:
-            lines.append(f"<i>источник: {src}</i>")
-        return "\n".join(lines)
-
-    def indicator_panel_text(self) -> str:
-        return ""
 
     def verdict_v2_text(self) -> str:
         from hunt_core.deep.verdict_v2.types import ScenarioVerdict
@@ -145,13 +91,11 @@ def _enrich_deep_row(work: dict[str, Any]) -> dict[str, Any]:
     if not sym or not tf or price <= 0:
         return work
 
-    from hunt_core.deep.pinned import build_pinned_verdict
+    # Verdict V2 is the single decision authority — build/attach it directly
+    # (no legacy pinned_verdict shim).
+    from hunt_core.deep.verdict_v2.serialize import ensure_verdict_v2
 
-    if not work.get("pinned_verdict"):
-        work["pinned_verdict"] = build_pinned_verdict(work)
-    from hunt_core.deep.verdict_v2.serialize import attach_verdict_v2_to_row
-
-    attach_verdict_v2_to_row(work)
+    ensure_verdict_v2(work)
     return work
 
 
@@ -182,10 +126,6 @@ def build_deep_report(
     }
     fusion = work.get("manipulation_fusion") if isinstance(work.get("manipulation_fusion"), dict) else {}
 
-    verdicts = build_three_verdicts(work, fusion=fusion)
-    work["_deep_verdicts"] = verdicts
-    pv = work.get("pinned_verdict")
-
     wd = would_deliver
     if wd is None and include_watch_appendix:
         wd = bool(work.get("would_deliver"))
@@ -198,11 +138,9 @@ def build_deep_report(
         symbol=sym,
         row=work,
         fusion=fusion,
-        verdicts=verdicts,
         forecasts=forecasts,
         would_deliver=bool(wd) if wd is not None else False,
         blockers=bl,
-        pinned_verdict=pv,
         include_watch_appendix=include_watch_appendix,
     )
 
@@ -224,24 +162,4 @@ def build_deep_analysis(
     )
 
 
-def _sanitize_deep_reason(reason: str) -> str:
-    """Strip watch-hunter lifecycle / phase clauses from deep narrative."""
-    skip = (
-        "phase=",
-        "hunt closed",
-        "dump_",
-        "long_setup",
-        "dump_setup",
-        "pre-dump",
-        "pre-pump",
-        "impulse",
-    )
-    parts = [
-        p.strip()
-        for p in reason.split(" · ")
-        if p.strip() and not any(s in p.lower() for s in skip)
-    ]
-    return " · ".join(parts[:4])
-
-
-__all__ = ["DeepAnalysis", "build_deep_analysis", "build_deep_report", "_sanitize_deep_reason"]
+__all__ = ["DeepAnalysis", "build_deep_analysis", "build_deep_report"]

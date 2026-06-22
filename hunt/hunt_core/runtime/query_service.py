@@ -80,13 +80,6 @@ def _pick_focus(row: dict[str, Any]) -> Literal["short", "long"]:
             return "short"
         if action == "long":
             return "long"
-    pv = row.get("pinned_verdict")
-    if pv is not None:
-        kind = str(getattr(pv, "kind", "") or "")
-        if kind == "short":
-            return "short"
-        if kind == "long":
-            return "long"
     dump = row.get("dump") or {}
     long_setup = row.get("long") or {}
     if dump.get("confirmed") and not long_setup.get("confirmed"):
@@ -95,13 +88,6 @@ def _pick_focus(row: dict[str, Any]) -> Literal["short", "long"]:
         return "long"
     if dump.get("confirmed") and long_setup.get("confirmed"):
         return "short" if _setup_conviction(dump, "short") >= _setup_conviction(long_setup, "long") else "long"
-    verdicts = row.get("_deep_verdicts")
-    if isinstance(verdicts, dict):
-        dom = str(verdicts.get("dominant") or "")
-        if dom == "short":
-            return "short"
-        if dom == "long":
-            return "long"
     return "short"
 
 

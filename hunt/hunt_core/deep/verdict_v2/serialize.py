@@ -15,6 +15,26 @@ def verdict_v2_to_summary(v2: Any | None) -> dict[str, Any] | None:
     return None
 
 
+def ensure_verdict_v2(row: dict[str, Any]) -> Any | None:
+    """Single authority for attaching Verdict V2 to a deep row.
+
+    Builds the ScenarioVerdict via the orchestrator when not already present as a
+    live dataclass, stores it on ``row["verdict_v2"]`` and writes the JSONL-safe
+    ``verdict_v2_summary``. Returns the ScenarioVerdict object (or None on a row
+    that cannot be scored, e.g. missing timeframes).
+    """
+    from hunt_core.deep.verdict_v2.types import ScenarioVerdict
+
+    v2 = row.get("verdict_v2")
+    if not isinstance(v2, ScenarioVerdict):
+        from hunt_core.deep.verdict_v2.orchestrator import build_scenario_verdict
+
+        v2 = build_scenario_verdict(row)
+        row["verdict_v2"] = v2
+    attach_verdict_v2_to_row(row)
+    return v2
+
+
 def attach_verdict_v2_to_row(row: dict[str, Any]) -> dict[str, Any]:
     """Persist JSONL-safe summary; drop non-serializable dataclass on export."""
     v2 = row.get("verdict_v2")

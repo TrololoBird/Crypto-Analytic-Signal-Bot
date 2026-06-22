@@ -35,9 +35,6 @@ def format_deep_analysis_telegram(analysis: DeepAnalysis) -> str:
     mtf_txt = analysis.mtf_text()
     if mtf_txt:
         parts.extend(["", mtf_txt])
-    verdict_txt = analysis.verdicts_text()
-    if verdict_txt:
-        parts.extend(["", verdict_txt])
     exp_txt = _expansion_text(analysis.row)
     if exp_txt:
         parts.extend(["", exp_txt])
