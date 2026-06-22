@@ -192,7 +192,7 @@ def resolve_tf_snap(
         closed_key = f"{key}_closed"
         closed = tf.get(closed_key)
         if isinstance(closed, dict) and closed.get("status") != "empty":
-            if closed.get("closed_bar") or closed.get("close"):
+            if _scalar_bool(closed.get("closed_bar")) or _coerce_float(closed.get("close")) is not None:
                 return closed
     snap = tf.get(key)
     return snap if isinstance(snap, dict) else {}

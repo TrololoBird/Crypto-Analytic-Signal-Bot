@@ -13,8 +13,8 @@ def ensure_fusion_lifecycle_fields(
     setup: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Backfill ``phase_fusion`` / entry flags — JSONL rows must never carry null gates."""
-    from hunt_core.detect.phase import NEUTRAL
-    from hunt_core.detect.phase_compat import fusion_lifecycle_flags
+    from hunt_core.scanner.detect.phase import NEUTRAL
+    from hunt_core.scanner.gate._lifecycle import fusion_lifecycle_flags
 
     base = dict(lc) if isinstance(lc, dict) else {}
     setup_d = setup if isinstance(setup, dict) else {}
@@ -130,7 +130,7 @@ def prepare_tick_row_for_jsonl(row: dict[str, Any]) -> dict[str, Any]:
 
     out.setdefault("plane", "hunt")
 
-    from hunt_core.analysis.deep.verdict_v2.serialize import strip_verdict_v2_for_jsonl
+    from hunt_core.deep.verdict_v2.serialize import strip_verdict_v2_for_jsonl
 
     return strip_verdict_v2_for_jsonl(out)
 

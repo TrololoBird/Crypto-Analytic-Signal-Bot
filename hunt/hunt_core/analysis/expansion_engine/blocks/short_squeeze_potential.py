@@ -1,23 +1,9 @@
-"""Block 18 — Short-squeeze potential (pre-pump fuel).
-
-Crowded shorts + negative funding + price not falling + magnets above = a short squeeze
-waiting to fire. Reuses the maps squeeze-fuel model (``liq_squeeze_fuel_short``).
-"""
+"""Lab lane shim → ``hunt_core._dev.expansion_lab.blocks.short_squeeze_potential``."""
 from __future__ import annotations
-
-from hunt_core.analysis.expansion_engine._util import opt_float
-from hunt_core.analysis.expansion_engine.blocks._common import abstain, result
-from hunt_core.analysis.expansion_engine.types import BlockContext, BlockResult
-
-NAME = "short_squeeze_potential"
-
-
-def score(ctx: BlockContext) -> BlockResult:
-    fuel = opt_float(ctx.market.get("liq_squeeze_fuel_short"))
-    if fuel is None:
-        return abstain(NAME)
-    evidence = (f"short_squeeze_fuel={fuel:.2f}",) if fuel >= 0.4 else ()
-    return result(NAME, fuel, direction="up", evidence=evidence)
-
-
-__all__ = ["NAME", "score"]
+import importlib
+_mod = importlib.import_module('hunt_core._dev.expansion_lab.blocks.short_squeeze_potential')
+for _name in dir(_mod):
+    if _name.startswith('_'):
+        continue
+    globals()[_name] = getattr(_mod, _name)
+__all__ = ['BlockContext', 'BlockResult', 'NAME', 'abstain', 'annotations', 'opt_float', 'result', 'score']

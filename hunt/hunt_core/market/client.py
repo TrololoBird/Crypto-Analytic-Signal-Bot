@@ -796,41 +796,7 @@ class HuntCcxtClient:
         )
 
     async def fetch_taker_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
-        """Taker buy/sell volume ratio (takerlongshortRatio buySellRatio)."""
-        if self._ccxt_has(self._ex, "fetchTakerBuySellVolume"):
-            sym = self._bin_sym(symbol)
-            cache_key = (sym, period)
-            now = time.monotonic()
-            cached = self._taker_ratio_cache.get(cache_key)
-            if self._cache_fresh(cached, _CACHE_TTL["taker_ratio"]):
-                return cached[1]  # type: ignore[index]
-            try:
-                await self.load_markets()
-                rows = await self._direct_binance_fetch(
-                    lambda: self._ex.fetch_taker_buy_sell_volume(
-                        self._ccxt_sym(sym),
-                        timeframe=period,
-                        limit=1,
-                    ),
-                    context=f"taker_ratio:{sym}:{period}",
-                    weight=1,
-                    method="fetchTakerBuySellVolume",
-                )
-                if rows:
-                    item = rows[-1]
-                    buy = _safe_float(item.get("takerBuyQuoteVolume"))
-                    sell = _safe_float(item.get("takerSellQuoteVolume"))
-                    if buy > 0 and sell > 0:
-                        value = buy / sell
-                        self._taker_ratio_cache[cache_key] = (now, value)
-                        return value
-            except ccxt.BaseError as exc:
-                if is_ccxt_rate_limited(exc):
-                    raise
-                LOG.warning("fetch_taker_buy_sell_volume failed | sym=%s error=%s", sym, exc)
-            except Exception as exc:
-                LOG.warning("fetch_taker_buy_sell_volume failed | sym=%s error=%s", sym, exc)
-            return None
+        """Taker buy/sell volume ratio via fapi takerlongshortRatio (CCXT implicit)."""
         return await self._fetch_fapi_metric(
             symbol,
             period=period,

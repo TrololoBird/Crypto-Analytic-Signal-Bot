@@ -354,7 +354,7 @@ def confirm_thresholds(symbol: str = "") -> dict[str, float]:
     return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
 
 
-_ENTRY_CONFIRM_TF_ALLOWED = frozenset({"1m", "3m", "5m", "15m"})
+_ENTRY_CONFIRM_TF_ALLOWED = frozenset({"1m", "5m", "15m"})
 
 
 def entry_confirm_tf(symbol: str = "", direction: str = "") -> str:
@@ -398,6 +398,40 @@ def scoring_thresholds(symbol: str = "") -> dict[str, float]:
     per = symbol_section(symbol.upper(), "scoring") if symbol else {}
     merged = _deep_merge(sc, per)
     return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def scanner_thresholds() -> dict[str, float | int]:
+    """Unified [scanner] config — single source with config.defaults.toml."""
+    sc = universal_section("scanner")
+    return {
+        "min_quote_volume_usd": float(sc.get("min_quote_volume_usd", 10_000_000)),
+        "min_open_interest_usd": float(sc.get("min_open_interest_usd", 500_000)),
+        "min_listing_age_days": int(sc.get("min_listing_age_days", 7)),
+        "max_recent_volatility_pct": float(sc.get("max_recent_volatility_pct", 80.0)),
+        "min_change_pct_for_hot": float(sc.get("min_change_pct_for_hot", 3.0)),
+        "max_hot_coins": int(sc.get("max_hot_coins", 10)),
+        "pump_extreme_pct": float(sc.get("pump_extreme_pct", 15.0)),
+        "range_hot_pct": float(sc.get("range_hot_pct", 8.0)),
+        "pos_near_high": float(sc.get("pos_near_high", 0.85)),
+        "pos_near_low": float(sc.get("pos_near_low", 0.25)),
+        "score_watch": float(sc.get("score_watch", 45.0)),
+        "score_priority": float(sc.get("score_priority", 60.0)),
+        "scan_interval_s": int(sc.get("scan_interval_s", 900)),
+        "watchlist_limit": int(sc.get("watchlist_limit", 30)),
+    }
+
+
+def prescan_thresholds() -> dict[str, float | int]:
+    """Lite prescan cadence (D1) — debounce 60–120s, merge into Full-tier slots."""
+    ps = universal_section("watch").get("prescan")
+    ps = ps if isinstance(ps, dict) else {}
+    debounce = float(ps.get("debounce_s", 90))
+    debounce = max(60.0, min(120.0, debounce))
+    return {
+        "debounce_s": debounce,
+        "merge_cap": int(ps.get("merge_cap", 12)),
+        "cadence_s": int(ps.get("cadence_s", 90)),
+    }
 
 
 def orderflow_use_nq(symbol: str = "") -> bool:

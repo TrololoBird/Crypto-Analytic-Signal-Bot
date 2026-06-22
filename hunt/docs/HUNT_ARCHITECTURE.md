@@ -6,11 +6,11 @@ Standalone **crypto-hunter** package (`hunt/`, import `hunt_core`). No `engine.*
 
 | Plane | Trigger | Pipeline | Artifacts | Telegram |
 |-------|---------|----------|-----------|----------|
-| **Module 1 — Hunt scan** | `watch` tick (dynamic universe only) | fusion detect → delivery → gates | `data/hunt_scan.jsonl`, `plane=hunt` | ARMED / CONFIRM for **alts only** (pinned blocked) |
-| **Module 2 — Deep analysis** | `deep_pinned_loop` + `/signal` / `/analyze` | `analysis/deep` + `pinned_deep` + maps | `data/deep_ticks.jsonl`, `pinned_cache/` | Change-only for pinned; on-demand for user symbols |
+| **Module 2 — Scanner** | `watch` tick (dynamic universe only) | fusion detect → delivery → gates | `data/hunt_scan.jsonl`, `plane=hunt` | ARMED / CONFIRM for **alts only** (pinned blocked) |
+| **Module 1 — Deep** | `deep_pinned_loop` + `/signal` / `/analyze` | `analysis/deep` + `pinned_deep` + maps | `data/deep_ticks.jsonl`, `pinned_cache/` | Change-only for pinned; on-demand for user symbols |
 | **Catalog** | `/signals [SYMS]` | 7 setup detectors + probability | setup candidates | Setup list + tracker block |
 
-Pinned anchors (BTC/ETH/XAU/XAG) stay on WS for market context but are **excluded** from Module 1 fusion ticks. Module 2 never calls `build_live_detection` or hunt delivery gates for TG.
+Pinned anchors stay on WS for market context but are **excluded** from Module 2 fusion ticks. Module 1 never calls `build_live_detection` or scanner delivery gates for TG.
 
 **North star (short):** gate_edge hold-to-target SL ≤30%, TP1+ ≥50% (n≥30). Long TG off by default until n≥30.
 
@@ -32,9 +32,12 @@ hunt/
 │   ├── market/             # factory, client, streams, cross, symbols, … (CCXT.md)
 │   ├── data/               # collect, universe, lake, completeness
 │   ├── features/           # prepare, snapshot, lake append
-│   ├── detect/             # fusion engine (calibrate, factors, fusion, live, delivery_bridge, deep)
-│   ├── scan/               # scanner.py shim → detect/routing only
-│   ├── gate/               # delivery, policy, _delivery_helpers
+│   ├── shared/             # mathlib, facts, primitives, shadow ledger
+│   ├── scanner/            # Module 2: detect, gate, setups, delivery, telegram
+│   ├── deep/               # Module 1: engine façade, arbiter, telegram
+│   ├── detect/             # (legacy shim → scanner.detect)
+│   ├── gate/               # (legacy shim → scanner.gate)
+│   ├── setups/             # (legacy shim → scanner.setups)
 │   ├── deliver/            # dispatch, telegram, digest
 │   ├── track/              # tracker, events, outcomes, …
 │   ├── analysis/           # pinned_deep, deep_signal (query plane)
@@ -48,7 +51,7 @@ hunt/
 
 Fusion migration **done** (2026-06-20): legacy `scan/{predump,prepump,…}` and `regime/leg_fsm` deleted; detection is `detect/*` only.
 
-## Hot path (watch tick — Module 1 only)
+## Hot path (watch tick — Module 2 Scanner only)
 
 ```
 run_loop → resolve_hunt_scan_universe (no pinned fusion)
@@ -57,7 +60,7 @@ run_loop → resolve_hunt_scan_universe (no pinned fusion)
   → hunt_scan.jsonl + HuntScanStore
   → [confirmed alt] deliver.telegram (pinned blocked via hunt_auto_confirm_blocked)
 
-deep_pinned_loop (background, Module 2):
+deep_pinned_loop (background, Module 1 Deep):
   assemble_deep_tick (hunt_fusion=False, plane=deep) → analysis/deep → change-only TG
 ```
 
@@ -230,15 +233,39 @@ FUSION gate_open  →  setup.confirmed  →  route_tick candidate
 |----------|--------|
 | Who picks side? | Fusion (`detect/fusion.py`) |
 | Who sets `confirmed`? | Fusion `gate_open` via `delivery_bridge` |
-| Who blocks mid-leg TG? | Mission + sniper (`gate/_mission.py`, `SniperConfig`) |
+| Who blocks mid-leg TG? | Mission gate (`gate/_mission.py`) + cross-module arbiter |
 | Who is default delivery authority? | Playbook N-of-M when `HUNT_PWIN_GATE=0` ([ENGINE_DESIGN.md](ENGINE_DESIGN.md)) |
 | Is `fusion_score` the gate? | No — magnitude quantile opens gate; score is strength index |
 | PRE phase source | CUSUM only (`detect/phase.py`); legacy FSM removed from tick writer |
-| Phase compat | `gate/_phase_compat.py` maps fusion ↔ legacy for mission/sniper |
+| Cross-module conflict | `shared/delivery/cross_module.py` blocks opposing Deep/Expansion vs Scanner |
 
 **Audit:** every deliver/block writes `hunt_outcome_ledger.jsonl` with `fusion_gate_open`, `playbook_pass_ok`, `mission_pass`, `authority_violation`. Run `python -m hunt_core._dev.authority_audit` after sessions.
 
 **Pre-TG funnel:** `setup_candidates.jsonl` + `dump_minute_watch.jsonl` — not tracker FSM.
+
+## Layer 0 prescan (P0-B + Phase 9 D1)
+
+Universe scan ranks on **expansion readiness energy**, not `abs(change_pct)` (`data/scanner.py` → `prescan_from_tickers`).
+
+**Lite prescan debounce** (`runtime/cycle/_cycle_loop.py` + `[watch.prescan]` in `config.defaults.toml`):
+
+| Key | Default | Role |
+|-----|---------|------|
+| `debounce_s` | 90 | Min dwell before a symbol joins the watch universe |
+| `cadence_s` | 90 | How often prescan hits are offered to the debounce queue |
+| `merge_cap` | 12 | Max symbols promoted into Full-tier slots per cycle |
+
+This closes the 15‑min blind spot between full universe REST scans and Layer‑1/2 WS fan-out.
+
+## Liquidation map approximation (Phase 9)
+
+`maps/liquidation.py` builds forward squeeze zones from **default leverage tiers** `(5, 10, 20, 50)×` when real multi-venue liquidation events are sparse:
+
+- **Primary:** realized liq events from public CCXT streams (no auth).
+- **Overlay:** estimated clusters at tier notionals around swing highs/lows — labeled `source=forward` / `realized` in zone metadata.
+- **Limitation:** tier notionals are not per-symbol max-leverage from exchange metadata; treat overlay as directional magnet hints, not exact liquidation prices.
+
+Improve only via additional public OI/liq feeds — no authenticated endpoints.
 
 ## Forbidden
 

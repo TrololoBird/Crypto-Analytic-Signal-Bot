@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import sys
 
-from hunt_core.analysis.deep.verdict_v2.blender import blend_horizons, build_conflict_matrix
-from hunt_core.analysis.deep.verdict_v2.config import SignalGates, VerdictV2Config
-from hunt_core.analysis.deep.verdict_v2.engines import run_all_engines
-from hunt_core.analysis.deep.verdict_v2.orchestrator import build_scenario_verdict
-from hunt_core.analysis.deep.verdict_v2.signal_decision import decide_signal
-from hunt_core.analysis.deep.verdict_v2.types import (
+from hunt_core.deep.verdict_v2.blender import blend_horizons, build_conflict_matrix
+from hunt_core.deep.verdict_v2.config import SignalGates, VerdictV2Config
+from hunt_core.deep.verdict_v2.engines import run_all_engines
+from hunt_core.deep.verdict_v2.orchestrator import build_scenario_verdict
+from hunt_core.deep.verdict_v2.signal_decision import decide_signal
+from hunt_core.deep.verdict_v2.types import (
     DataQualityReport,
     EngineOutput,
     ExpectedPath,
@@ -115,7 +115,7 @@ def check_r13_range_probability() -> None:
 
 
 def check_r14_timing_gate() -> None:
-    from hunt_core.analysis.deep.verdict_v2.timing_gate import assess_timing_gate
+    from hunt_core.deep.verdict_v2.timing_gate import assess_timing_gate
 
     row = _base_row()
     gate = assess_timing_gate(row, "long")
@@ -139,7 +139,7 @@ def check_suggest_gates() -> None:
         {"path": "continuation_down", "path_direction": "short", "action": "wait", "strength": 0.46, "gates_failed": ["strength"]},
         {"path": "continuation_up", "path_direction": "long", "action": "long", "strength": 0.55, "gates_failed": []},
     ]
-    from hunt_core.analysis.deep.verdict_v2.calibration import suggest_gates
+    from hunt_core.deep.verdict_v2.calibration import suggest_gates
 
     sg = suggest_gates(summaries, min_samples=4, target_signal_rate=0.25)
     assert sg.get("applied")
@@ -147,7 +147,7 @@ def check_suggest_gates() -> None:
 
 
 def check_signal_queue_score() -> None:
-    from hunt_core.analysis.deep.verdict_v2.signal_queue import compute_opportunity_score
+    from hunt_core.deep.verdict_v2.signal_queue import compute_opportunity_score
 
     active = compute_opportunity_score(
         {"action": "short", "strength": 0.52, "path": "continuation_down", "rr_primary": 1.5, "fragility": 0.25, "trade_quality": "favorable"}

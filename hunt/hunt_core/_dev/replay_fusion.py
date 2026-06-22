@@ -27,12 +27,12 @@ from dataclasses import dataclass, field
 
 import polars as pl
 
-from hunt_core.detect import build_detection
-from hunt_core.detect import factors as F
-from hunt_core.detect.fusion import fuse, vol_adjusted_magnitude
-from hunt_core.detect.magnitude_cache import clear_magnitude_cache
-from hunt_core.detect.phase import clear_phase_sticky
-from hunt_core.detect.windows import DEFAULT_LOOKBACK, build_window
+from hunt_core.scanner.detect import build_detection
+from hunt_core.scanner.detect import factors as F
+from hunt_core.scanner.detect.fusion import fuse, vol_adjusted_magnitude
+from hunt_core.scanner.detect.magnitude_cache import clear_magnitude_cache
+from hunt_core.scanner.detect.phase import clear_phase_sticky
+from hunt_core.scanner.detect.windows import DEFAULT_LOOKBACK, build_window
 from hunt_core.paths import LAKE_PARQUET
 
 DEFAULT_WARMUP = 60
@@ -55,6 +55,8 @@ class ReplayMetrics:
     by_side: dict[str, list[int]] = field(default_factory=lambda: {"long": [0, 0], "short": [0, 0]})
     hit_factor_abs: dict[str, list[float]] = field(default_factory=dict)
     miss_factor_abs: dict[str, list[float]] = field(default_factory=dict)
+    hit_quarantine_abs: dict[str, list[float]] = field(default_factory=dict)
+    miss_quarantine_abs: dict[str, list[float]] = field(default_factory=dict)
 
     @property
     def precision(self) -> float:
@@ -212,6 +214,10 @@ def replay(
         bucket = m.hit_factor_abs if hit else m.miss_factor_abs
         for f in det.active_factors:
             bucket.setdefault(f.name, []).append(abs(f.score))
+        q_bucket = m.hit_quarantine_abs if hit else m.miss_quarantine_abs
+        for f in det.quarantine_factors:
+            if f.active:
+                q_bucket.setdefault(f.name, []).append(abs(f.score))
         if hit:
             m.hits += 1
             self_side[0] += 1
@@ -247,6 +253,13 @@ def _print_metrics(m: ReplayMetrics) -> None:
         hm = sum(hv) / len(hv) if hv else 0.0
         mm = sum(mv) / len(mv) if mv else 0.0
         print(f"    factor {k:<12} |z| hit={hm:.2f} miss={mm:.2f}")
+    qkeys = sorted(set(m.hit_quarantine_abs) | set(m.miss_quarantine_abs))
+    for k in qkeys:
+        hv = m.hit_quarantine_abs.get(k, [])
+        mv = m.miss_quarantine_abs.get(k, [])
+        hm = sum(hv) / len(hv) if hv else 0.0
+        mm = sum(mv) / len(mv) if mv else 0.0
+        print(f"    quarantine {k:<12} |z| hit={hm:.2f} miss={mm:.2f}")
 
 
 def _lake_symbols() -> list[str]:
@@ -274,7 +287,23 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FRAC",
         help="Score only the last FRAC of bars (e.g. 0.3 = out-of-sample tail)",
     )
+    p.add_argument(
+        "--train-frac",
+        type=float,
+        default=0.0,
+        metavar="FRAC",
+        help="In-sample fraction; when --walk-forward unset, holdout = 1-train_frac",
+    )
     args = p.parse_args(argv)
+
+    walk_forward = args.walk_forward
+    if walk_forward <= 0 and args.train_frac > 0:
+        walk_forward = max(0.0, min(1.0, 1.0 - args.train_frac))
+    if args.train_frac > 0:
+        print(
+            f"replay split: train_frac={args.train_frac:.2f} "
+            f"holdout_frac={1.0 - args.train_frac:.2f} walk_forward={walk_forward:.2f}"
+        )
 
     if args.all or not args.symbol:
         symbols = _lake_symbols()
@@ -292,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
             q_gate=args.q_gate,
             horizon=args.horizon_bars,
             target_atr=args.target_atr,
-            walk_forward_frac=args.walk_forward if args.walk_forward > 0 else None,
+            walk_forward_frac=walk_forward if walk_forward > 0 else None,
         )
         _print_metrics(m)
         agg.eligible += m.eligible

@@ -192,16 +192,27 @@ async def send_expansion_change_telegram(
     broadcaster: Any,
     row: dict[str, Any],
 ) -> bool:
-    """Send a standalone Expansion card — never merged with Verdict deep TG."""
+    """Send Expansion card to lab channel (E1 — not production TG)."""
     from hunt_core.analysis.expansion_engine.format import format_expansion_card
+    from hunt_core.scanner.delivery.lab import send_lane_html
 
     sym = str(row.get("symbol") or "").upper()
     exp = _expansion_dict(row)
     if row.get("error") or not exp:
         return False
+    exp = dict(exp)
+    exp["lab_alert"] = True
+    row["expansion"] = exp
     body = format_expansion_card(exp)
-    text = f"🧨 <b>Expansion Alert</b> — pinned\n\n{body}"
-    result = await broadcaster.send_html(text, no_split=True)
+    text = f"🧨 <b>Expansion Alert</b> — lab\n\n{body}"
+    setup = {"delivery_lane": "lab"}
+    result = await send_lane_html(
+        broadcaster,
+        text,
+        setup=setup,
+        row=row,
+        no_split=True,
+    )
     if result.status == "sent":
         LOG.info("expansion_pinned_tg_sent", symbol=sym, message_id=result.message_id)
         return True

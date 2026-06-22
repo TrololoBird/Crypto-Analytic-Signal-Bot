@@ -11,8 +11,7 @@ from typing import Any
 from hunt_core.domain.config import SYMBOL_TICK_TIMEOUT_S
 from hunt_core.params.store import effective_hunt_params
 
-from hunt_core.market.live_price import apply_live_price_to_row
-from hunt_core.market import HuntCcxtStreams
+from hunt_core.shared.market import HuntCcxtStreams, apply_live_price_to_row
 
 from hunt_core.data.lake import (
     buffer_cooldown_state,
@@ -108,16 +107,33 @@ def _phase_long(long_setup: dict[str, Any], confirmed: bool, *, symbol: str = ""
 
 
 def _load_state() -> dict[str, str]:
-    if not STATE_PATH.exists():
-        return {}
+    state: dict[str, str] = {}
+    if STATE_PATH.exists():
+        try:
+            raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                state.update({str(k): str(v) for k, v in raw.items()})
+        except json.JSONDecodeError:
+            pass
     try:
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
+        from hunt_core.scanner.delivery.delivery_state import load_delivery_state
+
+        ds = load_delivery_state()
+        if isinstance(ds, dict):
+            state.update({str(k): str(v) for k, v in ds.items()})
+    except Exception:
+        pass
+    return state
 
 
 def _save_state(state: dict[str, str]) -> None:
     buffer_cooldown_state(state, STATE_PATH)
+    try:
+        from hunt_core.scanner.delivery.delivery_state import save_delivery_state
+
+        save_delivery_state(state)
+    except Exception:
+        pass
 
 
 from hunt_core.runtime.cycle._cycle_tick import run_tick

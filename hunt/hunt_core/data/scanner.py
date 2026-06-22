@@ -29,6 +29,28 @@ DEFAULT_OUTLIER_MATRIX: dict[str, float] = {
     "24h": 1.00,
 }
 
+def _scanner_thresholds() -> dict:
+    try:
+        from hunt_core.params.store import scanner_thresholds
+        return scanner_thresholds()
+    except Exception:
+        return {}
+
+
+def universe_config() -> UniverseConfig:
+    """Load quality gates from [scanner] in config.defaults.toml."""
+    t = _scanner_thresholds()
+    return UniverseConfig(
+        min_quote_volume_usd=float(t.get("min_quote_volume_usd", 10_000_000)),
+        min_open_interest_usd=float(t.get("min_open_interest_usd", 500_000)),
+        min_listing_age_days=int(t.get("min_listing_age_days", 7)),
+        max_recent_volatility_pct=float(t.get("max_recent_volatility_pct", 80.0)),
+        min_change_pct_for_hot=float(t.get("min_change_pct_for_hot", 3.0)),
+        max_hot_coins=int(t.get("max_hot_coins", 10)),
+    )
+
+
+
 
 @dataclass(frozen=True, slots=True)
 class PrescanHit:
@@ -38,6 +60,8 @@ class PrescanHit:
     threshold_pct: float
     quote_volume: float
     direction: str
+    energy: float = 0.0
+    readiness_direction: str = "undecided"
     # Soft cross-venue overlay (P1.8): number of secondary CEX venues that
     # corroborate the same directional move, and the strongest move seen there.
     cross_venues: int = 0
@@ -91,44 +115,48 @@ def apply_quality_gates(
 @dataclass
 class PrescanEngine:
     outlier_matrix: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_OUTLIER_MATRIX))
-    cfg: UniverseConfig = field(default_factory=UniverseConfig)
+    cfg: UniverseConfig = field(default_factory=universe_config)
 
-    def scan_ticker(self, row: dict[str, Any]) -> list[PrescanHit]:
+    def scan_ticker(
+        self,
+        row: dict[str, Any],
+        *,
+        oi_change_pct: float | None = None,
+    ) -> list[PrescanHit]:
         ok, _ = apply_quality_gates(row, self.cfg)
         if not ok:
             return []
 
-        sym = str(row.get("symbol") or "").strip().upper()
-        change_24h = _safe_float(
-            row.get("price_change_percent") or row.get("price_change_pct"),
-            0.0,
-        ) or 0.0
-        qvol = _safe_float(row.get("quote_volume"), 0.0) or 0.0
-        hits: list[PrescanHit] = []
+        from hunt_core.data.expansion_readiness import (
+            compute_expansion_readiness,
+            readiness_meets_prescan,
+        )
 
-        interval_scale = {
-            "5m": 24.0 * 12.0,
-            "15m": 24.0 * 4.0,
-            "1h": 24.0,
-            "4h": 6.0,
-            "24h": 1.0,
-        }
-        for interval, threshold in self.outlier_matrix.items():
-            scale = interval_scale.get(interval, 24.0)
-            implied = abs(change_24h) / scale
-            if implied >= threshold:
-                direction = "pump" if change_24h > 0 else "dump"
-                hits.append(
-                    PrescanHit(
-                        symbol=sym,
-                        interval=interval,
-                        change_pct=round(change_24h, 2),
-                        threshold_pct=threshold,
-                        quote_volume=qvol,
-                        direction=direction,
-                    )
-                )
-        return hits
+        readiness = compute_expansion_readiness(row, oi_change_pct=oi_change_pct)
+        if readiness is None or not readiness_meets_prescan(readiness):
+            return []
+
+        sym = readiness.symbol
+        change_24h = readiness.change_24h_pct
+        qvol = _safe_float(row.get("quote_volume"), 0.0) or 0.0
+        if readiness.direction == "bull":
+            direction = "pump"
+        elif readiness.direction == "bear":
+            direction = "dump"
+        else:
+            direction = "coil"
+        return [
+            PrescanHit(
+                symbol=sym,
+                interval="readiness",
+                change_pct=round(change_24h, 2),
+                threshold_pct=readiness.energy,
+                quote_volume=qvol,
+                direction=direction,
+                energy=readiness.energy,
+                readiness_direction=readiness.direction,
+            )
+        ]
 
 
 OI_DIVERGENCE_MIN_PRICE_PCT = 1.0
@@ -208,12 +236,12 @@ def prescan_from_tickers(
     all_hits: list[PrescanHit] = []
     for row in rows:
         sym = str(row.get("symbol") or "").strip().upper()
-        oi_chg = (oi_change_by_sym or {}).get(sym) if oi_change_by_sym else None
-        for hit in eng.scan_ticker(row):
+        oi_chg_row = (oi_change_by_sym or {}).get(sym) if oi_change_by_sym else None
+        for hit in eng.scan_ticker(row, oi_change_pct=oi_chg_row):
             venues, strongest = _cross_overlay_for(
                 hit.symbol, hit.direction, secondary_overlay
             )
-            div = oi_price_divergence(change_pct=hit.change_pct, oi_change_pct=oi_chg)
+            div = oi_price_divergence(change_pct=hit.change_pct, oi_change_pct=oi_chg_row)
             if venues or strongest is not None or div is not None:
                 hit = PrescanHit(
                     symbol=hit.symbol,
@@ -222,6 +250,8 @@ def prescan_from_tickers(
                     threshold_pct=hit.threshold_pct,
                     quote_volume=hit.quote_volume,
                     direction=hit.direction,
+                    energy=hit.energy,
+                    readiness_direction=hit.readiness_direction,
                     cross_venues=venues,
                     cross_max_change_pct=strongest,
                     oi_divergence=div,
@@ -231,7 +261,7 @@ def prescan_from_tickers(
     # primary outlier of equal magnitude.
     all_hits.sort(
         key=lambda h: (
-            abs(h.change_pct),
+            h.energy,
             h.cross_venues,
             1 if h.oi_divergence else 0,
             h.quote_volume,
@@ -255,17 +285,17 @@ def funnel_hot_candidates(
     filtered: list[Any] = []
     for c in candidates:
         qvol = getattr(c, "quote_volume", None) or 0.0
-        chg = abs(getattr(c, "change_24h_pct", None) or 0.0)
+        energy = getattr(c, "expansion_energy", 0.0)
         if qvol < cfg.min_quote_volume_usd:
             continue
-        if chg < min_chg:
+        if energy < min_chg:
             continue
         filtered.append(c)
 
     filtered.sort(
         key=lambda item: (
+            getattr(item, "expansion_energy", 0),
             getattr(item, "hunt_score", 0),
-            abs(getattr(item, "change_24h_pct", 0)),
             getattr(item, "quote_volume", 0),
         ),
         reverse=True,
@@ -283,6 +313,7 @@ class _DebouncedSymbol:
     first_seen: float
     last_seen: float
     merged: bool = False
+    energy: float = 0.0
 
 
 class PrescanDebounceQueue:
@@ -304,7 +335,7 @@ class PrescanDebounceQueue:
         best: dict[str, PrescanHit] = {}
         for h in hits:
             cur = best.get(h.symbol)
-            if cur is None or abs(h.change_pct) > abs(cur.change_pct):
+            if cur is None or h.energy > cur.energy:
                 best[h.symbol] = h
         for sym, h in best.items():
             prev = self._items.get(sym)
@@ -315,6 +346,7 @@ class PrescanDebounceQueue:
                     interval=h.interval,
                     change_pct=h.change_pct,
                     quote_volume=h.quote_volume,
+                    energy=h.energy,
                     first_seen=mono,
                     last_seen=mono,
                 )
@@ -323,6 +355,7 @@ class PrescanDebounceQueue:
                 prev.interval = h.interval
                 prev.change_pct = h.change_pct
                 prev.quote_volume = h.quote_volume
+                prev.energy = h.energy
                 prev.last_seen = mono
 
     def drain_ready(self, *, now: float | None = None) -> list[_DebouncedSymbol]:
@@ -339,7 +372,7 @@ class PrescanDebounceQueue:
             if mono - item.first_seen >= self.debounce_s:
                 item.merged = True
                 ready.append(item)
-        ready.sort(key=lambda d: (abs(d.change_pct), d.quote_volume), reverse=True)
+        ready.sort(key=lambda d: (getattr(d, "energy", 0.0), d.quote_volume), reverse=True)
         return ready
 
     def pending_count(self) -> int:
@@ -396,13 +429,17 @@ LOG = structlog.get_logger("hunt_core.data.scanner")
 
 WatchBias = Literal["short", "long", "both"]
 
-HUNT_MIN_QUOTE_VOLUME_USD = 10_000_000.0
-HUNT_PUMP_EXTREME_PCT = 15.0
-HUNT_RANGE_HOT_PCT = 8.0
-HUNT_POS_NEAR_HIGH = 0.85
-HUNT_POS_NEAR_LOW = 0.25
-HUNT_SCORE_WATCH_THRESHOLD = 45.0
-HUNT_SCORE_PRIORITY_THRESHOLD = 60.0
+def _hunt_scanner_cfg() -> dict:
+    return _scanner_thresholds()
+
+
+HUNT_MIN_QUOTE_VOLUME_USD = float(_hunt_scanner_cfg().get("min_quote_volume_usd", 10_000_000))
+HUNT_PUMP_EXTREME_PCT = float(_hunt_scanner_cfg().get("pump_extreme_pct", 15.0))
+HUNT_RANGE_HOT_PCT = float(_hunt_scanner_cfg().get("range_hot_pct", 8.0))
+HUNT_POS_NEAR_HIGH = float(_hunt_scanner_cfg().get("pos_near_high", 0.85))
+HUNT_POS_NEAR_LOW = float(_hunt_scanner_cfg().get("pos_near_low", 0.25))
+HUNT_SCORE_WATCH_THRESHOLD = float(_hunt_scanner_cfg().get("score_watch", 45.0))
+HUNT_SCORE_PRIORITY_THRESHOLD = float(_hunt_scanner_cfg().get("score_priority", 60.0))
 
 
 def legacy_scanner_thresholds_enabled() -> bool:
@@ -520,6 +557,8 @@ class HuntCandidate:
     quote_volume: float
     range_pct_24h: float | None
     pos_in_range: float | None
+    expansion_energy: float = 0.0
+    readiness_direction: str = "undecided"
 
 
 def _safe_float(value: Any, default: float | None = None) -> float | None:
@@ -588,14 +627,20 @@ def score_hunt_row(
     if quote_volume < HUNT_MIN_QUOTE_VOLUME_USD:
         return None
 
+    from hunt_core.data.expansion_readiness import compute_expansion_readiness
+
+    readiness = compute_expansion_readiness(row)
+    expansion_energy = readiness.energy if readiness else 0.0
+    readiness_dir = readiness.direction if readiness else "undecided"
+
     high_24h = _safe_float(row.get("high_price") or row.get("high_24h"))
     low_24h = _safe_float(row.get("low_price") or row.get("low_24h"))
     range_pct, pos = _range_stats(last_price, high_24h=high_24h, low_24h=low_24h)
 
     flags: list[str] = []
     reasons: list[str] = []
-    score = 0.0
-    move = abs(change_24h)
+    score = expansion_energy * 0.55
+    move = abs(change_24h)  # metadata only — not primary rank
 
     tier: str | None
     move_z: float | None
@@ -613,19 +658,11 @@ def score_hunt_row(
             tier = None
 
     if tier == "extreme":
-        score += 30.0
         flags.append("pump_extreme_z" if tier_mode == "adaptive" else "pump_extreme")
-        reasons.append(
-            f"change_24h={change_24h:.1f}%"
-            + (f"_z={move_z:.1f}" if move_z is not None else "")
-        )
+        reasons.append(f"meta_change_24h={change_24h:.1f}%")
     elif tier == "hot":
-        score += 18.0
         flags.append("range_hot_z" if tier_mode == "adaptive" else "range_hot")
-        reasons.append(
-            f"change_24h={change_24h:.1f}%"
-            + (f"_z={move_z:.1f}" if move_z is not None else "")
-        )
+        reasons.append(f"meta_change_24h={change_24h:.1f}%")
 
     if range_pct is not None and range_pct >= 25.0:
         score += 20.0
@@ -687,6 +724,9 @@ def score_hunt_row(
     if score < 25.0:
         return None
 
+    if expansion_energy >= 20.0:
+        flags.append("expansion_ready")
+        reasons.append(f"energy={expansion_energy:.0f}")
     return HuntCandidate(
         symbol=symbol,
         hunt_score=score,
@@ -698,6 +738,8 @@ def score_hunt_row(
         quote_volume=quote_volume,
         range_pct_24h=range_pct,
         pos_in_range=pos,
+        expansion_energy=expansion_energy,
+        readiness_direction=readiness_dir,
     )
 
 
@@ -716,7 +758,7 @@ def rank_hunt_candidates(
         if candidate is not None:
             scored.append(candidate)
     scored.sort(
-        key=lambda item: (item.hunt_score, abs(item.change_24h_pct), item.quote_volume),
+        key=lambda item: (item.expansion_energy, item.hunt_score, item.quote_volume),
         reverse=True,
     )
     return scored[: max(limit, 1)]

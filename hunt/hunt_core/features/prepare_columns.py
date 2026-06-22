@@ -44,8 +44,10 @@ ALL_PREPARE_GROUPS: frozenset[str] = frozenset(
     }
 )
 
-# BTC/ETH/XAU/XAG — full indicator panel + polars_ta extended pack.
-PINNED_SYMBOLS: frozenset[str] = frozenset({"BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT"})
+# Canonical 7-coin anchor set — must match config.defaults.toml [pinned.defaults].
+PINNED_SYMBOLS: frozenset[str] = frozenset({
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUUSDT", "XAGUSDT", "PAXGUSDT"
+})
 
 # Not referenced by strategies or enrichment telemetry — safe to skip on live path.
 LIVE_SKIPPABLE_GROUPS: frozenset[str] = frozenset(
@@ -58,6 +60,8 @@ LIVE_SKIPPABLE_GROUPS: frozenset[str] = frozenset(
         "kama",
         "heikin_ashi",
         "pivot_points",
+        "polars_wq_features",
+        "fisher",
     }
 )
 

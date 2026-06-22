@@ -196,7 +196,7 @@ def _tracker_closed_summary() -> dict[str, Any]:
 
 def build_calibration_report(cal: dict[str, Any] | None = None) -> dict[str, Any]:
     """Per-setup lake report — WR, avg PnL, flip eligibility (T4)."""
-    from hunt_core.setups.catalog import HUNT_SETUP_IDS, setup_ev_flip_eligible
+    from hunt_core.scanner.setups.catalog import HUNT_SETUP_IDS, setup_ev_flip_eligible
 
     payload = cal if cal is not None else rebuild_calibration(dry_run=True)
     oc = (payload.get("outcome_calibration") or {}).get("by_setup") or {}

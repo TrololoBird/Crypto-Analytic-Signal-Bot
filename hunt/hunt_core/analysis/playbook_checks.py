@@ -15,7 +15,7 @@ PLAYBOOK_REQUIRED: dict[str, frozenset[str]] = {
             "anti_squeeze",
         }
     ),
-    "coil_long": frozenset(
+    "prepump_long": frozenset(
         {
             "coil_phase",
             "vp_accumulation",
@@ -39,7 +39,7 @@ PLAYBOOK_REQUIRED: dict[str, frozenset[str]] = {
 
 PLAYBOOK_N_OF_M: dict[str, tuple[int, int]] = {
     "predump_short": (4, 6),
-    "coil_long": (5, 7),
+    "prepump_long": (5, 7),
     "ignition_long": (5, 5),
 }
 
@@ -52,6 +52,9 @@ def playbook_pass_count(
     checks: dict[str, bool],
 ) -> tuple[int, int]:
     """Return (pass_count, required_n) for archetype checklist."""
+    from hunt_core.analysis.archetypes import playbook_archetype_key
+
+    archetype = playbook_archetype_key(archetype)
     if archetype == "none":
         return 0, 0
     keys = PLAYBOOK_REQUIRED.get(str(archetype), frozenset())
@@ -83,7 +86,7 @@ def best_archetype_by_ratio(checks: dict[str, bool]) -> tuple[str, float, int, i
     best_ratio = 0.0
     best_pc = 0
     best_req = 0
-    for arch in ("predump_short", "coil_long", "ignition_long"):
+    for arch in ("predump_short", "prepump_long", "ignition_long"):
         pc, req = playbook_pass_count(arch, checks)
         ratio = (100.0 * pc / req) if req > 0 else 0.0
         if ratio > best_ratio or (ratio == best_ratio and pc > best_pc):

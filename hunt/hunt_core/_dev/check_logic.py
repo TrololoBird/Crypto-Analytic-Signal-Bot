@@ -182,8 +182,8 @@ def main() -> int:
     if not load_config_defaults_toml():
         issues.append("config.defaults.toml empty or missing")
 
-    from hunt_core.gate._ev import delivery_ev_floors, resolve_delivery_ev
-    from hunt_core.gate.policy import _decl_check_ev_delivery
+    from hunt_core.scanner.gate._ev import delivery_ev_floors, resolve_delivery_ev
+    from hunt_core.scanner.gate.policy import _decl_check_ev_delivery
 
     good_setup = {
         "confirmed": True,
@@ -234,7 +234,7 @@ def main() -> int:
     if resolved.get("ev") != 0.03 or resolved.get("p_win") != 0.5:
         issues.append(f"resolve_delivery_ev primary fields got {resolved}")
 
-    from hunt_core.gate._ev import setup_meets_strength
+    from hunt_core.scanner.gate._ev import setup_meets_strength
 
     weak_dump = {"dump_fuel": 30, "confirm_hard": ["5m_rejection", "close_below_support"]}
     strong_dump = {"delivery_p_win": 0.55, "confirm_hard": ["5m_rejection", "close_below_support"]}
@@ -243,7 +243,7 @@ def main() -> int:
     if not setup_meets_strength(strong_dump, direction="short", symbol="TESTUSDT", tier="confirm"):
         issues.append("confirm strength must pass when delivery_p_win >= min_p_win")
 
-    from hunt_core.gate._rr import (
+    from hunt_core.scanner.gate._rr import (
         apply_structure_ev_fuel_cap,
         structure_ev_fuel_cap,
     )
@@ -372,7 +372,7 @@ def main() -> int:
         if count > budget:
             issues.append(f"#43 {rel}: silent except-pass {count} > budget {budget}")
 
-    from hunt_core.gate.delivery import collect_report_blockers, run_gate_pipeline
+    from hunt_core.scanner.gate.delivery import collect_report_blockers, run_gate_pipeline
 
     row = {"symbol": "TESTUSDT", "price": 1.0, "market": {}, "session": {}}
     setup = {"confirmed": False, "dump_score": 50.0}
@@ -395,7 +395,7 @@ def main() -> int:
             f"run_gate_pipeline vs collect_report_blockers drift: live={gate.code} report={sorted(report_codes)}"
         )
 
-    from hunt_core.gate.delivery import delivery_freshness_block, price_in_entry_zone
+    from hunt_core.scanner.gate.delivery import delivery_freshness_block, price_in_entry_zone
 
     home_setup = {"entry_zone": [0.035201, 0.03572], "tp1": 0.032459}
     if price_in_entry_zone(home_setup, 0.03574, direction="short"):
@@ -434,7 +434,7 @@ def main() -> int:
     if "required_bars = int(limits[name])" not in src:
         issues.append("resolve_kline_map must require full kline limit before resample accept")
 
-    from hunt_core.detect.market_cycle import cusum_series, detect_pump_cycle_events
+    from hunt_core.scanner.detect.market_cycle import cusum_series, detect_pump_cycle_events
 
     z = pl.Series([0.0, 1.0, 2.0, 1.5, 0.5])
     cus = cusum_series(z, threshold=1.0)
@@ -447,7 +447,7 @@ def main() -> int:
     if not isinstance(cycle.get("cusum"), (int, float)):
         issues.append("detect_pump_cycle_events must return numeric cusum")
 
-    from hunt_core.detect.market_cycle import btc_decoupled_flags
+    from hunt_core.scanner.detect.market_cycle import btc_decoupled_flags
 
     sym_1m = pl.DataFrame({"close": [100.0, 101.0, 102.5, 104.0, 105.0, 106.0, 107.0, 108.0]})
     btc_1m = pl.DataFrame({"close": [100.0, 100.1, 100.2, 100.3, 100.4, 100.5, 100.6, 100.7]})
@@ -465,7 +465,7 @@ def main() -> int:
     if "prepared.work_1h" in dec_block:
         issues.append("btc_decoupled must use prepared.work_1m not work_1h (Phase C1)")
 
-    from hunt_core.gate._delivery_helpers import (
+    from hunt_core.scanner.gate._delivery_helpers import (
         inject_kline_flow_into_market,
         kline_bar_flow,
         resolve_flow_cvd_px,
@@ -570,14 +570,14 @@ def main() -> int:
     ok_caution, miss_caution = evaluate_must_pass(caution_row, direction="short")
     if not ok_caution and "mtf_funding_squeeze_short" in miss_caution:
         issues.append(f"funding caution tier must not hard-block must_pass got {miss_caution}")
-    from hunt_core.gate.policy import funding_short_risk_tier
+    from hunt_core.scanner.gate.policy import funding_short_risk_tier
 
     if funding_short_risk_tier(-0.0025) != "block":
         issues.append("funding_short_risk_tier -0.25% must be block")
     if funding_short_risk_tier(-0.0018) != "caution":
         issues.append("funding_short_risk_tier -0.18% must be caution")
 
-    from hunt_core.gate.delivery import effective_min_rr_for_delivery
+    from hunt_core.scanner.gate.delivery import effective_min_rr_for_delivery
 
     exhaust_rr = effective_min_rr_for_delivery(
         {"confirmed": True},
@@ -588,7 +588,7 @@ def main() -> int:
     if exhaust_rr < 2.0:
         issues.append(f"exhaustion_at_high delivery min RR must be >=2.0 got {exhaust_rr}")
 
-    from hunt_core.analysis.deep_signal import _cvd_from_row
+    from hunt_core.shared.facts.order_flow import cvd_from_row as _cvd_from_row
 
     kline_row = {
         "timeframes": {
@@ -627,7 +627,7 @@ def main() -> int:
     if "Pre-dump" in tg or "Manipulation fusion" in tg:
         issues.append("format_query_telegram must not expose watch fusion/predump narrative")
 
-    from hunt_core.setups.detectors import detect_cex_dump, detect_cex_pump
+    from hunt_core.scanner.setups.detectors import detect_cex_dump, detect_cex_pump
 
     pump_row = {
         "price": 1.025,
@@ -670,8 +670,8 @@ def main() -> int:
         issues.append("detect_cex_dump triple-gate fixture must fire short")
 
     import inspect
-    from hunt_core.gate import policy as gate_policy
-    from hunt_core.setups import catalog as setup_catalog
+    from hunt_core.scanner.gate import policy as gate_policy
+    from hunt_core.scanner.setups import catalog as setup_catalog
 
     src = inspect.getsource(gate_policy._decl_check_ev_delivery)
     if "legacy_fuel_delivery_enabled" not in src:
@@ -732,7 +732,7 @@ def main() -> int:
     if 'setup.get("dump_fuel") or setup.get("long_fuel")' in funnel_src:
         issues.append("_record_delivery_funnel must not use cross-direction fuel fallback")
 
-    from hunt_core.gate._delivery_helpers import closed_bar_candle
+    from hunt_core.scanner.gate._delivery_helpers import closed_bar_candle
 
     live_wick = closed_bar_candle(
         {"1m_closed": {"closed_bar": False, "candle": {"bearish": True, "upper_wick_ratio": 0.9}}},
@@ -747,13 +747,15 @@ def main() -> int:
     if not closed_wick.get("bearish"):
         issues.append("T5: closed 1m bar must expose candle for wick scoring")
 
-    from hunt_core.setups.catalog import legacy_fuel_merge_enabled
+    from hunt_core.scanner.setups.catalog import legacy_fuel_merge_enabled
+    from hunt_core.params.store import universal_section
 
-    if legacy_fuel_merge_enabled():
+    dl = universal_section("delivery")
+    if bool(dl.get("ev_primary_default", True)) and legacy_fuel_merge_enabled():
         issues.append("ev_primary_default=true must keep legacy fuel merge off")
 
-    from hunt_core.gate._ev import EV_PRIMARY_LEGACY_BLOCKERS
-    from hunt_core.gate.delivery import collect_report_blockers
+    from hunt_core.scanner.gate._ev import EV_PRIMARY_LEGACY_BLOCKERS
+    from hunt_core.scanner.gate.delivery import collect_report_blockers
 
     ev_row = {
         "symbol": "VELVETUSDT",
@@ -810,7 +812,7 @@ def main() -> int:
     if "mission_mid_dump" not in mission_codes:
         issues.append("dump_active short must block with mission_mid_dump")
 
-    from hunt_core.gate._mission import mission_delivery_block
+    from hunt_core.scanner.gate._mission import mission_delivery_block
 
     mid_pump = mission_delivery_block(
         direction="long",
@@ -821,7 +823,7 @@ def main() -> int:
     if mid_pump is None or mid_pump.code != "mission_mid_pump":
         issues.append("impulse_initiating long must block with mission_mid_pump")
 
-    from hunt_core.setups.catalog import promote_catalog_ev_setup
+    from hunt_core.scanner.setups.catalog import promote_catalog_ev_setup
 
     pre_lake = promote_catalog_ev_setup(
         {"dump_score": 10.0},
@@ -847,13 +849,6 @@ def main() -> int:
         issues.append("promote_catalog_ev_setup must stamp ev_primary before lake flip (n<8)")
     if pre_lake.get("setup_type") != "bos_retest":
         issues.append("EV-primary bos_choch must map to bos_retest setup_type")
-
-    import inspect
-    from hunt_core.regime import _delivery_fsm as delivery_fsm_mod
-
-    fsm_src = inspect.getsource(delivery_fsm_mod._infer_target)
-    if 'setup.get("dump_fuel") or setup.get("long_fuel")' in fsm_src:
-        issues.append("_infer_target must not use cross-direction fuel fallback")
 
     from hunt_core.runtime import tick_io
 
@@ -882,7 +877,13 @@ def main() -> int:
     if 'setup.get("dump_score") or setup.get("long_score")' in eval_src:
         issues.append("evaluate_delivery must not use cross-direction score for family_vote")
 
-    from hunt_core.analysis.deep_signal import resolve_trade_direction
+    from hunt_core.deep.signal import resolve_trade_direction
+
+    from hunt_core.analysis.deep_signal import (  # noqa: F401 — shim contract
+        btc_market_context as _btc_shim,
+        resolve_trade_direction as _rtd_shim,
+    )
+    from hunt_core.analysis.pinned_deep import is_pinned_symbol as _pin_shim  # noqa: F401
 
     dir_row = {
         "symbol": "TESTUSDT",
@@ -909,13 +910,13 @@ def main() -> int:
     if not any("structure bias" in n for n in struct_notes):
         issues.append("resolve_trade_direction must note structure bias")
 
-    from hunt_core.gate import _rules_table as rules_mod
+    from hunt_core.scanner.gate import _rules_table as rules_mod
 
     rule_ids = [r.id for r in rules_mod.DELIVERY_GATE_RULES]
     if "meme_pump_volume" not in rule_ids:
         issues.append("DELIVERY_GATE_RULES must include meme_pump_volume (A4)")
 
-    from hunt_core.setups.catalog import HUNT_SETUP_IDS
+    from hunt_core.scanner.setups.catalog import HUNT_SETUP_IDS
 
     if "btc_decoupled" not in HUNT_SETUP_IDS:
         issues.append("HUNT_SETUP_IDS must include btc_decoupled (C1)")
@@ -926,25 +927,13 @@ def main() -> int:
     if "delivered_levels_snapshot" not in latch_src:
         issues.append("_latched_levels_payload must consume delivered_levels_snapshot")
 
-    from hunt_core.runtime.cycle._cycle_advisory import early_telegram_block_reason
+    from hunt_core.runtime.cycle._cycle_confirm import _advisory_tg_enabled
 
-    if early_telegram_block_reason({}, direction="short") != "disabled":
-        issues.append("early advisory path must stay disabled after fusion cutover")
+    if _advisory_tg_enabled():
+        issues.append("advisory TG must stay off by default after legacy purge")
 
-    from hunt_core.runtime.cycle._cycle_tick import dump_hunt_skip_reason
-
-    adv_block = dump_hunt_skip_reason(
-        symbol="LABUSDT",
-        tier="armed",
-        price=1.0,
-        setup={"phase": "dump_setup_forming", "entry_zone": [1.01, 1.02], "tp1": 0.9},
-        lifecycle={"phase": "dump_active", "fall_from_high_pct": 20.0},
-    )
-    if adv_block != "dump_hunt_disabled":
-        issues.append(f"dump_hunt advisory must stay disabled got {adv_block}")
-
-    # dump_hunt path retired — stale-price guard lives in lifecycle gates below.
-    from hunt_core.gate._lifecycle_gates import collect_lifecycle_blockers
+    # dump_hunt / early advisory paths removed — fusion confirm-only on production lane.
+    from hunt_core.scanner.gate._lifecycle_gates import collect_lifecycle_blockers
 
     stale_lifecycle = collect_lifecycle_blockers(
         {"confirmed": True, "entry_zone": [1.0, 1.01], "stop_loss": 1.05, "tp1": 0.95},
@@ -979,7 +968,7 @@ def main() -> int:
 
     # Facade re-export smoke (post-ruff __all__ guard)
     from hunt_core.deliver import telegram as tg_facade
-    from hunt_core.gate import delivery as gate_facade
+    from hunt_core.scanner.gate import delivery as gate_facade
     from hunt_core.runtime.cycle._impl import SYMBOL_TICK_TIMEOUT_S
     from hunt_core.track import tracker as tracker_facade
 
@@ -1009,8 +998,8 @@ def main() -> int:
     from hunt_core.maps.forecast import build_dump_forecast, build_ignition_forecast, build_maps_forecast
     from hunt_core.maps.oi import classify_oi_regime
     from hunt_core.analysis.playbook_eval import playbook_passes
-    from hunt_core.analysis.deep.build import build_deep_analysis
-    from hunt_core.gate._ev import pwin_gate_enabled
+    from hunt_core.deep.build import build_deep_analysis
+    from hunt_core.scanner.gate._ev import pwin_gate_enabled
 
     if classify_oi_regime(20.0, 8.0) != "new_money_long":
         issues.append("oi regime new_money_long expected")
@@ -1119,7 +1108,7 @@ def main() -> int:
     if low_blocked is not None:
         issues.append("low p_win must not block EV delivery when pwin_gate off")
 
-    from hunt_core.gate.policy import _decl_check_playbook
+    from hunt_core.scanner.gate.policy import _decl_check_playbook
 
     weak_row = dict(dist_row)
     weak_row["manipulation_fusion"] = assessment_to_dict(fusion)
@@ -1138,7 +1127,7 @@ def main() -> int:
         issues.append("playbook fail must block delivery")
 
     from hunt_core.analysis.manipulation_fusion import evaluate_manipulation_fusion, assessment_to_dict
-    from hunt_core.gate._delivery_helpers import cluster_fuel
+    from hunt_core.scanner.gate._delivery_helpers import cluster_fuel
 
     if cluster_fuel(["5m_rejection"], raw_score=80.0, symbol="TESTUSDT") != 80.0:
         issues.append("cluster_fuel must passthrough raw_score when legacy fuel off")
@@ -1157,7 +1146,7 @@ def main() -> int:
         if bad in pwin_card:
             issues.append(f"card must not leak internal code {bad!r}")
 
-    from hunt_core.gate._mission import (
+    from hunt_core.scanner.gate._mission import (
         hunt_skip_reason,
         is_mid_leg_phase,
         is_watch_hunt_phase,
@@ -1174,9 +1163,9 @@ def main() -> int:
     if hunt_skip_reason("distribution", "short") is not None:
         issues.append("distribution short must not be hunt-skipped")
 
-    from hunt_core.detect.phase import PRE_DUMP, PRE_PUMP, MID
-    from hunt_core.gate._mission import mission_delivery_block
-    from hunt_core.gate._phase_compat import fusion_lifecycle_flags, fusion_lifecycle_dict
+    from hunt_core.scanner.detect.phase import PRE_DUMP, PRE_PUMP, MID
+    from hunt_core.scanner.gate._mission import mission_delivery_block
+    from hunt_core.scanner.gate._lifecycle import fusion_lifecycle_flags, fusion_lifecycle_dict
 
     pre_dump_lc = fusion_lifecycle_dict(
         None,
@@ -1272,7 +1261,7 @@ def main() -> int:
     if violations_are_partial_history_only(stale_v):
         issues.append("violations_are_partial_history_only must reject stale violations")
 
-    from hunt_core.gate.policy import EdgePolicyConfig, long_tg_allowed
+    from hunt_core.scanner.gate.policy import EdgePolicyConfig, long_tg_allowed
 
     ok_long, long_reason = long_tg_allowed(
         EdgePolicyConfig(wide_hunter=False, long_tg_enabled=True)
@@ -1280,7 +1269,7 @@ def main() -> int:
     if not ok_long or long_reason != "env_override":
         issues.append("long_tg_allowed must pass with HUNT_LONG_TG without wide_hunter")
 
-    from hunt_core.analysis.deep.verdicts import build_three_verdicts
+    from hunt_core.deep.verdicts import build_three_verdicts
 
     mid_deep_row = {
         "symbol": "TESTUSDT",

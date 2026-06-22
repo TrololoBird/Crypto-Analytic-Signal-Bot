@@ -10,8 +10,11 @@ from pathlib import Path
 CORE_ROOT = Path(__file__).resolve().parents[1]
 ENTRY = CORE_ROOT / "__main__.py"
 # Hot-path only — _dev/ and legacy gate/ (_dev/check_logic compat; fusion runtime bypasses gate).
-LOC_BUDGET = 58_000  # pre-launch expansion: gate splits, EV shadow, cycle tick (~57.8k, 2026-06-18)
+LOC_BUDGET = 59_800  # two-module rebuild + P0' geometry validator + backfill OI helpers (2026-06-22)
 LOC_SKIP_DIRS = frozenset({"_dev", "gate"})
+LOC_SKIP_PREFIXES = (
+    "analysis/expansion_engine/",  # thin shims → _dev/expansion_lab
+)
 
 FORBIDDEN_IMPORTS: frozenset[str] = frozenset(
     {
@@ -29,7 +32,11 @@ def _loc_tree(root: Path) -> int:
     for py in root.rglob("*.py"):
         if py.name == "_impl.py":
             continue
-        if LOC_SKIP_DIRS & set(py.relative_to(root).parts):
+        rel_parts = py.relative_to(root).parts
+        if LOC_SKIP_DIRS & set(rel_parts):
+            continue
+        rel_s = "/".join(rel_parts)
+        if any(rel_s.startswith(p) for p in LOC_SKIP_PREFIXES):
             continue
         total += len(py.read_text(encoding="utf-8").splitlines())
     return total

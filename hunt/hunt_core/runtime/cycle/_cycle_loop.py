@@ -3,11 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import faulthandler
-import html
 import json
 import os
 import time
-from types import SimpleNamespace
 from typing import Any
 
 from hunt_core import clock
@@ -19,69 +17,44 @@ from hunt_core.data.scanner import (
     apply_quality_gates,
     prescan_from_tickers,
 )
+from hunt_core.data.baseline_store import batch_update_baselines
 from hunt_core.data.universe import MAX_PRESCAN_MERGE, PINNED_SYMBOLS, resolve_watch_universe
 from hunt_core.deliver.digest import DigestCandidate, get_digest_scheduler
 from hunt_core.deliver.telegram import TelegramBroadcaster
 from hunt_core.domain.config import (
-    IGNITION_MIN_VOL_DELTA_USD,
-    IGNITION_TELEGRAM_ENABLED,
-    IGNITION_TTL_S,
-    IGNITION_WINDOW_S,
     SCAN_INTERVAL_S,
     TICK_ROTATE_INTERVAL_S,
     TICK_ROTATE_MIN_BYTES,
 )
 from hunt_core.domain.market_regime import (
     REGIME_REFRESH_S,
-    active_params,
     apply_snapshot,
     load_regime_file,
     refresh_market_regime,
 )
 from hunt_core.errors import DEFENSIVE_EXC, defensive_exc_types
 from hunt_core.features.prepare import min_required_bars
-from hunt_core.market.capacity import HuntLoadPlanner
-from hunt_core.market.cross import (
+from hunt_core.shared.market import (
     CrossExchangeConfig,
+    HuntLoadPlanner,
     apply_cross_exchange_env,
+    create_hunt_market_plane_from_settings,
     fetch_secondary_ticker_overlay,
     load_cross_exchange_config,
     refresh_cross_exchange_cache,
 )
-from hunt_core.market.factory import create_hunt_market_plane_from_settings
-from hunt_core.params.store import migrate_calibration_split
+from hunt_core.params.store import migrate_calibration_split, prescan_thresholds
 from hunt_core.runtime.cycle._cycle_confirm import _advisory_tg_enabled
 from hunt_core.runtime.cycle._cycle_tick import run_tick
 from hunt_core.runtime.state import LOG, OUT_PATH, SYMBOL_WATCH_MODES, new_session_state, should_stop
 from hunt_core.runtime.telegram_commands import build_hunt_telegram_commands
 from hunt_core.runtime.tick_io import rotate_hunt_ticks, rotate_telemetry_jsonl
-# Legacy ignition/adaptive-store scanner removed; inert no-op stubs (no ticker-stream
-# ignition alerts — the fusion engine detects on closed-bar ticks).
-def _empty_ignition_state() -> SimpleNamespace:
-    return SimpleNamespace(active={})
-
-
-def format_ignition_telegram(*_a, **_k) -> str: return ""
-def load_adaptive_store(*_a, **_k) -> dict: return {}
-def load_ignition_state(*_a, **_k) -> SimpleNamespace:
-    return _empty_ignition_state()
-def mark_ignition_notified(*_a, **_k) -> None: return None
-def pending_ignition_alerts(*_a, **_k) -> list: return []
-def process_ticker_snapshots(_snaps, state, *_a, **_k):
-    if state is None or not hasattr(state, "active"):
-        state = _empty_ignition_state()
-    return [], state
-def save_adaptive_store(*_a, **_k) -> None: return None
-def save_ignition_state(*_a, **_k) -> None: return None
 from hunt_core.track.events import record_funnel_stage
 from hunt_core.track.pump_history import (
     backfill_from_jsonl,
-    format_history_telegram,
     load_pump_history,
     observe_prices,
-    record_pump_leg,
     save_pump_history,
-    stats_for,
 )
 from hunt_core.track.tracker import iter_active_tracker_symbols, load_tracker_state
 from hunt_core.domain.config import load_settings
@@ -145,7 +118,7 @@ async def run_loop(
     def _hunt_loop_exc_handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
         exc = context.get("exception")
         if exc is not None:
-            from hunt_core.market.streams import HuntCcxtStreams
+            from hunt_core.shared.market import HuntCcxtStreams
 
             if HuntCcxtStreams._ws_transport_fatal(exc):
                 LOG.debug("asyncio_orphan_ws | %s", exc)
@@ -236,15 +209,19 @@ async def run_loop(
 
     reset_frame_cache()
     feature_lake = FeatureLakeWriter()
-    ignition_state = load_ignition_state()
     prescan_debounce = PrescanDebounceQueue(
-        debounce_s=float(os.getenv("HUNT_PRESCAN_DEBOUNCE_S", "30") or 30),
+        debounce_s=float(
+            os.getenv(
+                "HUNT_PRESCAN_DEBOUNCE_S",
+                str(prescan_thresholds()["debounce_s"]),
+            )
+            or prescan_thresholds()["debounce_s"]
+        ),
     )
     prescan_engine = PrescanEngine()
     load_planner = HuntLoadPlanner()
     digest_scheduler = get_digest_scheduler()
     pump_store = load_pump_history()
-    adaptive_store = load_adaptive_store()
     if not pump_store.symbols and not pump_store.event_log:
         backfill_from_jsonl(pump_store)
         save_pump_history(pump_store)
@@ -316,7 +293,7 @@ async def run_loop(
     from hunt_core.analysis.expansion_engine.config import load_expansion_config
 
     exp_cfg = load_expansion_config()
-    if exp_cfg.enabled:
+    if exp_cfg.enabled and exp_cfg.lab_runtime:
         try:
             from hunt_core.analysis.expansion_engine.runtime_state import load_expansion_runtime_state
 
@@ -324,7 +301,7 @@ async def run_loop(
         except Exception:
             LOG.exception("expansion_fsm_load_failed")
 
-    if not once and exp_cfg.enabled and exp_cfg.review_loop:
+    if not once and exp_cfg.enabled and exp_cfg.lab_runtime and exp_cfg.review_loop:
         from hunt_core.runtime.deep_assembly import expansion_outcome_review_loop
 
         expansion_review_task = asyncio.create_task(
@@ -334,7 +311,7 @@ async def run_loop(
         LOG.info("expansion_review_loop_scheduled", interval_s=exp_cfg.review_interval_s)
 
     expansion_universe_task: asyncio.Task[None] | None = None
-    if not once and exp_cfg.enabled and exp_cfg.tg_universe_scan and send_telegram:
+    if not once and exp_cfg.enabled and exp_cfg.lab_runtime and exp_cfg.tg_universe_scan and send_telegram:
         from hunt_core.runtime.expansion_universe_scan import expansion_universe_scan_loop
 
         expansion_universe_task = asyncio.create_task(
@@ -400,34 +377,13 @@ async def run_loop(
                     client=client,
                 ) or []
                 ticker_by_sym = {str(t.get("symbol")): t for t in ticker_raw if t.get("symbol")}
-                new_ignitions, ignition_state = process_ticker_snapshots(
-                    ticker_raw,
-                    ignition_state,
-                    now=now,
-                    window_s=float(IGNITION_WINDOW_S),
-                    min_pct=float(active_params().ignition_min_pct),
-                    min_vol_delta_usd=float(IGNITION_MIN_VOL_DELTA_USD),
-                    min_qvol_usd=float(active_params().ignition_min_qvol_usd),
-                    ttl_s=float(IGNITION_TTL_S),
-                    adaptive=adaptive_store,
-                )
-                save_ignition_state(ignition_state)
-                save_adaptive_store(adaptive_store)
-                if not IGNITION_TELEGRAM_ENABLED:
-                    for ig in ignition_state.active.values():
-                        ig.notified = True
-                ignition_by_sym = {
-                    sym: ig.to_row() for sym, ig in ignition_state.active.items()
-                }
+                ignition_by_sym: dict[str, Any] = {}
                 ex = client.exchange
-                from hunt_core.market.symbol_gate import gate_symbol_dict_keys, gate_symbol_list
+                from hunt_core.shared.market import gate_symbol_dict_keys, gate_symbol_list
 
                 ignition_by_sym = gate_symbol_dict_keys(
                     ignition_by_sym, exchange=ex, label="ignition"
                 )
-                for sym in list(ignition_state.active.keys()):
-                    if sym not in ignition_by_sym:
-                        del ignition_state.active[sym]
                 # P1.6: prescan outliers feed an internal debounce queue, NOT
                 # Telegram. Ready (debounced) symbols merge into the watch universe.
                 gated_ticker_rows = [
@@ -463,6 +419,7 @@ async def run_loop(
                     _oi_change_by_sym[_sym] = (
                         _ratio * 100.0 if _ratio is not None else None
                     )
+                batch_update_baselines(gated_ticker_rows, oi_by_sym=_oi_change_by_sym)
                 _prescan_hits = prescan_from_tickers(
                     gated_ticker_rows,
                     engine=prescan_engine,
@@ -474,10 +431,12 @@ async def run_loop(
                 prescan_outlier_by_sym: dict[str, dict[str, Any]] = {}
                 for _h in _prescan_hits:
                     prev = prescan_outlier_by_sym.get(_h.symbol)
-                    if prev is None or abs(_h.change_pct) > abs(prev["change_pct"]):
+                    if prev is None or _h.energy > prev.get("energy", 0.0):
                         prescan_outlier_by_sym[_h.symbol] = {
                             "direction": _h.direction,
                             "change_pct": _h.change_pct,
+                            "energy": _h.energy,
+                            "readiness_direction": _h.readiness_direction,
                             "interval": _h.interval,
                             "cross_venues": _h.cross_venues,
                             "oi_divergence": _h.oi_divergence,
@@ -496,27 +455,6 @@ async def run_loop(
                             direction=d.direction,
                             detail=f"{d.interval}:{d.change_pct:.1f}%",
                         )
-                for ev in new_ignitions:
-                    LOG.info(
-                        "hunt_ignition",
-                        symbol=ev.symbol,
-                        direction=ev.direction,
-                        price_delta_pct=round(ev.price_delta_pct, 2),
-                        vol_delta_usd=round(ev.vol_delta_usd, 0),
-                        window_s=round(ev.window_s, 1),
-                    )
-                    tick = ticker_by_sym.get(ev.symbol) or {}
-                    ign_price = float(tick.get("last_price") or 0)
-                    if ign_price > 0:
-                        record_pump_leg(
-                            pump_store,
-                            symbol=ev.symbol,
-                            kind=ev.direction,
-                            source="ignition",
-                            price=ign_price,
-                            change_24h_pct=float(tick.get("price_change_percent") or 0),
-                            now=now,
-                        )
                 price_map = {
                     sym: float(row.get("last_price") or 0)
                     for sym, row in ticker_by_sym.items()
@@ -526,40 +464,12 @@ async def run_loop(
                 pump_stats_by_sym = {
                     sym: st.to_public() for sym, st in pump_store.symbols.items()
                 }
-                if (
-                    send_telegram
-                    and broadcaster is not None
-                    and _advisory_tg_enabled()
-                    and IGNITION_TELEGRAM_ENABLED
-                ):
-                    for ig in pending_ignition_alerts(ignition_state):
-                        hist = format_history_telegram(stats_for(pump_store, ig.symbol))
-                        msg = format_ignition_telegram(ig)
-                        if hist:
-                            msg = f"{msg}\n<i>{html.escape(hist)}</i>"
-                        result = await broadcaster.send_html(msg)
-                        if result.status == "sent":
-                            mark_ignition_notified(ignition_state, ig.symbol)
-                            save_ignition_state(ignition_state)
-                            LOG.info(
-                                "hunt_ignition_telegram_sent",
-                                symbol=ig.symbol,
-                                direction=ig.direction,
-                                message_id=result.message_id,
-                            )
-                        else:
-                            LOG.warning(
-                                "hunt_ignition_telegram_failed",
-                                symbol=ig.symbol,
-                                status=result.status,
-                                reason=result.reason,
-                            )
-
                 if once:
                     merged = list(dict.fromkeys(s.upper() for s in cli_symbols))
                     mode_map = {
                         s: SYMBOL_WATCH_MODES.get(s, "short") for s in merged
                     }
+                    prescan_pinned_ready: set[str] = set()
                 else:
                     full_symbols, mode_map = resolve_watch_universe(
                         settings,
@@ -574,9 +484,14 @@ async def run_loop(
                         mode_map.setdefault(s, SYMBOL_WATCH_MODES.get(s, "short"))
                     # P1.6 merge: debounced prescan outliers join the ignition path.
                     prescan_merge_cap = int(
-                        os.getenv("HUNT_PRESCAN_MERGE_CAP", str(MAX_PRESCAN_MERGE)) or MAX_PRESCAN_MERGE
+                        os.getenv(
+                            "HUNT_PRESCAN_MERGE_CAP",
+                            str(prescan_thresholds()["merge_cap"]),
+                        )
+                        or prescan_thresholds()["merge_cap"]
                     )
                     prescan_to_merge = prescan_ready[: max(prescan_merge_cap, 0)]
+                    prescan_pinned_ready = set()
                     if len(prescan_ready) > len(prescan_to_merge):
                         LOG.info(
                             "hunt_prescan_merge_capped",
@@ -584,12 +499,16 @@ async def run_loop(
                             merged=len(prescan_to_merge),
                             cap=prescan_merge_cap,
                         )
+                    prescan_pinned_ready: set[str] = set()
                     for d in prescan_to_merge:
                         s = d.symbol.upper()
                         if s not in merged:
                             merged.append(s)
+                        energy = float(getattr(d, "energy", 0) or 0)
+                        if s in PINNED_SYMBOLS and energy >= 20.0:
+                            prescan_pinned_ready.add(s)
                         mode_map.setdefault(
-                            s, "short" if d.direction == "pump" else "long"
+                            s, "short" if d.direction in {"dump", "bear"} else "long"
                         )
                     # Keep open tracker positions in every tick batch — otherwise
                     # SL/TP followups stall until orphan kline reconcile.
@@ -606,7 +525,11 @@ async def run_loop(
                         LOG.info("watch_tracker_pin", symbols=pinned_n)
                 merged = gate_symbol_list(merged, exchange=ex, label="watch_universe")
                 active = tuple(dict.fromkeys(merged))
-                hunt_active = tuple(s for s in active if s not in PINNED_SYMBOLS)
+                hunt_active = tuple(
+                    s
+                    for s in active
+                    if s not in PINNED_SYMBOLS or s in prescan_pinned_ready
+                )
                 load_plan = load_planner.plan_tick(
                     hunt_active,
                     ignited=set(ignition_by_sym.keys()),
@@ -751,11 +674,12 @@ async def run_loop(
                 save_pump_history(pump_store)
                 buffer_tick_rows(rows)
                 try:
-                    from hunt_core.analysis.expansion_engine.runtime_state import (
-                        maybe_save_expansion_runtime_state,
-                    )
+                    if exp_cfg.lab_runtime:
+                        from hunt_core.analysis.expansion_engine.runtime_state import (
+                            maybe_save_expansion_runtime_state,
+                        )
 
-                    maybe_save_expansion_runtime_state()
+                        maybe_save_expansion_runtime_state()
                 except Exception:
                     LOG.debug("expansion_runtime_maybe_save_failed", exc_info=True)
                 if not once:
@@ -833,12 +757,13 @@ async def run_loop(
                 await expansion_universe_task
             except asyncio.CancelledError:
                 pass
-        try:
-            from hunt_core.analysis.expansion_engine.runtime_state import save_expansion_runtime_state
+        if exp_cfg.lab_runtime:
+            try:
+                from hunt_core.analysis.expansion_engine.runtime_state import save_expansion_runtime_state
 
-            save_expansion_runtime_state()
-        except Exception:
-            LOG.exception("expansion_fsm_save_failed")
+                save_expansion_runtime_state()
+            except Exception:
+                LOG.exception("expansion_fsm_save_failed")
         if tg_cmds is not None:
             await tg_cmds.close()
         await hot_kline_loop.stop()

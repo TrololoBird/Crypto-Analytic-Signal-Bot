@@ -380,19 +380,6 @@ def load_config_defaults_toml() -> dict[str, Any]:
             if v is not None
         }
 
-    premature = raw.get("gate", {}).get("premature_exhaustion_short") if isinstance(raw.get("gate"), dict) else None
-    if isinstance(premature, dict):
-        out["lifecycle"] = {
-            k: v
-            for k, v in {
-                "premature_exhaustion_pos": premature.get("pos_min"),
-                "premature_exhaustion_bounce_pct": premature.get("bounce_from_low_pct"),
-                "premature_exhaustion_pos_tight": premature.get("pos_min_tight"),
-                "premature_exhaustion_bounce_tight_pct": premature.get("bounce_from_low_pct_tight"),
-            }.items()
-            if v is not None
-        }
-
     lifecycle_sq = raw.get("lifecycle", {}).get("squeeze") if isinstance(raw.get("lifecycle"), dict) else None
     if isinstance(lifecycle_sq, dict):
         lc_block = dict(out.get("lifecycle") or {})

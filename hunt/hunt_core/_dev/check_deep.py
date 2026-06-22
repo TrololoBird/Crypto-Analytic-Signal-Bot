@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from hunt_core.detect.deep import build_deep_report_from_lake
+from hunt_core.scanner.detect.deep import build_deep_report_from_lake
 from hunt_core.paths import LAKE_PARQUET
 
 

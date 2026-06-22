@@ -6,7 +6,7 @@ import asyncio
 import json
 import sys
 
-from hunt_core.analysis.deep.verdict_v2.calibration import (
+from hunt_core.deep.verdict_v2.calibration import (
     CALIBRATION_JSON,
     aggregate_calibration,
     load_deep_tick_summaries,

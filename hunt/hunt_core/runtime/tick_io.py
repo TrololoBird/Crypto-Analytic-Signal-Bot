@@ -11,7 +11,6 @@ from pathlib import Path
 from hunt_core.paths import (
     DATA,
     HUNT_SCAN_JSONL,
-    LEGACY_TICK_JSONL,
     PREP_SHADOW_EVENTS,
     SETUP_CANDIDATES_EVENTS,
     SENT_MESSAGES,
@@ -30,13 +29,9 @@ _TELEMETRY_JSONL = (
 def rotate_hunt_ticks(*, retention_days: int = RETENTION_DAYS, dry_run: bool = False) -> dict[str, int]:
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     daily = DATA / f"hunt_scan-{today}.jsonl"
-    legacy_daily = DATA / f"dump_minute_watch-{today}.jsonl"
     stats = {"appended_lines": 0, "archived": 0, "pruned": 0}
 
     source = HUNT_SCAN_JSONL
-    if not source.exists() and LEGACY_TICK_JSONL.exists():
-        source = LEGACY_TICK_JSONL
-
     if not source.exists():
         return stats
 
@@ -58,9 +53,9 @@ def rotate_hunt_ticks(*, retention_days: int = RETENTION_DAYS, dry_run: bool = F
         HUNT_SCAN_JSONL.write_text("", encoding="utf-8")
 
     cutoff = datetime.now(UTC) - timedelta(days=retention_days)
-    for pattern in ("hunt_scan-*.jsonl", "dump_minute_watch-*.jsonl"):
+    for pattern in ("hunt_scan-*.jsonl",):
         for path in sorted(DATA.glob(pattern)):
-            stem = path.stem.replace("hunt_scan-", "").replace("dump_minute_watch-", "")
+            stem = path.stem.replace("hunt_scan-", "")
             try:
                 day = datetime.strptime(stem, "%Y-%m-%d").replace(tzinfo=UTC)
             except ValueError:

@@ -1,4 +1,4 @@
-"""Module 2 deep tick orchestrator — pinned continuous + on-demand query plane."""
+"""Module 1 Deep tick orchestrator — pinned continuous + on-demand query plane."""
 from __future__ import annotations
 
 import json
@@ -9,7 +9,7 @@ from typing import Any
 import structlog
 
 from hunt_core.data.universe import PINNED_SYMBOLS, save_pinned_cache
-from hunt_core.market.client import HuntCcxtClient
+from hunt_core.shared.market import HuntCcxtClient
 from hunt_core.paths import DEEP_TICKS_JSONL
 from hunt_core.runtime.tick_jsonl import serialize_tick_row
 
@@ -47,7 +47,7 @@ def stamp_expansion_on_row(row: dict[str, Any]) -> None:
         )
 
         cfg = load_expansion_config()
-        if not cfg.enabled:
+        if not cfg.enabled or not cfg.lab_runtime:
             return
         opp = build_expansion_opportunity(row, cfg=cfg)
         row["expansion"] = opp.to_dict()
@@ -72,19 +72,15 @@ def deep_change_fingerprint(row: dict[str, Any]) -> str:
 
     action = str(getattr(dec, "action", "") or "")
     path_type = str(getattr(path, "type", "") or "")
-    trigger = 0.0
-    if cat and getattr(cat, "trigger_level", None):
-        try:
-            trigger = round(float(cat.trigger_level), 4)
-        except (TypeError, ValueError):
-            pass
-
-    entry = sl = tp1 = 0.0
+    # Trigger level excluded — it fluctuates with price every tick causing spurious re-fires.
+    # Material change = action direction or scenario type changed.
+    entry = sl = 0.0
     if plan:
         try:
-            entry = round(float((plan.entry_zone[0] + plan.entry_zone[1]) / 2), 4)
-            sl = round(float(plan.stop_loss), 4)
-            tp1 = round(float(plan.take_profit_1), 4)
+            # Round aggressively so minor price drift (< 0.5%) doesn't look like a change.
+            entry_mid = (plan.entry_zone[0] + plan.entry_zone[1]) / 2
+            entry = round(float(entry_mid), 1)
+            sl = round(float(plan.stop_loss), 1)
         except (TypeError, ValueError, IndexError):
             pass
 
@@ -99,8 +95,6 @@ def deep_change_fingerprint(row: dict[str, Any]) -> str:
             "path": path_type,
             "entry": entry,
             "sl": sl,
-            "tp1": tp1,
-            "catalyst": trigger,
         },
         sort_keys=True,
     )
@@ -141,7 +135,7 @@ async def assemble_deep_tick(
     """Full deep snapshot — no hunt fusion, structure-first enrichments."""
     import asyncio
 
-    from hunt_core.analysis.deep.build import _enrich_deep_row
+    from hunt_core.deep.build import _enrich_deep_row
     from hunt_core.domain.config import load_settings
     from hunt_core.features.prepare import _prepare_frame
     from hunt_core.features.prepare import min_required_bars
@@ -157,7 +151,7 @@ async def assemble_deep_tick(
     )
     owned_plane = None
     if client is None:
-        from hunt_core.market.factory import create_hunt_market_plane_from_settings
+        from hunt_core.shared.market import create_hunt_market_plane_from_settings
 
         owned_plane = await create_hunt_market_plane_from_settings(settings)
         client = owned_plane.client
@@ -217,13 +211,13 @@ async def assemble_deep_tick(
         return row
 
     if btc_work_1h is not None:
-        from hunt_core.analysis.deep_signal import btc_market_context
+        from hunt_core.deep.signal import btc_market_context
 
         row["btc_context"] = btc_market_context(btc_work_1h)
 
     try:
         from hunt_core.features.microstructure import build_microstructure_context
-        from hunt_core.analysis.deep_signal import resolve_trade_direction
+        from hunt_core.deep.signal import resolve_trade_direction
 
         market = dict(row.get("market") or {})
         market["symbol"] = sym
@@ -261,7 +255,7 @@ async def assemble_deep_tick(
     deep_query_store().put(sym, row)
     append_deep_tick_jsonl(row)
     try:
-        from hunt_core.analysis.deep.verdict_v2.calibration import (
+        from hunt_core.deep.verdict_v2.calibration import (
             CALIBRATION_JSON,
             merge_live_sample,
             write_calibration_rollup,
@@ -282,8 +276,8 @@ async def assemble_deep_tick(
     except Exception as exc:
         LOG.debug("verdict_v2_calibration_skip", symbol=sym, error=repr(exc))
     try:
-        from hunt_core.analysis.deep.verdict_v2.config import load_verdict_v2_config
-        from hunt_core.analysis.deep.verdict_v2.signal_queue import refresh_pinned_signal_queue
+        from hunt_core.deep.verdict_v2.config import load_verdict_v2_config
+        from hunt_core.deep.verdict_v2.signal_queue import refresh_pinned_signal_queue
 
         v2cfg = load_verdict_v2_config()
         if getattr(v2cfg, "signal_queue_enabled", True):
@@ -303,7 +297,7 @@ async def send_deep_change_telegram(
 ) -> bool:
     """Send deep analysis TG when material change detected."""
     from hunt_core.analysis.confluence_grid import build_confluence_grid, format_grid_telegram
-    from hunt_core.analysis.deep.format_pinned_signal import format_pinned_signal
+    from hunt_core.deep.format_pinned_signal import format_pinned_signal
     from hunt_core.deliver._sections import format_intraday_maps_telegram
 
     sym = str(row.get("symbol") or "").upper()
@@ -314,8 +308,8 @@ async def send_deep_change_telegram(
     if pinned_block:
         blocks.append(pinned_block)
     else:
-        from hunt_core.analysis.deep.build import build_deep_report
-        from hunt_core.analysis.deep.format_telegram import format_deep_analysis_telegram
+        from hunt_core.deep.build import build_deep_report
+        from hunt_core.deep.format_telegram import format_deep_analysis_telegram
 
         analysis = build_deep_report(row, include_watch_appendix=False)
         blocks.append(format_deep_analysis_telegram(analysis))
@@ -325,9 +319,9 @@ async def send_deep_change_telegram(
     maps_block = format_intraday_maps_telegram(row)
     if maps_block:
         blocks.extend(["", maps_block])
-    from hunt_core.analysis.deep.verdict_v2.config import load_verdict_v2_config
-    from hunt_core.analysis.deep.verdict_v2.delivery_policy import format_cycle_peers_footer
-    from hunt_core.analysis.deep.verdict_v2.signal_queue import format_queue_telegram
+    from hunt_core.deep.verdict_v2.config import load_verdict_v2_config
+    from hunt_core.deep.verdict_v2.delivery_policy import format_cycle_peers_footer
+    from hunt_core.deep.verdict_v2.signal_queue import format_queue_telegram
 
     v2cfg = load_verdict_v2_config()
     if cycle_peers:
@@ -362,13 +356,13 @@ async def deep_pinned_loop(
     interval = interval_s if interval_s is not None else deep_pinned_interval_s()
     LOG.info("deep_pinned_loop_start", symbols=list(PINNED_SYMBOLS), interval_s=interval)
     while not should_stop():
-        from hunt_core.analysis.deep.verdict_v2.config import load_verdict_v2_config
-        from hunt_core.analysis.deep.verdict_v2.delivery_policy import (
+        from hunt_core.deep.verdict_v2.config import load_verdict_v2_config
+        from hunt_core.deep.verdict_v2.delivery_policy import (
             filter_notify_candidates,
             pick_hero_row,
             should_send_pinned_batch,
         )
-        from hunt_core.analysis.deep.verdict_v2.signal_queue import load_signal_queue
+        from hunt_core.deep.verdict_v2.signal_queue import load_signal_queue
 
         v2cfg = load_verdict_v2_config()
         prev_queue = load_signal_queue()
@@ -395,7 +389,9 @@ async def deep_pinned_loop(
 
                 exp_cfg = load_expansion_config()
                 if (
-                    send_telegram
+                    exp_cfg.lab_runtime
+                    and exp_cfg.tg_pinned_alerts
+                    and send_telegram
                     and broadcaster is not None
                     and material_expansion_change(sym, row, prev=prev, cfg=exp_cfg)
                     and expansion_cooldown_ok(sym, exp_cfg)
@@ -433,24 +429,29 @@ async def deep_pinned_loop(
                     if hero:
                         hero_sym = str(hero.get("symbol") or "").upper()
                         hero_prev = deep_query_store().get(hero_sym)
+                        from hunt_core.deep.arbiter import deep_cooldown_ok, mark_deep_sent
+                        cooldown_h = deep_tg_stale_hours() / 8.0  # min 30min between re-fires
                         if should_send_pinned_batch(
                             hero,
                             queue=queue,
                             prev_queue=prev_queue,
                             hero_prev=hero_prev,
                             fingerprint_fn=deep_change_fingerprint,
-                        ):
-                            await send_deep_change_telegram(
+                        ) and deep_cooldown_ok(hero_sym, hours=max(0.5, cooldown_h)):
+                            if await send_deep_change_telegram(
                                 broadcaster,
                                 hero,
                                 cycle_peers=filtered,
-                            )
+                            ):
+                                mark_deep_sent(hero_sym)
                 else:
+                    from hunt_core.deep.arbiter import deep_cooldown_ok, mark_deep_sent
                     for row in filtered:
                         sym = str(row.get("symbol") or "").upper()
                         prev = deep_query_store().get(sym)
-                        if material_deep_change(sym, row, prev=prev):
-                            await send_deep_change_telegram(broadcaster, row)
+                        if material_deep_change(sym, row, prev=prev) and deep_cooldown_ok(sym, hours=0.75):
+                            if await send_deep_change_telegram(broadcaster, row):
+                                mark_deep_sent(sym)
         try:
             await asyncio.sleep(max(30.0, interval))
         except asyncio.CancelledError:

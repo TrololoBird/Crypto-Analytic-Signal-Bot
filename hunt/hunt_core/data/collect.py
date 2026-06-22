@@ -343,7 +343,7 @@ def _apply_rest_enrichments(
         prepared.basis_pct = float(basis_direct)
         prepared.mark_index_spread_bps = float(basis_direct) * 100.0
     if premium_row:
-        from hunt_core.coercion import finite_float_or_none
+        from hunt_core.errors import finite_float_or_none
 
         mark = finite_float_or_none(premium_row.get("mark_price"))
         index = finite_float_or_none(premium_row.get("index_price"))

@@ -70,6 +70,7 @@ class LiquidationMap:
     squeeze_fuel_long: float | None = None
     squeeze_fuel_short: float | None = None
     funding_rate: float | None = None
+    leverage_tiers_known: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         base = heatmap_to_market_dict(self.heatmap)
@@ -78,6 +79,7 @@ class LiquidationMap:
                 "liq_forward_zones": self.forward_zones,
                 "liq_realized_zones": self.realized_zones,
                 "liq_forward_confidence": self.heatmap.forward_confidence,
+                "liq_leverage_tiers_known": self.leverage_tiers_known,
                 "liq_venues": list(self.heatmap.venues),
                 "liq_realized_events": self.heatmap.realized_event_count,
                 "liq_magnet_pull_long": self.magnet_pull_long,
@@ -693,6 +695,7 @@ def build_liquidation_map(
         squeeze_fuel_long=long_fuel,
         squeeze_fuel_short=short_fuel,
         funding_rate=funding_rate,
+        leverage_tiers_known=bool(bracket_tiers),
     )
 
 

@@ -9,7 +9,14 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
-from hunt_core.contract import validate_signal_contract
+from hunt_core.shared.contract import validate_signal_contract
+from hunt_core.shared.geometry import (
+    DEFAULT_MIN_RR as _DEFAULT_MIN_RR,
+    geometry_block_evidence,
+    geometry_block_reason,
+    resolve_min_rr as _resolve_min_rr,
+    setup_risk_reward as _setup_rr,
+)
 
 
 @dataclass(frozen=True)
@@ -20,10 +27,9 @@ class GateResult:
     code: str = ""
     message: str = ""
 
-# Cross-stage cooldown: one symbol+direction must not re-fire across advisory
-# Telegram stages (early → dump_hunt → squeeze → confirm) inside the window.
-DELIVERY_STAGES: tuple[str, ...] = ("early", "dump_hunt", "squeeze", "confirm")
-ADVISORY_STAGES: tuple[str, ...] = ("early", "dump_hunt", "squeeze")
+# Cross-stage cooldown: squeeze → confirm within the window.
+DELIVERY_STAGES: tuple[str, ...] = ("squeeze", "confirm")
+ADVISORY_STAGES: tuple[str, ...] = ("squeeze",)
 UNIFIED_COOLDOWN_MINUTES = 45
 
 
@@ -52,6 +58,13 @@ def unified_cooldown_ok(
     """
     sym = symbol.upper()
     direc = direction.lower()
+    try:
+        from hunt_core.scanner.delivery.delivery_state import production_cooldown_ok
+
+        if not production_cooldown_ok(state, symbol=sym, direction=direc, now=now, minutes=minutes):
+            return False
+    except Exception:
+        pass
     if stage == "confirm":
         raw = state.get(_unified_key(sym, direc, "confirm"))
         if raw:
@@ -84,6 +97,12 @@ def mark_unified_sent(
     now: datetime,
 ) -> None:
     state[_unified_key(symbol, direction, stage)] = now.isoformat()
+    try:
+        from hunt_core.scanner.delivery.delivery_state import mark_cross_channel_sent
+
+        mark_cross_channel_sent(state, symbol=symbol, direction=direction, now=now)
+    except Exception:
+        pass
 
 
 def _contract_issues_for_setup(
@@ -118,16 +137,6 @@ def _contract_issues_for_setup(
         valid_until=datetime.now(UTC) + timedelta(hours=12),
     )
     return validate_signal_contract(signal, min_risk_reward=min_risk_reward)
-
-
-def _repair_setup_rr_for_contract(
-    setup: dict[str, Any],
-    *,
-    direction: str,
-    min_rr: float,
-) -> None:
-    """No-op: structural TP must satisfy R:R or setup is rejected (L1)."""
-    return
 
 
 def _latch_delivery_geometry(setup: dict[str, Any]) -> None:
@@ -197,14 +206,12 @@ def evaluate_delivery(
     refresh_live_price: bool = False,
     ws_feed: Any | None = None,
 ) -> tuple[GateResult, str | None]:
-    """Deliver a confirmed fusion setup: live-price -> geometry contract -> tier.
-
-    The fusion engine's ``confirmed`` flag already encodes the full decision (gate
-    cleared and a matching PRE phase), so delivery only re-validates the trade geometry
-    contract and ships. Returns ``(gate, tier)``; tier is ``None`` when blocked.
-    """
+    """Deliver a confirmed fusion setup: authorities → gate pipeline → geometry contract."""
+    from hunt_core.scanner.delivery.arbiter import evaluate_confirm_authorities
+    from hunt_core.scanner.delivery.lab import route_delivery_lane
+    from hunt_core.scanner.gate.delivery import run_gate_pipeline
     from hunt_core.levels.levels import reanchor_setup_levels
-    from hunt_core.market.live_price import apply_live_price_to_row
+    from hunt_core.shared.market import apply_live_price_to_row
 
     sym = symbol or str(row.get("symbol") or "")
     if refresh_live_price:
@@ -212,17 +219,59 @@ def evaluate_delivery(
     _apply_delivery_latch(setup)
     if not setup.get("telegram_sent") and not setup.get("_delivery_latched"):
         reanchor_setup_levels(setup, row, direction=direction, symbol=sym)
+
+    sniper = sniper_config or SniperConfig.from_env()
+    gate_result = run_gate_pipeline(
+        direction=direction,
+        setup=setup,
+        row=row,
+        lifecycle=lifecycle,
+        symbol=sym,
+        sniper_config=sniper,
+    )
+    blockers = [gate_result.code] if gate_result.code else []
+
+    if not isinstance(row.get("manipulation_fusion"), dict):
+        from hunt_core.analysis.manipulation_fusion import stamp_fusion_on_row
+
+        stamp_fusion_on_row(row)
+
+    lane = route_delivery_lane(setup=setup, row=row)
+    setup["delivery_lane"] = lane
+
+    if lane == "lab":
+        min_rr = _resolve_min_rr(setup, direction=direction, symbol=sym)
+        issues = _contract_issues_for_setup(direction=direction, setup=setup, min_risk_reward=min_rr)
+        if issues:
+            code = f"contract_{getattr(issues[0], 'field', 'invalid')}"
+            return GateResult(ok=False, code=code, message=code), None
+        setup["delivery_tier"] = "lab"
+        _latch_delivery_geometry(setup)
+        gate = GateResult(ok=True, code="lab_lane")
+        _record_delivery_funnel(sym, direction=direction, setup=setup, gate=gate, tier="lab")
+        return gate, "lab"
+
+    arbiter = evaluate_confirm_authorities(
+        row=row,
+        direction=direction,
+        setup=setup,
+        blockers=blockers,
+        lifecycle=lifecycle,
+    )
+    if not arbiter.ok:
+        return arbiter, None
+    if not gate_result.ok:
+        return gate_result, None
+
     min_rr = _resolve_min_rr(setup, direction=direction, symbol=sym)
     issues = _contract_issues_for_setup(direction=direction, setup=setup, min_risk_reward=min_rr)
     if issues:
         code = f"contract_{getattr(issues[0], 'field', 'invalid')}"
         return GateResult(ok=False, code=code, message=code), None
-    if not (setup.get("confirmed") or setup.get("intrabar_confirmed")):
-        return GateResult(ok=False, code="not_confirmed", message="not_confirmed"), None
     tier = "triggered"
     setup["delivery_tier"] = tier
     _latch_delivery_geometry(setup)
-    gate = GateResult(ok=True)
+    gate = GateResult(ok=True, code="arbiter_pass")
     _record_delivery_funnel(sym, direction=direction, setup=setup, gate=gate, tier=tier)
     return gate, tier
 
@@ -249,20 +298,6 @@ def evaluate_delivery_fast(
         refresh_live_price=refresh_live_price,
         ws_feed=ws_feed,
     )
-
-
-def shadow_full_lane_recheck(
-    row: dict[str, Any],
-    *,
-    direction: str,
-    setup: dict[str, Any],
-    lifecycle: dict[str, Any] | None,
-    symbol: str,
-    broadcaster: Any | None = None,
-    send_telegram: bool = False,
-) -> bool:
-    """Fast and full lanes are identical under the fusion engine — no shadow divergence."""
-    return True
 
 
 def evaluate_forming_gate(
@@ -321,7 +356,16 @@ def format_delivery_telegram(
     delivery_tier: str,
     confirm_reasons: list[str] | None = None,
 ) -> str:
-    """Format confirm/ARMED Telegram body via layered card_formatter."""
+    """Format confirm/ARMED Telegram body — scanner macquette when enabled."""
+    import os
+
+    if os.environ.get("HUNT_SCANNER_MACQUETTE", "1") != "0":
+        from hunt_core.scanner.telegram import format_scanner_from_setup
+
+        sym = str(row.get("symbol") or "")
+        alt = format_scanner_from_setup(sym, setup, row, lab=False)
+        if alt:
+            return alt
     body = format_delivery_card(
         row,
         direction=direction,
@@ -430,18 +474,6 @@ def effective_top_ls(market: dict[str, Any] | None) -> float | None:
     return None
 
 
-def sniper_block_reason(
-    *,
-    direction: str,
-    setup: dict[str, Any],
-    row: dict[str, Any],
-    lifecycle: dict[str, Any] | None,
-    config: SniperConfig | None = None,
-) -> str | None:
-    """Sniper-mode veto retired — the fusion gate already enforces PRE-phase entry."""
-    return None
-
-
 def _pct_str(entry: float, target: float | None, direction: str) -> str:
     """Move % from worst-fill entry edge to target (M1)."""
     if not entry or not target:
@@ -487,17 +519,6 @@ def _order_flow_inputs_present(row: dict[str, Any]) -> bool:
         ):
             return True
     return row.get("order_flow") is not None
-
-
-def _finalize_delivery_tier(
-    tier: str | None,
-    *,
-    direction: str,
-    setup: dict[str, Any],
-    row: dict[str, Any],
-) -> str | None:
-    """Tier demotion retired — the fusion gate is the single delivery decision."""
-    return tier
 
 
 def _squeeze_note(row: dict[str, Any], *, direction: str) -> str | None:
@@ -841,10 +862,6 @@ def invalidate_detail_human(detail: str, *, reason: str = "") -> str:
 # --- merged from deliver/readiness_labels.py ---
 
 
-_DEFAULT_MIN_RR = 1.6
-_POC_HEADWIND_PCT = 0.5
-
-
 def readiness_score(setup: dict[str, Any], *, direction: str) -> float:
     score = setup.get("dump_score" if direction == "short" else "long_score")
     if score is not None:
@@ -852,10 +869,13 @@ def readiness_score(setup: dict[str, Any], *, direction: str) -> float:
             return float(score)
         except (TypeError, ValueError):
             pass
-    try:
-        return float(setup.get("p_win") or 0) * 100.0
-    except (TypeError, ValueError):
-        return 0.0
+    fusion = setup.get("fusion_score")
+    if fusion is not None:
+        try:
+            return float(fusion)
+        except (TypeError, ValueError):
+            pass
+    return 0.0
 
 
 def readiness_tier(score: float) -> str:
@@ -866,95 +886,6 @@ def readiness_tier(score: float) -> str:
     if score >= 45:
         return "forming"
     return "watch"
-
-
-def _setup_rr(setup: dict[str, Any]) -> float | None:
-    raw = setup.get("risk_reward")
-    if raw is None:
-        return None
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None
-
-
-def _resolve_min_rr(setup: dict[str, Any], *, direction: str = "", symbol: str = "") -> float:
-    """Fixed R:R floor; the levels geometry already enforces a structural R:R."""
-    return _DEFAULT_MIN_RR
-
-
-def geometry_block_reason(
-    setup: dict[str, Any],
-    *,
-    min_rr: float = _DEFAULT_MIN_RR,
-    row: dict[str, Any] | None = None,
-    direction: str = "",
-) -> str | None:
-    """Why trade geometry blocks a high fuel score from implying «strong setup»."""
-    min_rr = _resolve_min_rr(setup, direction=direction)
-    return geometry_block_evidence(
-        setup, min_rr=min_rr, row=row, direction=direction
-    ).get("reason")
-
-
-def geometry_block_evidence(
-    setup: dict[str, Any],
-    *,
-    min_rr: float = _DEFAULT_MIN_RR,
-    row: dict[str, Any] | None = None,
-    direction: str = "",
-) -> dict[str, Any]:
-    """Structured geometry veto — code, reason, evidence list (§3 cleanup)."""
-    min_rr = _resolve_min_rr(setup, direction=direction)
-    evidence: list[str] = []
-    if setup.get("levels_viable") is False:
-        veto = setup.get("levels_veto") or []
-        tail = ", ".join(str(v) for v in veto[:2]) if veto else "levels_veto"
-        evidence.extend(str(v) for v in veto[:4])
-        return {"code": "levels_veto", "reason": f"уровни: {tail}", "evidence": evidence}
-    rr = _setup_rr(setup)
-    if rr is not None and rr < min_rr:
-        evidence.append(f"risk_reward={rr:.3f}")
-        evidence.append(f"min_rr={min_rr:.1f}")
-        return {
-            "code": "min_rr",
-            "reason": f"RR {rr:.2f} < {min_rr:.1f}",
-            "evidence": evidence,
-        }
-    if row and direction == "short":
-        regime = row.get("regime") or {}
-        poc_dir = str(regime.get("poc_direction_1h") or "")
-        poc = regime.get("poc_1h")
-        price = float(row.get("price") or 0)
-        if poc_dir == "long" and poc and price > 0:
-            try:
-                dist = abs(price - float(poc)) / price * 100.0
-            except (TypeError, ValueError):
-                dist = 999.0
-            if dist <= _POC_HEADWIND_PCT:
-                evidence.append(f"poc={float(poc):.0f}")
-                evidence.append(f"dist_pct={dist:.2f}")
-                return {
-                    "code": "poc_headwind",
-                    "reason": f"POC поддержка {float(poc):.0f} ({dist:.2f}%)",
-                    "evidence": evidence,
-                }
-    triggers = {str(t) for t in (setup.get("triggers") or [])}
-    if direction == "short" and any("poc_contra" in t for t in triggers):
-        evidence.extend(sorted(t for t in triggers if "poc_contra" in t))
-        return {
-            "code": "poc_contra",
-            "reason": "POC contra (short в поддержку)",
-            "evidence": evidence,
-        }
-    if direction == "long" and any("poc_contra" in t for t in triggers):
-        evidence.extend(sorted(t for t in triggers if "poc_contra" in t))
-        return {
-            "code": "poc_contra",
-            "reason": "POC contra (long в сопротивление POC)",
-            "evidence": evidence,
-        }
-    return {"code": "", "reason": None, "evidence": evidence}
 
 
 def display_readiness_score(

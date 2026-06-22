@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from hunt_core.domain.schemas import PreparedSymbol, UniverseSymbol
 
 
-from hunt_core.contract import MARKET_FIELD_CCXT_SOURCE
+from hunt_core.shared.contract import MARKET_FIELD_CCXT_SOURCE
 
 REQUIRED_DERIVATIVES_KEYS: tuple[str, ...] = (
     "oi_change_pct",
@@ -256,3 +256,31 @@ def assess_symbol_data_readiness(
         details["strict_derivatives_skipped"] = True
 
     return DataReadinessResult(ready=True, details=details)
+
+
+def composite_readiness_pct(result: DataReadinessResult) -> int:
+    """Graded 0–100 data readiness for TG (P0-D) — not a probability."""
+    if not result.ready:
+        return 0
+    details = result.details or {}
+    rows = details.get("frame_rows") or {}
+    score = 0.0
+    for tf, count in rows.items():
+        if int(count or 0) >= 200:
+            score += 20.0
+        elif int(count or 0) >= 100:
+            score += 12.0
+        elif int(count or 0) >= 50:
+            score += 6.0
+    if details.get("spread_bps") is not None:
+        score += 10.0
+    if not details.get("missing_live_fields") and not details.get("fast_tier_derivatives_skipped"):
+        score += 10.0
+    return int(min(100.0, max(0.0, score)))
+
+
+def readiness_dict_for_row(result: DataReadinessResult) -> dict[str, int | bool]:
+    return {
+        "ready": result.ready,
+        "composite_pct": composite_readiness_pct(result),
+    }

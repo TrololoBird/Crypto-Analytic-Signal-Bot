@@ -12,14 +12,40 @@ from hunt_core.paths import WATCHLIST as WATCHLIST_PATH
 
 WatchMode = Literal["short", "long", "both"]
 
-PINNED_SYMBOLS = ("BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT")
+_CANONICAL_PINNED: tuple[str, ...] = (
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "XAUUSDT",
+    "XAGUSDT",
+    "PAXGUSDT",
+)
+
+
+def load_pinned_symbols() -> tuple[str, ...]:
+    """Operator pinned set (config.defaults.toml [pinned.defaults])."""
+    try:
+        from hunt_core.domain.config import load_settings
+
+        settings = load_settings()
+        assets = getattr(settings, "assets", None) or {}
+        if isinstance(assets, dict):
+            deep = [
+                str(s).upper()
+                for s, block in assets.items()
+                if isinstance(block, dict) and block.get("deep_analysis")
+            ]
+            if deep:
+                return tuple(dict.fromkeys(deep))
+    except Exception:
+        pass
+    return _CANONICAL_PINNED
+
+
+PINNED_SYMBOLS: tuple[str, ...] = load_pinned_symbols()
 DEFAULT_SYMBOLS = PINNED_SYMBOLS
-DEFAULT_MODES: dict[str, WatchMode] = {
-    "BTCUSDT": "both",
-    "ETHUSDT": "both",
-    "XAUUSDT": "both",
-    "XAGUSDT": "both",
-}
+DEFAULT_MODES: dict[str, WatchMode] = {sym: "both" for sym in PINNED_SYMBOLS}
 MAX_DYNAMIC_SYMBOLS = 12
 # Debounced prescan outliers merged per tick (on top of resolve_watch_universe cap).
 MAX_PRESCAN_MERGE = 8
@@ -97,10 +123,19 @@ def resolve_watch_universe(
         sym = str(row.get("symbol") or "").strip().upper()
         if not sym:
             continue
-        if row.get("suggest_minute_watch") or float(row.get("hunt_score") or 0) >= 45:
+        flags = row.get("flags") or ()
+        expansion_ready = "expansion_ready" in flags or float(
+            row.get("expansion_energy") or 0
+        ) >= 20.0
+        eligible = row.get("suggest_minute_watch") or float(row.get("hunt_score") or 0) >= 45
+        if sym in pinned_set and not expansion_ready:
+            continue
+        if eligible or (sym in pinned_set and expansion_ready):
             _add(sym)
             bias = str(row.get("watch_bias") or "both")
             if sym in pinned_set:
+                if expansion_ready:
+                    modes[sym] = _bias_to_mode(bias)
                 continue
             if sym not in modes or row.get("suggest_minute_watch"):
                 modes[sym] = _bias_to_mode(bias)
@@ -157,6 +192,7 @@ def resolve_hunt_scan_universe(
     return hunt_symbols, modes
 
 __all__ = [
+    "load_pinned_symbols",
     "DEFAULT_MODES",
     "DEFAULT_SYMBOLS",
     "MAX_DYNAMIC_SYMBOLS",

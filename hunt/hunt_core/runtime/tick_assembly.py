@@ -58,7 +58,7 @@ from hunt_core.features.snapshot import (
     tf_snapshot_for_symbol,
     tf_snapshot_lite,
 )
-from hunt_core.detect.delivery_support import liquidity_skip_reason
+from hunt_core.scanner.detect.delivery_support import liquidity_skip_reason
 from hunt_core.runtime.state import current_symbol_state
 from hunt_core.data.universe import PINNED_SYMBOLS
 
@@ -67,7 +67,7 @@ _CONFIRM_STICKY_MAX_TICKS = 6
 
 def _stamp_setup_risk_reward(setup: dict[str, Any], *, direction: str) -> None:
     """Worst-edge R:R on the tick row so gates/cards never see risk_reward=None (G3)."""
-    from hunt_core.contract import compute_setup_risk_reward
+    from hunt_core.shared.contract import compute_setup_risk_reward
 
     ez = setup.get("entry_zone") or []
     if len(ez) < 2 or setup.get("stop_loss") is None or setup.get("tp1") is None:
@@ -121,9 +121,14 @@ from hunt_core.data_readiness import assess_symbol_data_readiness
 from hunt_core.domain.market_regime import symbol_regime_features
 from hunt_core.domain.schemas import SymbolFrames, UniverseSymbol
 from hunt_core.features.fib import leg_fib_levels
-from hunt_core.market import HuntCcxtClient, HuntCcxtSpotCompanion, HuntCcxtStreams
-from hunt_core.market.client import normalize_depth_levels
-from hunt_core.market.live_price import resolve_live_price
+from hunt_core.shared.market import (
+    HuntCcxtClient,
+    HuntCcxtSpotCompanion,
+    HuntCcxtStreams,
+    attach_cross_microstructure,
+    normalize_depth_levels,
+    resolve_live_price,
+)
 from hunt_core.runtime.state import SymbolStateStore, merge_hunt_extremes
 
 LOG = logging.getLogger("hunt_core.runtime.tick_assembly")
@@ -304,6 +309,7 @@ async def snapshot_symbol(
     btc_work_1m: Any | None = None,
     hunt_fusion: bool = True,
 ) -> dict[str, Any]:
+    readiness_result = None
     meta = exchange_by_sym.get(symbol)
     ticker = ticker_by_sym.get(symbol)
     if meta is None or ticker is None:
@@ -337,7 +343,7 @@ async def snapshot_symbol(
         price_change_pct=market_row["price_change_percent"],
         last_price=price,
         shortlist_bucket="dump_watch",
-        seed_source="dump_minute_watch",
+        seed_source="hunt_scan",
         strategy_fits=(),
     )
     limits = kline_limits_override if kline_limits_override is not None else kline_limits(minimums, symbol)
@@ -537,6 +543,7 @@ async def snapshot_symbol(
     )
     if not young_listing and not hot_tier:
         readiness = assess_symbol_data_readiness(prepared, settings, universe_item=item, snapshot_tier=tier)
+        readiness_result = readiness
         if not readiness.ready:
             reason = readiness.reason or "data.not_ready"
             return {
@@ -893,7 +900,7 @@ async def snapshot_symbol(
         except Exception:
             pass
         try:
-            from hunt_core.market.cross import attach_cross_microstructure
+            from hunt_core.shared.market import attach_cross_microstructure
 
             await attach_cross_microstructure(client, result)
             cx_walls = (result.get("cross_microstructure") or {}).get("book_walls")
@@ -995,62 +1002,50 @@ async def snapshot_symbol(
         result["long"] = {**stub, "direction": "long"}
     else:
         # --- Fusion detection engine (replaces scan/* + regime FSM + gate scoring) ---
-        leg_gain_pct = round((hunt_h - hunt_l) / hunt_l * 100.0, 1) if hunt_l > 0 else 0.0
-        fall_from_high_pct = round((hunt_h - price) / hunt_h * 100.0, 2) if hunt_h > 0 else 0.0
-        structure_bias = str(structure.get("structure_bias") or "")
-        from hunt_core.detect.delivery_setup import build_delivery_setup
-        from hunt_core.detect.live import build_live_detection
-        from hunt_core.features.feature_engine import build_feature_vector
+        from hunt_core.runtime.tick_fusion import apply_fusion_setups, run_fusion_detection
 
-        detection = None
-        try:
-            _vector = build_feature_vector(prepared, result, symbol=symbol, tf="15m")
-            detection = build_live_detection(symbol, _vector.to_dict())
-        except Exception as exc:  # data gaps must not crash the tick
-            LOG.debug("fusion_detection_skipped | symbol=%s error=%s", symbol, exc)
-
-        side = detection.side if detection is not None else "none"
-        phase_val = detection.phase if detection is not None else "neutral"
-        from hunt_core.detect.phase_compat import fusion_lifecycle_dict
-
-        lifecycle_dict = fusion_lifecycle_dict(
-            detection,
-            structure_bias=structure_bias,
-            fall_from_high_pct=fall_from_high_pct,
-            leg_gain_pct=leg_gain_pct,
+        detection, side, phase_val, lifecycle_dict = run_fusion_detection(
+            prepared=prepared,
+            result=result,
+            symbol=symbol,
+            structure=structure,
+            price=price,
+            hunt_h=hunt_h,
+            hunt_l=hunt_l,
         )
-        from hunt_core.runtime.tick_jsonl import ensure_fusion_lifecycle_fields
-
-        lifecycle_dict = ensure_fusion_lifecycle_fields(lifecycle_dict)
         result["lifecycle"] = lifecycle_dict
         result["plane"] = "hunt"
-
-        def _stub_setup(direction: str) -> dict[str, Any]:
-            return {
-                "symbol": symbol,
-                "direction": direction,
-                "confirmed": False,
-                "phase": phase_val,
-                "lifecycle_phase": phase_val,
-                "lifecycle": lifecycle_dict,
+        apply_fusion_setups(
+            detection=detection,
+            side=side,
+            phase_val=phase_val,
+            lifecycle_dict=lifecycle_dict,
+            result=result,
+            symbol=symbol,
+        )
+        if detection is not None:
+            result["factor_panel"] = {
+                f.name: {"score": f.score, "active": f.active, "detail": f.detail}
+                for f in detection.factors
             }
-
-        if detection is not None and side in {"long", "short"}:
-            active = build_delivery_setup(detection, result)
-            active["lifecycle"] = lifecycle_dict
-            if side == "short":
-                dump, long_setup = active, _stub_setup("long")
-            else:
-                long_setup, dump = active, _stub_setup("short")
-        else:
-            dump, long_setup = _stub_setup("short"), _stub_setup("long")
-
+        dump = result.get("dump") if isinstance(result.get("dump"), dict) else {}
+        long_setup = result.get("long") if isinstance(result.get("long"), dict) else {}
         dump["young_listing"] = young_listing
         dump["bars_1h"] = bars_1h
         long_setup["young_listing"] = young_listing
         long_setup["bars_1h"] = bars_1h
         result["dump"] = dump
         result["long"] = long_setup
+        if side in {"long", "short"}:
+            from hunt_core.track.outcome_ledger import maybe_append_candidate_ledger
+
+            active_setup = dump if side == "short" else long_setup
+            maybe_append_candidate_ledger(
+                symbol=symbol,
+                direction=side,
+                row=result,
+                setup=active_setup if isinstance(active_setup, dict) else None,
+            )
         merge_hunt_extremes(
             symbol,
             price=price,
@@ -1107,7 +1102,7 @@ async def snapshot_symbol(
         from hunt_core.maps.forecast import stamp_forecasts_on_row
 
         if ws_feed is not None:
-            from hunt_core.market.live_price import apply_live_price_to_row
+            from hunt_core.shared.market import apply_live_price_to_row
 
             apply_live_price_to_row(result, ws_feed=ws_feed)
         stamp_forecasts_on_row(result)
@@ -1148,6 +1143,11 @@ async def snapshot_symbol(
             and str(result.get("tick_path") or "") in {"hot_ws", "hot_delta", "hot_bootstrap"}
         ):
             cache.seed_carry_row(symbol, result)
+
+    if readiness_result is not None:
+        from hunt_core.data_readiness import readiness_dict_for_row
+
+        result["data_readiness"] = readiness_dict_for_row(readiness_result)
 
     return result
 

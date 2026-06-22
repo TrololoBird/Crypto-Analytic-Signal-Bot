@@ -32,7 +32,7 @@ def setup_meets_playbook(
     archetype = str(fusion.get("archetype") or "none")
     if direction == "short" and archetype != "predump_short":
         return False
-    if direction == "long" and archetype not in {"coil_long", "ignition_long"}:
+    if direction == "long" and archetype not in {"prepump_long", "ignition_long"}:
         return False
     checks = fusion.get("checks") if isinstance(fusion.get("checks"), dict) else {}
     if not playbook_passes(archetype, checks):

@@ -10,6 +10,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import polars as pl
+
 _REGISTRY_PATH = Path(__file__).resolve().parents[1] / "domain" / "feature_registry.json"
 
 _FRAME_SOURCES = frozenset(
@@ -27,6 +29,10 @@ _FRAME_SOURCES = frozenset(
         "bb_pct_b",
         "bb_width",
         "supertrend_dir",
+        "delta_ratio",
+        "zscore30",
+        "session_cvd",
+        "rolling_cvd_24h",
     }
 )
 
@@ -69,9 +75,20 @@ class FeatureVector:
     basis_pct: float | None = None
     premium_zscore_5m: float | None = None
     liquidation_score: float | None = None
+    delta_ratio: float | None = None
+    zscore30: float | None = None
+    session_cvd: float | None = None
+    rolling_cvd_24h: float | None = None
+    oi_acceleration: float | None = None
+    funding_velocity: float | None = None
+    poc_migration_1h: float | None = None
+    poc_migration_4h: float | None = None
+    va_contraction: float | None = None
+    liquidity_void_path: float | None = None
     lifecycle_phase: str | None = None
     lifecycle_bias: str | None = None
     market_regime: str | None = None
+    closed_bar: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -90,6 +107,10 @@ def load_feature_registry() -> dict[str, Any]:
 def _coerce_float(value: Any) -> float | None:
     if value is None:
         return None
+    if isinstance(value, pl.Series):
+        if value.len() == 0:
+            return None
+        value = value[-1]
     try:
         parsed = float(value)
     except (TypeError, ValueError):
@@ -97,6 +118,41 @@ def _coerce_float(value: Any) -> float | None:
     if math.isnan(parsed) or math.isinf(parsed):
         return None
     return parsed
+
+
+_TREND_POSITIVE = frozenset({"up", "rising", "long", "bull", "bullish", "positive"})
+_TREND_NEGATIVE = frozenset({"down", "falling", "short", "bear", "bearish", "negative"})
+_TREND_NEUTRAL = frozenset({"flat", "neutral", "none", "sideways", "stable"})
+
+
+def _encode_signed_label(value: Any) -> float | None:
+    """Encode categorical trend/migration labels as -1/0/+1 for lake numeric cols."""
+    if value is None:
+        return None
+    numeric = _coerce_float(value)
+    if numeric is not None:
+        return numeric
+    text = str(value).strip().lower()
+    if text in _TREND_POSITIVE:
+        return 1.0
+    if text in _TREND_NEGATIVE:
+        return -1.0
+    if text in _TREND_NEUTRAL:
+        return 0.0
+    return None
+
+
+def _scalar_bool(value: Any, *, default: bool = False) -> bool:
+    """Bool coercion safe for polars Series (never use ``if series``)."""
+    if value is None:
+        return default
+    if isinstance(value, pl.Series):
+        if value.len() == 0:
+            return default
+        value = value[-1]
+    if isinstance(value, (bool, int, float)):
+        return bool(value)
+    return default
 
 
 def _require_float(value: Any, *, field: str, symbol: str, tf: str) -> float:
@@ -107,7 +163,54 @@ def _require_float(value: Any, *, field: str, symbol: str, tf: str) -> float:
     return parsed
 
 
-def _frame_block(prepared: Any, row: dict[str, Any], tf: str) -> dict[str, Any]:
+def _closed_frame_block(prepared: Any, row: dict[str, Any], tf: str) -> dict[str, Any]:
+    """Prefer grace-closed bar snapshot; never use a forming bar for fusion."""
+    closed_key = f"{tf}_closed"
+    snap = ((row.get("timeframes") or {}).get(closed_key) or {})
+    if isinstance(snap, dict) and snap.get("status") != "empty" and _scalar_bool(snap.get("closed_bar")):
+        # Merge _FRAME_SOURCES columns missing from snapshot (e.g. zscore30, delta_ratio)
+        if prepared is not None:
+            work = getattr(prepared, f"work_{tf}", None)
+            if work is not None and getattr(work, "height", 0) >= 2:
+                cols = getattr(work, "columns", [])
+                missing = {n for n in _FRAME_SOURCES if n not in snap and n in cols}
+                if missing:
+                    snap = dict(snap)
+                    for name in missing:
+                        try:
+                            snap[name] = work.item(-2, name)
+                        except Exception:
+                            pass
+        return snap
+    if prepared is not None:
+        work = getattr(prepared, f"work_{tf}", None)
+        if work is not None and getattr(work, "height", 0) >= 2:
+            cols = getattr(work, "columns", [])
+            idx = -2
+            out: dict[str, Any] = {"closed_bar": True}
+            for name in _FRAME_SOURCES:
+                if name in cols:
+                    try:
+                        out[name] = work.item(idx, name)
+                    except Exception:
+                        continue
+            if len(out) > 1:
+                return out
+    return {}
+
+
+def _frame_block(
+    prepared: Any,
+    row: dict[str, Any],
+    tf: str,
+    *,
+    require_closed: bool = False,
+) -> dict[str, Any]:
+    if require_closed:
+        closed = _closed_frame_block(prepared, row, tf)
+        if closed:
+            return closed
+        return {"status": "empty", "closed_bar": False}
     if prepared is not None:
         attr = f"work_{tf}"
         work = getattr(prepared, attr, None)
@@ -121,19 +224,19 @@ def _frame_block(prepared: Any, row: dict[str, Any], tf: str) -> dict[str, Any]:
                     except Exception:
                         continue
             if out:
+                out.setdefault("closed_bar", False)
                 return out
     snap = ((row.get("timeframes") or {}).get(tf) or {})
-    return snap if isinstance(snap, dict) else {}
+    if isinstance(snap, dict):
+        snap.setdefault("closed_bar", _scalar_bool(snap.get("closed_bar")))
+        return snap
+    return {}
+
+
+_ROW_FIRST_KEYS = frozenset({"oi_current", "oi_change_pct", "oi_slope_5m", "funding_rate"})
 
 
 def _prepared_value(prepared: Any, row: dict[str, Any], attr: str) -> Any:
-    if prepared is not None:
-        val = getattr(prepared, attr, None)
-        if val is not None:
-            return val
-    market = row.get("market") or row.get("positioning") or {}
-    if not isinstance(market, dict):
-        return None
     aliases = {
         "oi_current": ("oi",),
         "oi_change_pct": ("oi_chg_1h", "oi_change_pct"),
@@ -146,6 +249,17 @@ def _prepared_value(prepared: Any, row: dict[str, Any], attr: str) -> Any:
         "premium_zscore_5m": ("premium_zscore_5m",),
         "liquidation_score": ("liquidation_score_5m", "liquidation_score"),
     }
+    market = row.get("market") or row.get("positioning") or {}
+    if isinstance(market, dict) and attr in _ROW_FIRST_KEYS:
+        for key in aliases.get(attr, (attr,)):
+            if key in market and market[key] is not None:
+                return market[key]
+    if prepared is not None:
+        val = getattr(prepared, attr, None)
+        if val is not None:
+            return val
+    if not isinstance(market, dict):
+        return None
     for key in aliases.get(attr, (attr,)):
         if key in market and market[key] is not None:
             return market[key]
@@ -158,6 +272,7 @@ def build_feature_vector(
     *,
     symbol: str,
     tf: str,
+    require_closed: bool = False,
 ) -> FeatureVector:
     """Extract registry-backed features from prepare outputs; fail loud on required gaps."""
     sym = (symbol or str(row.get("symbol") or "")).upper()
@@ -168,9 +283,11 @@ def build_feature_vector(
     if not ts:
         raise FeatureExtractError(f"ts missing for feature vector extraction: {sym}")
 
-    frame = _frame_block(prepared, row, tf)
+    frame = _frame_block(prepared, row, tf, require_closed=require_closed)
     if frame.get("status") == "empty":
         raise FeatureExtractError(f"timeframe frame empty for {sym} tf={tf}")
+    if require_closed and not _scalar_bool(frame.get("closed_bar")):
+        raise FeatureExtractError(f"closed bar unavailable for {sym} tf={tf}")
 
     lifecycle = row.get("lifecycle") or {}
     regime = row.get("regime") or {}
@@ -216,6 +333,23 @@ def build_feature_vector(
     vector_kwargs["liquidation_score"] = _coerce_float(
         _prepared_value(prepared, row, "liquidation_score")
     )
+    market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    oi_slope = _coerce_float(_prepared_value(prepared, row, "oi_slope_5m"))
+    oi_chg = _coerce_float(_prepared_value(prepared, row, "oi_change_pct"))
+    if oi_slope is not None and oi_chg is not None:
+        vector_kwargs["oi_acceleration"] = oi_slope - (oi_chg / 100.0)
+    elif oi_slope is not None:
+        vector_kwargs["oi_acceleration"] = oi_slope
+    funding_trend = market.get("funding_trend")
+    if funding_trend is None and prepared is not None:
+        funding_trend = getattr(prepared, "funding_trend", None)
+    vector_kwargs["funding_velocity"] = _encode_signed_label(funding_trend)
+    vector_kwargs["poc_migration_1h"] = _encode_signed_label(market.get("map_poc_migration_1h"))
+    vector_kwargs["poc_migration_4h"] = _encode_signed_label(market.get("map_poc_migration_4h"))
+    vector_kwargs["va_contraction"] = _coerce_float(market.get("map_vp_va_contraction"))
+    if vector_kwargs["va_contraction"] is None and market.get("map_vp_va_contraction") is not None:
+        vector_kwargs["va_contraction"] = 1.0 if bool(market.get("map_vp_va_contraction")) else 0.0
+    vector_kwargs["liquidity_void_path"] = _coerce_float(market.get("map_void_above_pct"))
     vector_kwargs["lifecycle_phase"] = (
         str(lifecycle.get("phase")) if lifecycle.get("phase") is not None else None
     )
@@ -227,6 +361,7 @@ def build_feature_vector(
     vector_kwargs["market_regime"] = (
         str(regime.get("market_regime")) if regime.get("market_regime") is not None else None
     )
+    vector_kwargs["closed_bar"] = _scalar_bool(frame.get("closed_bar"), default=not require_closed)
 
     registry = load_feature_registry().get("features") or {}
     missing_required: list[str] = []

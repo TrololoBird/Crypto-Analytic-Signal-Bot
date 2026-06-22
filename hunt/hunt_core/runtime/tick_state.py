@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from hunt_core.paths import DEEP_TICKS_JSONL, HUNT_SCAN_JSONL, LEGACY_TICK_JSONL
+from hunt_core.paths import DEEP_TICKS_JSONL, HUNT_SCAN_JSONL
 
 
 class _TickStoreBase:
@@ -38,8 +38,6 @@ class _TickStoreBase:
     def tail_jsonl(self, symbol: str, *, path: Path | None = None) -> dict[str, Any] | None:
         sym = str(symbol or "").upper()
         candidates = [path] if path is not None else [self._jsonl_path]
-        if self._jsonl_path != LEGACY_TICK_JSONL:
-            candidates.append(LEGACY_TICK_JSONL)
         for p in candidates:
             if p is None or not p.exists():
                 continue
@@ -81,14 +79,14 @@ class _TickStoreBase:
 
 
 class HuntScanStore(_TickStoreBase):
-    """Module 1 — dynamic hunt fusion rows only (plane=hunt)."""
+    """Module 2 Scanner — dynamic fusion rows only (plane=hunt)."""
 
     def __init__(self) -> None:
         super().__init__(jsonl_path=HUNT_SCAN_JSONL)
 
 
 class DeepQueryStore(_TickStoreBase):
-    """Module 2 — pinned continuous + on-demand deep rows (plane=deep)."""
+    """Module 1 Deep — pinned continuous + on-demand rows (plane=deep)."""
 
     def __init__(self) -> None:
         super().__init__(jsonl_path=DEEP_TICKS_JSONL)

@@ -67,7 +67,7 @@ def _maybe_emit_scanner_continuation_wait(
         return
     lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
     fall = float(lc.get("fall_from_high_pct") or 0)
-    from hunt_core.detect.setup_fields import setup_conviction_pct, setup_meets_strength
+    from hunt_core.scanner.detect.setup_fields import setup_conviction_pct, setup_meets_strength
 
     conviction = setup_conviction_pct(setup, direction="short")
     if (

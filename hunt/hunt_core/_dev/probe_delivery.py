@@ -254,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         "--jsonl",
         type=str,
         default="",
-        help="Tick JSONL path (default: hunt/data/dump_minute_watch.jsonl)",
+        help="Tick JSONL path (default: hunt/data/hunt_scan.jsonl)",
     )
     parser.add_argument(
         "--direction",

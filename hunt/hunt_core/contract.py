@@ -26,6 +26,7 @@ LOG = logging.getLogger("bot.contracts")
 DEFAULT_SCALE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
 DEFAULT_TARGET_RR: tuple[float, float, float] = (1.9, 3.0, 5.0)
 DEFAULT_MIN_RISK_REWARD = 1.9
+DEFAULT_MAX_RISK_REWARD = 10.0
 RISK_REWARD_EPSILON = 1e-9
 
 # Single source of truth for entry-zone width.
@@ -598,6 +599,14 @@ def validate_signal_contract(
                             SignalContractIssue(
                                 "risk_reward",
                                 "tp1_rr_below_minimum",
+                                round(risk_reward, 6),
+                            )
+                        )
+                    elif risk_reward > DEFAULT_MAX_RISK_REWARD:
+                        issues.append(
+                            SignalContractIssue(
+                                "risk_reward",
+                                "tp1_rr_above_maximum",
                                 round(risk_reward, 6),
                             )
                         )

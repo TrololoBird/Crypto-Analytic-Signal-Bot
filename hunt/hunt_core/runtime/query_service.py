@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from hunt_core.data.universe import PINNED_SYMBOLS
-from hunt_core.detect.delivery_support import GateResult
+from hunt_core.scanner.detect.delivery_support import GateResult
 from hunt_core.market.client import HuntCcxtClient
 
 STORE_FRESH_S = 180.0
@@ -60,7 +60,7 @@ def row_age_seconds(row: dict[str, Any]) -> float | None:
 
 
 def _setup_conviction(setup: dict[str, Any], direction: str) -> float:
-    from hunt_core.detect.setup_fields import setup_conviction_pct
+    from hunt_core.scanner.detect.setup_fields import setup_conviction_pct
 
     return setup_conviction_pct(setup, direction=direction)
 
@@ -126,7 +126,7 @@ def _evaluate_direction(
     sniper_config: Any,
 ) -> DirectionQuery:
     from hunt_core.deliver.dispatch import evaluate_delivery, evaluate_delivery_fast
-    from hunt_core.detect.delivery_support import collect_report_blockers, evaluate_formation
+    from hunt_core.scanner.detect.delivery_support import collect_report_blockers, evaluate_formation
 
     setup = (row.get("dump") if direction == "short" else row.get("long")) or {}
     confirmed = bool(setup.get("confirmed") or setup.get("intrabar_confirmed"))
@@ -299,8 +299,8 @@ def _format_blockers_section(dq: DirectionQuery) -> list[str]:
 
 def format_query_telegram(q: QueryResult, *, added_watch: bool = False) -> str:
     """Deep-first /signal — analysis/deep structure/MTF/maps; hunt scan collapsed footer."""
-    from hunt_core.analysis.deep.build import build_deep_report
-    from hunt_core.analysis.deep.format_telegram import format_deep_analysis_telegram
+    from hunt_core.deep.build import build_deep_report
+    from hunt_core.deep.format_telegram import format_deep_analysis_telegram
     from hunt_core.runtime.tick_state import hunt_scan_store
 
     focus = q.focus()

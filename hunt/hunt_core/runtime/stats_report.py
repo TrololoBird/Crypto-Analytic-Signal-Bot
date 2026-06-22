@@ -362,7 +362,7 @@ def build_stats_report_text() -> str:
     if sf:
         blocks.append(sf)
     blocks.extend(_phase_matrix(labeled))
-    from hunt_core.detect.delivery_support import disabled_phase_pairs
+    from hunt_core.scanner.detect.delivery_support import disabled_phase_pairs
 
     disabled = disabled_phase_pairs()
     if disabled:

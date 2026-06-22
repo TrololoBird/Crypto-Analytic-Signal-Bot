@@ -77,9 +77,11 @@ def delivery_replay_report(
     recompute: bool = False,
 ) -> dict[str, Any]:
     from hunt_core.deliver.dispatch import evaluate_delivery, evaluate_delivery_fast
-    from hunt_core.gate.delivery import collect_report_blockers
-    from hunt_core.runtime.cycle._cycle_advisory import early_telegram_block_reason
+    from hunt_core.scanner.gate.delivery import collect_report_blockers
     from hunt_core.track.events import audit_probe_row
+
+    def _early_block() -> str:
+        return "removed"
 
     if recompute:
         row = recompute_tick_row(row)
@@ -87,7 +89,7 @@ def delivery_replay_report(
     lc = row.get("lifecycle") or {}
     direction = direction.lower()
     setup = (row.get("dump") if direction == "short" else row.get("long")) or {}
-    from hunt_core.gate._ev import setup_conviction_pct, setup_p_win
+    from hunt_core.scanner.gate._ev import setup_conviction_pct, setup_p_win
 
     use_fast = row.get("tick_path") in {
         "hot_ws",
@@ -119,12 +121,7 @@ def delivery_replay_report(
         "audit_issues": audit.get("issues"),
     }
     if not setup.get("confirmed"):
-        out["early_block"] = early_telegram_block_reason(
-            setup,
-            direction=direction,
-            lifecycle=lc,
-            row=row,
-        )
+        out["early_block"] = _early_block()
         return out
     gate, tier = eval_fn(row, direction=direction, setup=setup, lifecycle=lc, symbol=sym)
     blockers = collect_report_blockers(
@@ -135,12 +132,7 @@ def delivery_replay_report(
     out["gate_message"] = gate.message
     out["tier"] = tier
     out["blocker_codes"] = [b.code for b in blockers if not b.ok]
-    out["early_block"] = early_telegram_block_reason(
-        setup,
-        direction=direction,
-        lifecycle=lc,
-        row=row,
-    )
+    out["early_block"] = _early_block()
     return out
 
 

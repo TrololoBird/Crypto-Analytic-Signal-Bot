@@ -23,8 +23,8 @@ from hunt_core.features.prepare import _prepare_frame, min_required_bars
 from hunt_core.market import HuntCcxtClient
 from hunt_core.deliver.telegram import TelegramBroadcaster
 
-from hunt_core.detect.delivery_support import evaluate_alert_gate, evaluate_formation
-from hunt_core.detect.probe import (
+from hunt_core.scanner.detect.delivery_support import evaluate_alert_gate, evaluate_formation
+from hunt_core.scanner.detect.probe import (
     btc_market_context,
     forming_confirm_gaps,
     probe_header,

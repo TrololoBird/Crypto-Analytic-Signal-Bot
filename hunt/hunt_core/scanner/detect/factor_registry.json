@@ -1,0 +1,21 @@
+{
+  "schema_version": "1",
+  "factors": {
+    "book": {"status": "production", "kind": "directional"},
+    "structure": {"status": "production", "kind": "directional"},
+    "funding": {"status": "production", "kind": "directional"},
+    "flow": {"status": "production", "kind": "directional"},
+    "oi_pressure": {"status": "production", "kind": "amplifier"},
+    "compression": {"status": "production", "kind": "amplifier"},
+    "oi_acceleration": {"status": "production", "kind": "directional", "note": "lake col promoted 2026-06-22"},
+    "funding_velocity": {"status": "production", "kind": "directional"},
+    "poc_migration": {"status": "production", "kind": "directional"},
+    "va_contraction": {"status": "production", "kind": "amplifier"},
+    "liquidity_void_path": {"status": "production", "kind": "directional"},
+    "market_maker_trap": {"status": "quarantine", "kind": "amplifier", "note": "live row context; OOS gate pending"},
+    "whale_activity": {"status": "quarantine", "kind": "amplifier", "note": "live row context; OOS gate pending"},
+    "cross_exchange_divergence": {"status": "quarantine", "kind": "directional", "note": "tick row cross_*; lake persist pending"},
+    "cross_funding_consensus": {"status": "quarantine", "kind": "directional", "note": "tick row; lake persist pending"},
+    "spot_futures_pressure": {"status": "quarantine", "kind": "directional", "note": "tick row spot/basis; lake persist pending"}
+  }
+}

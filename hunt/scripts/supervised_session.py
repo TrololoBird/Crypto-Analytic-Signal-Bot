@@ -19,8 +19,11 @@ from pathlib import Path
 
 HUNT = Path(__file__).resolve().parents[1]
 ROOT = HUNT.parent
+sys.path.insert(0, str(HUNT))
+from hunt_core.paths import HUNT_SCAN_JSONL, WATCH_LOG
+
 DATA = HUNT / "data"
-TICK_JSONL = DATA / "dump_minute_watch.jsonl"
+TICK_JSONL = HUNT_SCAN_JSONL
 WATCH_SH = HUNT / "scripts" / "watch.sh"
 PY = ROOT / ".venv/bin/python"
 

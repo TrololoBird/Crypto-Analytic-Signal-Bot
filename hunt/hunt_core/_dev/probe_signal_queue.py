@@ -5,7 +5,7 @@ import asyncio
 import json
 import sys
 
-from hunt_core.analysis.deep.verdict_v2.signal_queue import format_queue_telegram, load_signal_queue
+from hunt_core.deep.verdict_v2.signal_queue import format_queue_telegram, load_signal_queue
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.domain.config import load_settings
 from hunt_core.market.factory import create_hunt_market_plane_from_settings

@@ -5,6 +5,11 @@
 
 [scanner]
 min_quote_volume_usd = 10_000_000
+min_open_interest_usd = 500_000
+min_listing_age_days = 7
+max_recent_volatility_pct = 80.0
+min_change_pct_for_hot = 3.0
+max_hot_coins = 10
 pump_extreme_pct = 15.0
 range_hot_pct = 8.0
 pos_near_high = 0.85
@@ -22,6 +27,11 @@ symbol_tick_timeout_s = 180
 telegram_cooldown_min = 45
 followup_cooldown_min = 5
 max_dynamic_symbols = 12
+# Lite prescan (D1): debounced promotion into Full-tier slots.
+[watch.prescan]
+debounce_s = 90
+merge_cap = 12
+cadence_s = 90
 # Advisory digest: optional periodic summary (additive). 0 = no top-N cap.
 # HUNT_DIGEST_MAX_ENTRIES=0 HUNT_DIGEST_TOP_N=5 HUNT_ADVISORY_MAX_PER_HOUR=0
 # Liquidation burst advisory (P1.9): HUNT_LIQ_BURST_TG=1 to enable cascade radar TG
@@ -52,25 +62,15 @@ hot_range_pct = 60.0
 parabolic_range_pct = 120.0
 parabolic_leg_gain_pct = 80.0
 
-[gate.premature_exhaustion_short]
-# Legacy guard — fusion phase (detect/phase.py) owns PRE/MID; delivery stub is no-op.
-# Keys retained for config loader compatibility only.
-pos_min = 0.85
-bounce_from_low_pct = 15.0
-bounce_from_low_pct_tight = 4.0
-pos_min_tight = 0.92
-fall_from_high_max_pct = 5.0
-squeeze_top_pos_min = 0.85
-squeeze_top_bounce_pct = 4.0
-squeeze_top_fall_max_pct = 8.0
-
 [pinned.defaults]
-symbols = ["BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT"]
-modes = { BTCUSDT = "both", ETHUSDT = "both", XAUUSDT = "both", XAGUSDT = "both" }
+# Canonical 7-coin anchor set (operator decision 2026-06-21). Metals (XAU/XAG) and
+# PAXG carry thin 1w history → higher-TF panel degrades gracefully (documented, not a bug).
+symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUUSDT", "XAGUSDT", "PAXGUSDT"]
+modes = { BTCUSDT = "both", ETHUSDT = "both", SOLUSDT = "both", XRPUSDT = "both", XAUUSDT = "both", XAGUSDT = "both", PAXGUSDT = "both" }
 deep_continuous = true
 hunt_confirm = false
 # Deep /signal uses HUNT_FULL_PREPARE=1 + microstructure for these anchors.
-deep_analysis = { BTCUSDT = true, ETHUSDT = true, XAUUSDT = true, XAGUSDT = true }
+deep_analysis = { BTCUSDT = true, ETHUSDT = true, SOLUSDT = true, XRPUSDT = true, XAUUSDT = true, XAGUSDT = true, PAXGUSDT = true }
 
 [deep.pinned]
 interval_s = 300
@@ -80,12 +80,16 @@ tg_stale_hours = 4
 [hunt.expansion]
 # PRE-PUMP / PRE-DUMP engine — separate from Verdict V2 and fusion delivery.
 enabled = true
-watch_stamp = true
+watch_stamp = false
+# /expand TG operator commands — lab only until expansion_engine retired.
+operator_commands = false
+# Background expansion loops + row stamping — off in production watch.
+lab_runtime = false
 history_persist = true
 history_persist_samples = 40
 history_persist_max_symbols = 64
 runtime_save_interval_s = 300
-review_loop = true
+review_loop = false
 review_interval_s = 3600
 apply_calibration = true
 delta_lookback_bars = 120
@@ -97,15 +101,15 @@ scan_top_n = 50
 state_strong_prob = 0.62
 state_dominance_ratio = 1.20
 state_pivot_prob = 0.45
-# Pinned TG alerts — separate messages from Verdict deep change TG
-tg_pinned_alerts = true
+# Pinned TG alerts — lab only (HUNT_EXPANSION_LAB=1)
+tg_pinned_alerts = false
 tg_on_change = true
 tg_min_quality = 0.45
 tg_min_trigger = 0.50
 tg_stale_hours = 4
 tg_cooldown_min = 45
-# Watch-universe scan alerts (batched digest, excludes pinned anchors)
-tg_universe_scan = true
+# Watch-universe scan alerts — lab only
+tg_universe_scan = false
 tg_universe_interval_s = 900
 tg_universe_top_n = 5
 tg_universe_min_opp = 0.35
@@ -126,6 +130,7 @@ signal_queue_top_n = 3
 signal_queue_tg_footer = true
 signal_queue_tg_batch = true
 signal_queue_tg_min_rank = 2
+signal_queue_ttl_hours = 2.5
 
 [deep.verdict_v2.signal_gates]
 strength_min = 0.50
@@ -170,7 +175,7 @@ min_liquid_qvol_usd = 10_000_000
 
 [delivery]
 # Catalog EV-primary is default; set HUNT_LEGACY_FUEL=1 to restore legacy fuel scoring only.
-ev_primary_default = true
+ev_primary_default = false
 min_ev = 0.0
 min_p_win = 0.42
 min_p_win_forming = 0.35
@@ -218,6 +223,10 @@ cex_dump_buy_share_max = 0.35
 [gate.meme_pump]
 volume_ratio_pump_signature_min = 3.0
 volume_ratio_pump_extreme_min = 5.0
+
+[gate.strategic]
+# move/tradability gates: shadow (log only) until Phase 8 OOS. Set hard=true or HUNT_STRATEGIC_GATES_HARD=1 to block.
+hard = false
 
 [maps]
 enabled = true

@@ -72,7 +72,25 @@ class MapTimeSeriesStore:
             self._symbol_touch_order.append(sym)
             while len(self._symbol_touch_order) > self.cfg.max_symbols:
                 old = self._symbol_touch_order.popleft()
-                self.evict_symbol(old)
+                self._evict_symbol_unlocked(old)
+
+    def _evict_symbol_unlocked(self, symbol: str) -> None:
+        sym = symbol.upper()
+        self._book_history.pop(sym, None)
+        self._liq_by_venue.pop(sym, None)
+        self._vp_snapshots.pop(sym, None)
+        self._last_book_sample.pop(sym, None)
+        self._oi_bars_cache.pop(sym, None)
+        self._liq_estimate_cache.pop(sym, None)
+        try:
+            self._symbol_touch_order.remove(sym)
+        except ValueError:
+            pass
+
+    def evict_symbol(self, symbol: str) -> None:
+        sym = symbol.upper()
+        with self._lock:
+            self._evict_symbol_unlocked(sym)
 
     def cache_oi_bars(self, symbol: str, bars: list[dict[str, Any]], *, ttl_s: float = 300.0) -> None:
         if bars:
@@ -167,20 +185,6 @@ class MapTimeSeriesStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         append_jsonl_lines(path, lines)
         return len(lines)
-
-    def evict_symbol(self, symbol: str) -> None:
-        sym = symbol.upper()
-        with self._lock:
-            self._book_history.pop(sym, None)
-            self._liq_by_venue.pop(sym, None)
-            self._vp_snapshots.pop(sym, None)
-            self._last_book_sample.pop(sym, None)
-            self._oi_bars_cache.pop(sym, None)
-            self._liq_estimate_cache.pop(sym, None)
-            try:
-                self._symbol_touch_order.remove(sym)
-            except ValueError:
-                pass
 
 
 # Module-level singleton for tick path

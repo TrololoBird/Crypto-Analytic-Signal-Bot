@@ -31,21 +31,6 @@ def format_advisory_early(row: dict[str, Any], *, note: str) -> str:
     return f"⏳ <b>{sym}</b> · EARLY advisory\n{note}"
 
 
-def format_liquidation_burst_message(burst: Any) -> str:
-    from hunt_core.detect.probe import format_liquidation_burst_advisory
-
-    return format_liquidation_burst_advisory(burst)
-
-
-def format_ignition_message(ignition: Any, *, history_line: str = "") -> str:
-    from hunt_core.detect.probe import format_ignition_telegram
-
-    msg = format_ignition_telegram(ignition)
-    if history_line:
-        msg = f"{msg}\n<i>{html.escape(history_line)}</i>"
-    return msg
-
-
 def format_pinned_summary(row: dict[str, Any]) -> str:
     sym = str(row.get("symbol") or "").replace("USDT", "-USDT")
     verdict = row.get("pinned_verdict") or row.get("pinned_scenario") or {}
@@ -159,7 +144,7 @@ def _squeeze_direction(
         bull += 2
         evidence.append("Structure: бычий BOS/CHoCH")
 
-    from hunt_core.detect.setup_fields import setup_conviction_pct, setup_p_win
+    from hunt_core.scanner.detect.setup_fields import setup_conviction_pct, setup_p_win
 
     def _side_strength(setup: dict[str, Any], *, direction: str) -> float:
         p = setup_p_win(setup)
@@ -252,8 +237,6 @@ __all__ = [
     "format_advisory_early",
     "format_confirm_strong",
     "format_followup_telegram_message",
-    "format_ignition_message",
-    "format_liquidation_burst_message",
     "format_pinned_summary",
     "format_setup_lines_for_probe",
     "format_squeeze_telegram",

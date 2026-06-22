@@ -67,7 +67,7 @@ class HuntLoadPlanner:
         default_factory=lambda: max(1, int(os.getenv("HUNT_SNAPSHOT_PARALLEL", "6") or 6))
     )
     min_full_slots: int = field(
-        default_factory=lambda: max(len(PINNED_SYMBOLS), int(os.getenv("HUNT_MIN_FULL_SLOTS", "4") or 4))
+        default_factory=lambda: max(1, int(os.getenv("HUNT_MIN_FULL_SLOTS", "4") or 4))
     )
 
     def plan_tick(

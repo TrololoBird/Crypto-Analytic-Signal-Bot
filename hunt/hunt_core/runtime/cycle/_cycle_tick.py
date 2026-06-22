@@ -30,16 +30,13 @@ from hunt_core.errors import defensive_exc_types
 from hunt_core.features.prepare import _prepare_frame
 from hunt_core.features.feature_engine import FeatureExtractError, build_feature_vector
 from hunt_core.features.prepare_columns import book_walls_from_row, feature_vector_from_row
-from hunt_core.market import HuntCcxtClient, HuntCcxtSpotCompanion, HuntCcxtStreams
-from hunt_core.market.cross import attach_cross_fields, merge_ws_cross_into_snapshot
-def promote_initial_pump_lifecycle(*_a, **_k) -> None:
-    # Legacy pump-ignition lifecycle promotion; the fusion phase handles this now.
-    return None
-
-
-def record_delivery_fsm(*_a, **_k) -> None:
-    # Legacy delivery FSM telemetry; removed with the lifecycle FSM.
-    return None
+from hunt_core.shared.market import (
+    HuntCcxtClient,
+    HuntCcxtSpotCompanion,
+    HuntCcxtStreams,
+    attach_cross_fields,
+    merge_ws_cross_into_snapshot,
+)
 from hunt_core.runtime.cycle._cycle_confirm import (
     _advisory_tg_enabled,
     _confirm_blocked_bias_wait,
@@ -48,12 +45,7 @@ from hunt_core.runtime.cycle._cycle_confirm import (
     _should_emit_blocked_telemetry,
     hunt_auto_confirm_blocked,
 )
-from hunt_core.runtime.cycle._cycle_advisory import (
-    _cooldown_ok,
-    _entry_past_tp1,
-    _maybe_send_early_alert,
-    _maybe_send_liq_burst_advisory,
-)
+from hunt_core.runtime.cycle._cycle_advisory import _cooldown_ok, _entry_past_tp1
 from hunt_core.runtime.cycle._cycle_reconcile import (
     _deliver_followup,
     _reconcile_inwatch_active,
@@ -62,23 +54,8 @@ from hunt_core.runtime.cycle._cycle_reconcile import (
 )
 from hunt_core.runtime.state import LOG, SNIPER_CONFIG, WatchMode, SymbolStateStore
 from hunt_core.data.universe import PINNED_SYMBOLS, effective_watch_mode
-def dump_hunt_skip_reason(*_a, **_k) -> str:
-    return "dump_hunt_disabled"  # legacy dump-hunt advisory removed
 
-
-def format_dump_hunt_telegram(*_a, **_k) -> str:
-    return ""
-
-
-async def maybe_send_dump_hunt_telegram(*_a, **_k) -> bool:
-    return False
-
-
-def early_telegram_enabled(*_a, **_k) -> bool:
-    return False  # legacy early/ignition advisory removed
-
-
-from hunt_core.detect.routing import resolve_delivery_mode, route_tick
+from hunt_core.scanner.detect.routing import resolve_delivery_mode, route_tick
 from hunt_core.track.events import append_signal_event, record_funnel_stage, record_lifecycle_funnel
 from hunt_core.track.candidates import (
     load_setup_candidates_state,
@@ -105,37 +82,25 @@ from hunt_core.runtime.tick_assembly import hot_tick_symbol, snapshot_symbol
 from hunt_core.data.lake import FeatureLakeWriter
 
 
-def _record_outcome_ledger(
-    *,
-    symbol: str,
-    direction: str,
-    row: dict[str, Any],
-    setup: dict[str, Any] | None = None,
-    delivered: bool = False,
-    blockers: list[str] | None = None,
-    event: str = "blocked",
-) -> None:
-    from hunt_core.track.outcome_ledger import append_ledger_event, build_ledger_record
+from hunt_core.runtime.cycle._cycle_ledger import record_outcome_ledger as _record_outcome_ledger
 
+
+def _closed_bar_ts(prepared: Any) -> str | None:
+    """Closed (penultimate) 15m bar close_time as a stable per-bar key.
+
+    The feature lake must store one row per *closed* bar, not one per intra-bar
+    tick — otherwise the robust-z distribution and magnitude history that the
+    fusion gate compares against are built from ~30 forming-bar samples per bar.
+    """
+    work = getattr(prepared, "work_15m", None)
+    if work is None:
+        return None
+    if getattr(work, "height", 0) < 2 or "close_time" not in getattr(work, "columns", []):
+        return None
     try:
-        record = build_ledger_record(
-            symbol=symbol,
-            direction=direction,
-            event=event,
-            row=row,
-            setup=setup,
-            blockers=blockers,
-            delivered=delivered,
-        )
-        append_ledger_event(record)
-    except Exception as exc:
-        LOG.warning(
-            "outcome_ledger_failed | symbol=%s direction=%s event=%s error=%s",
-            symbol,
-            direction,
-            event,
-            exc,
-        )
+        return str(work.item(-2, "close_time"))
+    except Exception:
+        return None
 
 
 async def run_tick(
@@ -373,18 +338,30 @@ async def run_tick(
                     )
                     rows.append(row)
                     continue
-                if feature_lake is not None and _tier_for(symbol) == "full":
-                    if symbol in PINNED_SYMBOLS:
-                        pass
-                    else:
+                if (
+                    feature_lake is not None
+                    and _tier_for(symbol) == "full"
+                    and symbol not in PINNED_SYMBOLS
+                ):
+                    prepared_obj = row.get("_prepared")
+                    closed_bar_ts = _closed_bar_ts(prepared_obj)
+                    lake_key = f"{symbol}:lake_bar"
+                    # One lake row per CLOSED 15m bar (not per intra-bar tick), built
+                    # from closed-bar values only — keeps the fusion reference
+                    # distribution causal and un-oversampled (Phase 0.1).
+                    if closed_bar_ts is not None and state.get(lake_key) != closed_bar_ts:
                         try:
                             vector = build_feature_vector(
-                                row.get("_prepared"),
+                                prepared_obj,
                                 row,
                                 symbol=symbol,
                                 tf="15m",
+                                require_closed=True,
                             )
-                            feature_lake.enqueue(symbol, str(row.get("ts")), "15m", vector.to_dict())
+                            feature_lake.enqueue(
+                                symbol, str(row.get("ts")), "15m", vector.to_dict()
+                            )
+                            state[lake_key] = closed_bar_ts
                         except FeatureExtractError as exc:
                             LOG.warning(
                                 "feature_lake_enqueue_skipped",
@@ -429,13 +406,12 @@ async def run_tick(
                     row["ignition"] = ignition_by_sym[symbol]
                 if prescan_outlier_by_sym and symbol in prescan_outlier_by_sym:
                     row["prescan_outlier"] = prescan_outlier_by_sym[symbol]
-                promote_initial_pump_lifecycle(row, symbol=symbol)
                 if pump_stats_by_sym and symbol in pump_stats_by_sym:
                     row["pump_history"] = pump_stats_by_sym[symbol]
                 dump = row.get("dump") or {}
                 long_setup = row.get("long") or {}
                 from hunt_core.data.frame_cache import get_frame_cache
-                from hunt_core.detect.setup_fields import setup_conviction_pct
+                from hunt_core.scanner.detect.setup_fields import setup_conviction_pct
 
                 lifecycle_raw = row.get("lifecycle") or (dump.get("lifecycle") if dump else None)
                 get_frame_cache().mark_priority(
@@ -454,20 +430,8 @@ async def run_tick(
                         "hot_delta",
                         "hot_bootstrap",
                         "hot_carry",
-                    } and dump.get(
-                        "confirmed"
-                    ):
-                        from hunt_core.deliver.dispatch import shadow_full_lane_recheck
-
-                        shadow_full_lane_recheck(
-                            row,
-                            direction="short",
-                            setup=dump,
-                            lifecycle=lifecycle_raw if isinstance(lifecycle_raw, dict) else None,
-                            symbol=symbol,
-                            broadcaster=broadcaster,
-                            send_telegram=False,
-                        )
+                    }:
+                        pass  # hot→full path unified under fusion delivery
                 get_frame_cache().set_last_tick_path(
                     symbol, str(row.get("tick_path") or "")
                 )
@@ -489,7 +453,7 @@ async def run_tick(
                         lifecycle_bias=last_bias[symbol],
                     )
                     row["watch_mode"] = mode
-                from hunt_core.detect.setup_fields import setup_conviction_pct
+                from hunt_core.scanner.detect.setup_fields import setup_conviction_pct
 
                 def _tick_conviction(setup: dict[str, Any]) -> float:
                     if not setup:
@@ -585,15 +549,6 @@ async def run_tick(
                         squeeze=sq if cand_dir == "short" or sq else None,
                         ignition=ignited,
                         forming=not bool(cand_setup.get("confirmed")),
-                    )
-                    record_delivery_fsm(
-                        symbol,
-                        cand_dir,  # type: ignore[arg-type]
-                        cand_setup,
-                        tracker_active=bool(
-                            (tracker_state.get("signals") or {}).get(f"{symbol}:{cand_dir}")
-                        ),
-                        state=symbol_state,
                     )
                 kline_events = await _reconcile_inwatch_active(
                     client, tracker_state, symbol=symbol, now=now
@@ -696,16 +651,6 @@ async def run_tick(
                                 message_id=result.message_id,
                             )
 
-                if ws_feed is not None and _tier_for(symbol) == "full":
-                    await _maybe_send_liq_burst_advisory(
-                        broadcaster,
-                        symbol=symbol,
-                        ws_feed=ws_feed,
-                        state=state,
-                        now=now,
-                        send_telegram=send_telegram,
-                    )
-
                 pend = notify_pending.get(symbol)
                 if (
                     pend
@@ -716,7 +661,7 @@ async def run_tick(
                     ndir = str(pend.get("direction") or "short")
                     nsetup = dump if ndir == "short" else long_setup
                     lc_dict = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
-                    from hunt_core.detect.setup_fields import setup_conviction_pct, setup_meets_strength
+                    from hunt_core.scanner.detect.setup_fields import setup_conviction_pct, setup_meets_strength
 
                     nconviction = setup_conviction_pct(nsetup or {}, direction=ndir)
                     nphase = str((nsetup or {}).get("phase") or "")
@@ -803,7 +748,7 @@ async def run_tick(
                                     payload={
                                         "gate": gate.code,
                                         "phase": str(lc_dict.get("phase") or ""),
-                                        "fuel": nfuel,
+                                        "fuel": nconviction,
                                     },
                                 )
                             if not unified_cooldown_ok(
@@ -847,130 +792,6 @@ async def run_tick(
                                     direction=ndir,
                                     message_id=notify_result.message_id,
                                 )
-                    elif (
-                        _advisory_tg_enabled()
-                        and (forming_ready or phase_ready)
-                        and ndir == "short"
-                        and early_telegram_enabled(symbol)
-                    ):
-                        price_now = _refresh_live_price(
-                            row, ws_feed=ws_feed, symbol=symbol
-                        )
-                        if _entry_past_tp1(nsetup, direction=ndir, price=price_now):
-                            LOG.info(
-                                "signal_notify_skipped_past_tp1",
-                                symbol=symbol,
-                                direction=ndir,
-                                price=price_now,
-                            )
-                        else:
-                            tier: str = (
-                                "likely" if bool(nsetup.get("confirmed")) else
-                                "armed" if setup_meets_strength(
-                                    nsetup or {}, direction=ndir, symbol=symbol, tier="confirm"
-                                ) else
-                                "prep"
-                            )
-                            skip = dump_hunt_skip_reason(
-                                symbol=symbol,
-                                tier=tier,  # type: ignore[arg-type]
-                                price=price_now,
-                                setup=nsetup,
-                                lifecycle=lc_dict,
-                                now=now,
-                                price_stale=bool(row.get("price_stale")),
-                            )
-                            if skip:
-                                LOG.debug(
-                                    "signal_notify_skipped",
-                                    symbol=symbol,
-                                    reason=skip,
-                                    tier=tier,
-                                )
-                            elif f"{symbol}:{ndir}" in advisory_sent_tick:
-                                LOG.debug(
-                                    "signal_notify_skipped",
-                                    symbol=symbol,
-                                    reason="advisory_sent_same_tick",
-                                    tier=tier,
-                                )
-                            elif not unified_cooldown_ok(
-                                state,
-                                symbol=symbol,
-                                direction=ndir,
-                                stage="dump_hunt",
-                                now=now,
-                            ):
-                                LOG.debug(
-                                    "signal_notify_skipped",
-                                    symbol=symbol,
-                                    reason="unified_cooldown",
-                                    tier=tier,
-                                )
-                            else:
-                                imp = row.get("impulse") or {}
-                                notify_msg = format_dump_hunt_telegram(
-                                    symbol=symbol,
-                                    tier=tier,  # type: ignore[arg-type]
-                                    price=price_now,
-                                    setup=nsetup,
-                                    lifecycle=lc_dict,
-                                    chg_24h=float(row.get("chg_24h_pct") or 0),
-                                    impulse_low=float(
-                                        row.get("impulse_low")
-                                        or imp.get("hunt_low")
-                                        or 0
-                                    ),
-                                    atr15=float(
-                                        ((row.get("timeframes") or {}).get("15m") or {}).get("atr14")
-                                        or 0
-                                    ),
-                                    note=f"forming · {nphase} · fuel {nfuel:.0f}",
-                                )
-                                sent = await maybe_send_dump_hunt_telegram(
-                                    broadcaster,
-                                    symbol=symbol,
-                                    tier=tier,  # type: ignore[arg-type]
-                                    message=notify_msg,
-                                    now=now,
-                                    price=price_now,
-                                    setup=nsetup,
-                                    lifecycle=lc_dict,
-                                )
-                                if sent and advisory_digest_enabled():
-                                    get_advisory_digest().enqueue(
-                                        symbol=symbol,
-                                        direction=ndir,
-                                        tier=tier,
-                                        score=nfuel,
-                                        change_24h_pct=float(row.get("chg_24h_pct") or 0),
-                                        phase=nphase,
-                                        note=f"forming · fuel {nfuel:.0f}",
-                                    )
-                                if sent:
-                                    mark_unified_sent(
-                                        state,
-                                        symbol=symbol,
-                                        direction=ndir,
-                                        stage="dump_hunt",
-                                        now=now,
-                                    )
-                                    advisory_sent_tick.add(f"{symbol}:{ndir}")
-                                    LOG.info(
-                                        "signal_notify_forming_sent",
-                                        symbol=symbol,
-                                        direction=ndir,
-                                        tier=tier,
-                                        phase=nphase,
-                                        fuel=nfuel,
-                                    )
-                                    append_signal_event(
-                                        "forming_notify",
-                                        symbol=symbol,
-                                        direction=ndir,
-                                        detail=nphase,
-                                        payload={"fuel": nfuel, "tier": tier},
-                                    )
 
                 if send_telegram and broadcaster is not None and not row.get("error"):
                     routed_dirs = {
@@ -990,14 +811,14 @@ async def run_tick(
                             lifecycle_raw=lifecycle_raw,
                             now=now,
                         )
-                        from hunt_core.detect.setup_fields import ev_primary_delivery_qualified
+                        from hunt_core.scanner.detect.setup_fields import ev_primary_delivery_qualified
 
                         _ev_primary_live = ev_primary_delivery_qualified(
                             setup,
                             direction=direction,
                             symbol=symbol,
                         )
-                        from hunt_core.detect.delivery_support import mission_delivery_block
+                        from hunt_core.scanner.detect.delivery_support import mission_delivery_block
 
                         _lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
                         _lc_phase = str(_lc.get("phase") or "")
@@ -1128,14 +949,6 @@ async def run_tick(
                                         max=HUNT_SNIPER_TOP_LS_MAX,
                                     )
                                     continue
-                        from hunt_core.detect.probe import prepare_anticipation_delivery
-
-                        prepare_anticipation_delivery(
-                            row,
-                            setup,
-                            direction=direction,
-                            ws_feed=ws_feed,
-                        )
                         from hunt_core.runtime.cycle._delivery import is_armed_setup, is_confirmed_setup
 
                         confirmed_setup = is_confirmed_setup(setup)
@@ -1180,6 +993,7 @@ async def run_tick(
                                 )
                                 and _cooldown_ok(symbol, direction, state, now=now)
                             ):
+                                from hunt_core.scanner.delivery.lab import send_lane_html
                                 from hunt_core.deliver.templates import format_telegram_confirm
 
                                 msg = format_telegram_confirm(
@@ -1188,7 +1002,12 @@ async def run_tick(
                                     confirm_reasons=setup.get("confirm_hard") or [],
                                     delivery_tier="armed",
                                 )
-                                result = await broadcaster.send_html(msg)
+                                result = await send_lane_html(
+                                    broadcaster,
+                                    msg,
+                                    setup=setup,
+                                    row=row,
+                                )
                                 if result.status == "sent":
                                     from hunt_core.track.events import record_sent_delivery
 
@@ -1222,23 +1041,6 @@ async def run_tick(
                                     )
                                     tg_confirm_sent_this_tick = True
                                     continue
-                        if (
-                            send_telegram
-                            and broadcaster is not None
-                            and not confirmed_setup
-                        ):
-                            if await _maybe_send_early_alert(
-                                broadcaster,
-                                symbol=symbol,
-                                direction=direction,
-                                setup=setup,
-                                row=row,
-                                lifecycle_raw=lifecycle_raw,
-                                state=state,
-                                mode=mode,
-                                now=now,
-                            ):
-                                advisory_sent_tick.add(f"{symbol}:{direction}")
                         if confirmed_setup and _confirm_delivery_suppressed(
                             tracker_state,
                             state,
@@ -1375,7 +1177,7 @@ async def run_tick(
                             row=row,
                             sniper_config=SNIPER_CONFIG,
                         ).ok:
-                            from hunt_core.detect.setup_fields import setup_conviction_pct, setup_meets_strength
+                            from hunt_core.scanner.detect.setup_fields import setup_conviction_pct, setup_meets_strength
 
                             lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
                             conviction = setup_conviction_pct(setup, direction=direction)
@@ -1515,6 +1317,7 @@ async def run_tick(
                                 reason=gate.code if not gate.ok else "stale_tier",
                             )
                             continue
+                        from hunt_core.scanner.delivery.lab import send_lane_html
                         from hunt_core.deliver.templates import format_telegram_confirm
 
                         msg = format_telegram_confirm(
@@ -1523,7 +1326,12 @@ async def run_tick(
                             confirm_reasons=setup.get("confirm_hard") or [],
                             delivery_tier=delivery_tier,
                         )
-                        result = await broadcaster.send_html(msg)
+                        result = await send_lane_html(
+                            broadcaster,
+                            msg,
+                            setup=setup,
+                            row=row,
+                        )
                         key = f"{symbol}:{direction}"
                         if result.status == "sent":
                             from hunt_core.track.events import record_sent_delivery

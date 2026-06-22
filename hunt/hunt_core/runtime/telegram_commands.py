@@ -140,8 +140,8 @@ class HuntTelegramCommands:
                     f"⏳ <b>/analyze {sym_label}</b> — сценарий + уровни…"
                 )
                 from hunt_core.runtime.deep_assembly import assemble_deep_tick
-                from hunt_core.analysis.deep.build import build_deep_report
-                from hunt_core.analysis.deep.format_telegram import format_deep_analysis_telegram
+                from hunt_core.deep.build import build_deep_report
+                from hunt_core.deep.format_telegram import format_deep_analysis_telegram
 
                 row = await assemble_deep_tick(sym, self._client, stagger_ms=250)
                 if row.get("error"):
@@ -170,6 +170,17 @@ class HuntTelegramCommands:
 
     async def _handle_expand(self, chat_id: int, parts: list[str]) -> None:
         """Expansion Engine — /expand BTC | scan | stats | calibrate | review."""
+        from hunt_core.analysis.expansion_engine.config import load_expansion_config
+
+        exp_cfg = load_expansion_config()
+        if not exp_cfg.enabled or not exp_cfg.operator_commands:
+            await self._send(
+                chat_id,
+                "ℹ️ <code>/expand</code> отключён (lab-only). "
+                "Включи <code>operator_commands</code> или "
+                "<code>HUNT_EXPANSION_OPERATOR=1</code>.",
+            )
+            return
         if parts:
             sub = parts[0].lower()
             if sub in {"scan", "top", "list"}:

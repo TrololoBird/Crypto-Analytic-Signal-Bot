@@ -1,6 +1,5 @@
-"""Deep analysis facade — fusion, verdicts, forecasts for /signal."""
-from __future__ import annotations
+"""Deprecated shim — import from hunt_core.deep instead."""
+from hunt_core.deep.build import DeepAnalysis, build_deep_analysis, build_deep_report
+from hunt_core.deep.verdict_v2.orchestrator import build_scenario_verdict
 
-from hunt_core.analysis.deep.build import DeepAnalysis, build_deep_analysis, build_deep_report
-
-__all__ = ["DeepAnalysis", "build_deep_analysis", "build_deep_report"]
+__all__ = ["DeepAnalysis", "build_deep_analysis", "build_deep_report", "build_scenario_verdict"]

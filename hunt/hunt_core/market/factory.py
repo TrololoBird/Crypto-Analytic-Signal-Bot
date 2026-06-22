@@ -498,8 +498,8 @@ class HuntMarketPlane:
             await self.spot.close()
         except Exception:
             pass
-        # Brief yield so aiohttp/CCXT Pro sessions finish teardown (avoids Unclosed client session).
-        await asyncio.sleep(0.5)
+        # Yield so aiohttp/CCXT Pro sessions finish teardown (avoids Unclosed client session).
+        await asyncio.sleep(1.5)
 
     async def close(self) -> None:
         """Alias for ``aclose()`` — matches probe/smoke call sites."""

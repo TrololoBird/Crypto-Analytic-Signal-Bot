@@ -7,9 +7,9 @@ import unittest
 import numpy as np
 import polars as pl
 
-from hunt_core.detect import calibrate as C
-from hunt_core.detect import fusion as Fz
-from hunt_core.detect.factors import DIRECTIONAL, FactorScore
+from hunt_core.scanner.detect import calibrate as C
+from hunt_core.scanner.detect import fusion as Fz
+from hunt_core.scanner.detect.factors import DIRECTIONAL, FactorScore
 
 
 class TestRobustZ(unittest.TestCase):

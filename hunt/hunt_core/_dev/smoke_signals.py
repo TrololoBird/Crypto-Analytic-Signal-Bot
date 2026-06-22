@@ -19,7 +19,7 @@ DEFAULT_SYMBOLS = (
 
 
 def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
-    from hunt_core.gate._ev import setup_conviction_pct
+    from hunt_core.scanner.gate._ev import setup_conviction_pct
 
     lc = row.get("lifecycle") or {}
     dump = row.get("dump") or {}

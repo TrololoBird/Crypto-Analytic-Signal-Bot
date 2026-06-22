@@ -19,10 +19,10 @@ from pathlib import Path
 
 import polars as pl
 
-from hunt_core.detect import build_detection
-from hunt_core.detect import factors as F
-from hunt_core.detect.fusion import fuse
-from hunt_core.detect.windows import build_window
+from hunt_core.scanner.detect import build_detection
+from hunt_core.scanner.detect import factors as F
+from hunt_core.scanner.detect.fusion import fuse
+from hunt_core.scanner.detect.windows import build_window
 from hunt_core.paths import LAKE_PARQUET
 
 

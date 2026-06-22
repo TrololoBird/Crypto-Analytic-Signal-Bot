@@ -83,6 +83,24 @@ def append_ledger_event(record: dict[str, Any], *, path: Path | None = None) -> 
         fh.write(json.dumps(row, default=str) + "\n")
 
 
+def _setup_geometry(setup: dict[str, Any] | None) -> dict[str, Any]:
+    """Trade geometry for deliver and block rows (counterfactual replay)."""
+    s = setup if isinstance(setup, dict) else {}
+    entry = s.get("entry") or s.get("entry_price") or s.get("entry_mid")
+    zone = s.get("entry_zone")
+    if zone is None and entry is not None:
+        zone = {"mid": entry, "low": s.get("entry_low"), "high": s.get("entry_high")}
+    return {
+        "entry": entry,
+        "entry_zone": zone,
+        "stop_loss": s.get("stop_loss") or s.get("sl"),
+        "tp1": s.get("tp1"),
+        "tp2": s.get("tp2"),
+        "tp3": s.get("tp3"),
+        "risk_reward": s.get("risk_reward"),
+    }
+
+
 def build_ledger_record(
     *,
     symbol: str,
@@ -101,12 +119,16 @@ def build_ledger_record(
     forecast = (row or {}).get("maps_forecast") if isinstance((row or {}).get("maps_forecast"), dict) else {}
     factors = fusion.get("factors") or []
     top5 = factors[:5] if isinstance(factors, list) else []
+    quarantine = (setup or {}).get("quarantine_factors")
+    if not isinstance(quarantine, dict):
+        quarantine = {}
     authority = build_authority_snapshot(
         setup=setup,
         row=row,
         blockers=blockers,
         delivered=delivered,
     )
+    geometry = _setup_geometry(setup)
     return {
         "symbol": str(symbol).upper(),
         "direction": str(direction).lower(),
@@ -116,6 +138,7 @@ def build_ledger_record(
         "fusion_score": fusion.get("primary_score") or (setup or {}).get("fusion_score"),
         "oi_regime": fusion.get("oi_regime"),
         "factors_top5": top5,
+        "quarantine_factors": dict(quarantine),
         "lifecycle_phase": lc.get("phase"),
         "phase_fusion": lc.get("phase_fusion") or lc.get("phase"),
         "mission_ok": not bool(blockers and any("mission" in str(b) for b in blockers)),
@@ -133,7 +156,53 @@ def build_ledger_record(
             else None
         ),
         **authority,
+        **geometry,
+        "counterfactual": not delivered,
     }
+
+
+_CANDIDATE_LEDGER_DEDUPE: dict[str, str] = {}
+
+
+def maybe_append_candidate_ledger(
+    *,
+    symbol: str,
+    direction: str,
+    row: dict[str, Any],
+    setup: dict[str, Any] | None,
+) -> None:
+    """P0-E candidate lane — geometry to ledger without delivery (one row per bar)."""
+    s = setup if isinstance(setup, dict) else {}
+    if s.get("confirmed"):
+        return
+    if s.get("stop_loss") is None or s.get("tp1") is None:
+        return
+    sym = str(symbol or "").upper()
+    direc = str(direction or "").lower()
+    if not sym or direc not in {"long", "short"}:
+        return
+    bar_key = str(
+        row.get("bar_close_ts")
+        or row.get("snapshot_ts")
+        or row.get("ts")
+        or ""
+    )
+    dedupe = f"{sym}:{direc}:{bar_key}"
+    if _CANDIDATE_LEDGER_DEDUPE.get(f"{sym}:{direc}") == dedupe:
+        return
+    blockers = [str(s.get("gate_reason") or "candidate_forming")]
+    record = build_ledger_record(
+        symbol=sym,
+        direction=direc,
+        event="candidate",
+        row=row,
+        setup=s,
+        blockers=blockers,
+        delivered=False,
+    )
+    record["lane"] = "candidate"
+    append_ledger_event(record)
+    _CANDIDATE_LEDGER_DEDUPE[f"{sym}:{direc}"] = dedupe
 
 
 def append_outcome_horizon(
@@ -164,4 +233,5 @@ __all__ = [
     "append_outcome_horizon",
     "build_authority_snapshot",
     "build_ledger_record",
+    "maybe_append_candidate_ledger",
 ]

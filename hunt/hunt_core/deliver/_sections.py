@@ -107,7 +107,7 @@ def format_mtf_section(
     lines.append("")
     lines.append(f"🎯 <b>MTF bias:</b> {dom_ru} <i>(контекст)</i>")
 
-    from hunt_core.detect.probe import hunt_confirmed_direction
+    from hunt_core.scanner.detect.probe import hunt_confirmed_direction
 
     hunt_conf = hunt_confirmed_direction(row or {})
     if hunt_conf == "short":
@@ -641,8 +641,8 @@ def format_pinned_deep_analysis(row: dict[str, Any]) -> str:
     if not sym:
         return ""
     try:
-        from hunt_core.analysis.deep.build import build_deep_report
-        from hunt_core.analysis.deep.format_telegram import format_deep_analysis_telegram
+        from hunt_core.deep.build import build_deep_report
+        from hunt_core.deep.format_telegram import format_deep_analysis_telegram
 
         analysis = build_deep_report(row, include_watch_appendix=False)
         return format_deep_analysis_telegram(analysis)

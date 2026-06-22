@@ -1,64 +1,48 @@
-# Hunt fusion migration — implementation status
+# Hunt Two-Module Rebuild — implementation status
 
-> Spec: [`ENGINE_DESIGN.md`](ENGINE_DESIGN.md) · Params: [`FUSION_PARAMS.md`](FUSION_PARAMS.md)
+> Canon: **Module 1 = Deep** · **Module 2 = Scanner** · Plan: `abstract-chasing-cerf.md`
 
-## Honest scope
+## Summary (2026-06-22)
 
-**Threshold-free detection is impossible.** Self-calibration removes market-tuned constants
-(RSI 66, fall 3%) and replaces them with distribution-relative statistics plus an explicit
-small parameter set in `[fusion]` / `detect/config.py`.
+**Plan complete.** All phases landed; runtime-soak (OOS factor promotion, god-object splits) accrues via live watch only.
 
-**`fusion_score` is not P(win).** Calibrated delivery probability comes from geometry/catalog
-EV (`delivery_p_win`) when levels exist; fusion outputs a 0–100 strength index only.
+## Phase completion
 
-## Fusion engine (complete)
+| Phase | Status |
+|-------|--------|
+| 0–1 Shared + lint | **done** |
+| 2 Scanner consolidation | **done** |
+| 2A Feature facts | **done** — 11 production + 5 quarantine factors |
+| 2B Indicator prune | **done** |
+| 3 Deep independence | **done** |
+| 4 Legacy eradication | **done** |
+| 5 Telegram macquettes | **done** |
+| 6 Canonical numbering | **done** |
+| 7 Docs overhaul | **done** |
+| 8 Calibration + OOS | **done** |
+| 9 Remaining debt | **done** (docs + LOC) — god-object splits optional maintenance while budget green |
 
-| Phase | Status | Notes |
-|-------|--------|-------|
-| 1 calibrate + windows | done | `detect/calibrate.py`, `detect/windows.py` |
-| 2 factors + BB ddof=1 | done | six factors; `pivots.py` sample std |
-| 3 fusion + phase + result | done | `build_detection`, PRE/MID by CUSUM band |
-| 4 replay harness | done | `_dev/replay_fusion.py` (no lookahead) |
-| 5–7 live wiring | done | `tick_assembly` → fusion always-on; legacy scan/FSM deleted |
-| 6 deep path | done | `detect/deep/*`; pinned `/signal` via `build_deep_report_from_lake` |
-| 8 cleanup | done | `market_cycle.py`, `config.defaults.toml [fusion]`, pruned `UNIVERSAL_DEFAULTS` |
+## P0 / P0'
 
-## Architecture (current)
+All items **done**, including:
+- Cross-module arbiter (`shared/delivery/cross_module.py`)
+- Max RR 10R in contract
+- Deep signal queue TTL 2.5h (`signal_queue_ttl_hours`)
+- Expansion lab body moved to `_dev/expansion_lab/` (shims at `analysis/expansion_engine/`)
 
+## Fusion factors
+
+**Production (11):** `book`, `structure`, `funding`, `flow`, `oi_pressure`, `compression`, `oi_acceleration`, `funding_velocity`, `poc_migration`, `va_contraction`, `liquidity_void_path`
+
+**Quarantine (5):** `market_maker_trap`, `whale_activity`, `cross_exchange_divergence`, `cross_funding_consensus`, `spot_futures_pressure`
+
+## Verification
+
+```bash
+bash hunt/scripts/verify_hunt_rebuild.sh
 ```
-features/lake → detect/live → detect/delivery_bridge → validate_signal_contract → gate/delivery → deliver/*
-```
 
-- **Detection:** self-calibrating fusion (`detect/*`) — no magic RSI/OI/funding thresholds.
-- **Delivery:** preserved declarative gates (`gate/*`, `deliver/*`) — liquidity, EV, RR, contract.
-- **Deep query:** `detect/deep` (any phase, no watch gate).
+## Live soak (ongoing, not blocking)
 
-## Verification (automated)
-
-| Check | Command |
-|-------|---------|
-| compile | `python -m py_compile $(find hunt_core -name '*.py')` |
-| fusion smoke | `python -m hunt_core._dev.check_factors_fusion` |
-| logic | `python -m hunt_core._dev.check_logic` |
-| deep | `python -m hunt_core._dev.check_deep` |
-| replay | `python -m hunt_core._dev.replay_fusion --all --q-gate 0.92 --walk-forward 0.3` |
-| CCXT plane | `python -m hunt_core._dev.check_ccxt` |
-
-## Ops (manual)
-
-| Step | Status |
-|------|--------|
-| Supervised live session | `scripts/supervised_session.py` — run after deploy |
-| Parity vs old stack | waived — legacy path removed; replay is sole offline metric |
-| graphify update | run at repo root when refreshing architecture graphs |
-
-## Removed (phase-7)
-
-- `scan/{prepump,predump,presqueeze,early,predump_dump_hunt,scoring,routing,_confirm_shared,pump_cycle,detectors}.py`
-- `regime/{leg_fsm,_lifecycle_assess,_lifecycle_sticky}.py`
-- `HUNT_FUSION_ENGINE` flag (engine is always on)
-
-## Preserved
-
-- `gate/delivery.py` + declarative delivery stack (not detection scoring)
-- `market/*`, `features/*`, `data/lake.py`, `contract.py`, `deliver/*`
+- Ledger accrual → OOS promotion of quarantine factors (`need_n=172`)
+- God-object splits when LOC pressure returns

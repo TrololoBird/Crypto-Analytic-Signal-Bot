@@ -22,7 +22,7 @@ OUT_PATH = TICK_JSONL
 STATE_PATH = TELEGRAM_COOLDOWN
 
 SNIPER_CONFIG = SniperConfig.from_env()
-LOG = configure_script_logging("scripts.dump_minute_watch")
+LOG = configure_script_logging("hunt.watch")
 STOP = False
 
 

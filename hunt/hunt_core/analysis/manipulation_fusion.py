@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from hunt_core.maps.oi import OiRegime, oi_regime_from_row
 
-Archetype = Literal["predump_short", "coil_long", "ignition_long", "none"]
+Archetype = Literal["predump_short", "prepump_long", "ignition_long", "none"]
 
 _PREDUMP_PHASES = frozenset({"exhaustion_at_high", "distribution", "dump_initiating"})
 _COIL_PHASES = frozenset({"accumulation", "breakout_arming", "recovery"})

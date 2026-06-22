@@ -15,17 +15,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from hunt_core.analysis.expansion_engine.blocks import (
+from hunt_core._dev.expansion_lab.blocks import (
     breakout_failure,
     fractal_alignment,
     liquidity_vacuum,
     wyckoff_signals,
 )
-from hunt_core.analysis.expansion_engine.expansion.orchestrator import build_expansion_opportunity
-from hunt_core.analysis.expansion_engine.history import global_history
-from hunt_core.analysis.expansion_engine.ranking.opportunity_score import compute_opportunity_score
-from hunt_core.analysis.expansion_engine.state_machine import global_state_machine
-from hunt_core.analysis.expansion_engine.types import BlockContext
+from hunt_core._dev.expansion_lab.expansion.orchestrator import build_expansion_opportunity
+from hunt_core._dev.expansion_lab.history import global_history
+from hunt_core._dev.expansion_lab.ranking.opportunity_score import compute_opportunity_score
+from hunt_core._dev.expansion_lab.state_machine import global_state_machine
+from hunt_core._dev.expansion_lab.types import BlockContext
 
 
 def _reset() -> None:
@@ -236,7 +236,7 @@ def _imports_referencing(py: Path, needle: str) -> bool:
 def check_rotation_scan() -> int:
     """Universe scan folds cross-universe rotation into OpportunityScore."""
     _reset()
-    from hunt_core.analysis.expansion_engine import rank_universe
+    from hunt_core._dev.expansion_lab import rank_universe
 
     hot = _pre_pump_row(activation_pct=1.0)
     hot["symbol"] = "HOTUSDT"
@@ -259,11 +259,11 @@ def check_rotation_scan() -> int:
 def check_from_dict_roundtrip() -> int:
     """Stamped expansion dict round-trips and scan fast-path matches."""
     _reset()
-    from hunt_core.analysis.expansion_engine.expansion.orchestrator import (
+    from hunt_core._dev.expansion_lab.expansion.orchestrator import (
         build_expansion_opportunity,
         opportunity_from_row,
     )
-    from hunt_core.analysis.expansion_engine.types import ExpansionOpportunity
+    from hunt_core._dev.expansion_lab.types import ExpansionOpportunity
 
     row = _pre_pump_row(activation_pct=1.0)
     built = build_expansion_opportunity(row)
@@ -289,9 +289,9 @@ def check_history_persist() -> int:
     from pathlib import Path
     from unittest.mock import patch
 
-    from hunt_core.analysis.expansion_engine.config import ExpansionConfig
-    from hunt_core.analysis.expansion_engine.history import global_history
-    from hunt_core.analysis.expansion_engine.runtime_state import (
+    from hunt_core._dev.expansion_lab.config import ExpansionConfig
+    from hunt_core._dev.expansion_lab.history import global_history
+    from hunt_core._dev.expansion_lab.runtime_state import (
         load_expansion_runtime_state,
         save_expansion_runtime_state,
     )
@@ -310,13 +310,13 @@ def check_history_persist() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         state_path = Path(tmp) / "expansion_runtime_state.json"
         with patch(
-            "hunt_core.analysis.expansion_engine.runtime_state.EXPANSION_RUNTIME_STATE_JSON",
+            "hunt_core._dev.expansion_lab.runtime_state.EXPANSION_RUNTIME_STATE_JSON",
             state_path,
         ), patch(
-            "hunt_core.analysis.expansion_engine.runtime_state.load_expansion_config",
+            "hunt_core._dev.expansion_lab.runtime_state.load_expansion_config",
             return_value=cfg,
         ), patch(
-            "hunt_core.analysis.expansion_engine.runtime_state._persist_symbols",
+            "hunt_core._dev.expansion_lab.runtime_state._persist_symbols",
             return_value={"HISTUSDT"},
         ):
             save_expansion_runtime_state()
@@ -341,11 +341,11 @@ def check_fsm_persist() -> int:
     from pathlib import Path
     from unittest.mock import patch
 
-    from hunt_core.analysis.expansion_engine.runtime_state import (
+    from hunt_core._dev.expansion_lab.runtime_state import (
         load_expansion_runtime_state,
         save_expansion_runtime_state,
     )
-    from hunt_core.analysis.expansion_engine.state_machine import (
+    from hunt_core._dev.expansion_lab.state_machine import (
         ExpansionStateMachine,
         global_state_machine,
     )
@@ -361,7 +361,7 @@ def check_fsm_persist() -> int:
         state_path = Path(tmp) / "expansion_runtime_state.json"
         state_path.write_text(json.dumps({"fsm": snap}), encoding="utf-8")
         with patch(
-            "hunt_core.analysis.expansion_engine.runtime_state.EXPANSION_RUNTIME_STATE_JSON",
+            "hunt_core._dev.expansion_lab.runtime_state.EXPANSION_RUNTIME_STATE_JSON",
             state_path,
         ):
             global_state_machine().clear()
@@ -386,8 +386,8 @@ def check_universe_scan() -> int:
     from pathlib import Path
     from unittest.mock import patch
 
-    from hunt_core.analysis.expansion_engine.config import ExpansionConfig
-    from hunt_core.analysis.expansion_engine.types import (
+    from hunt_core._dev.expansion_lab.config import ExpansionConfig
+    from hunt_core._dev.expansion_lab.types import (
         BlockScores,
         BlockDeltas,
         ExpansionOpportunity,
@@ -463,7 +463,7 @@ def check_expansion_alerts() -> int:
     """Pinned expansion TG policy — eligibility, fingerprint, change detection."""
     from datetime import UTC, datetime
 
-    from hunt_core.analysis.expansion_engine.config import ExpansionConfig
+    from hunt_core._dev.expansion_lab.config import ExpansionConfig
     from hunt_core.runtime.expansion_alerts import (
         expansion_alert_eligible,
         expansion_change_fingerprint,
@@ -531,7 +531,7 @@ def check_expansion_alerts() -> int:
 
 def check_format_helpers() -> int:
     """Telegram format helpers render without error."""
-    from hunt_core.analysis.expansion_engine.format import (
+    from hunt_core._dev.expansion_lab.format import (
         format_calibration_report,
         format_outcome_stats,
         format_review_summary,
@@ -552,7 +552,7 @@ def check_format_helpers() -> int:
 
 def check_config_toml() -> int:
     """Config loads from [hunt.expansion] in config.defaults.toml."""
-    from hunt_core.analysis.expansion_engine.config import (
+    from hunt_core._dev.expansion_lab.config import (
         invalidate_expansion_config_cache,
         load_expansion_config,
     )
@@ -565,8 +565,16 @@ def check_config_toml() -> int:
         return _fail(f"expected scan_top_n=50, got {cfg.scan_top_n}")
     if cfg.review_interval_s <= 0:
         return _fail("review_interval_s must be positive")
-    if not cfg.watch_stamp:
-        return _fail("expected watch_stamp=true from defaults")
+    if cfg.watch_stamp:
+        return _fail("expected watch_stamp=false from defaults (lab-only until fusion port)")
+    if cfg.operator_commands:
+        return _fail("expected operator_commands=false from defaults (lab-only /expand TG)")
+    if cfg.lab_runtime:
+        return _fail("expected lab_runtime=false from defaults (production watch)")
+    if cfg.review_loop:
+        return _fail("expected review_loop=false from defaults")
+    if cfg.tg_universe_scan or cfg.tg_pinned_alerts:
+        return _fail("expected expansion TG alerts false from defaults (lab-only)")
     if not cfg.history_persist:
         return _fail("expected history_persist=true from defaults")
     print(
@@ -583,7 +591,7 @@ def check_calibration_apply() -> int:
     from pathlib import Path
     from unittest.mock import patch
 
-    from hunt_core.analysis.expansion_engine.config import (
+    from hunt_core._dev.expansion_lab.config import (
         _DEFAULT_UP_WEIGHTS,
         invalidate_expansion_config_cache,
         load_expansion_config,
@@ -598,7 +606,7 @@ def check_calibration_apply() -> int:
         cal_path = Path(tmp) / "expansion_calibration.json"
         cal_path.write_text(json.dumps(payload), encoding="utf-8")
         with patch(
-            "hunt_core.analysis.expansion_engine.config.EXPANSION_CALIBRATION_JSON",
+            "hunt_core._dev.expansion_lab.config.EXPANSION_CALIBRATION_JSON",
             cal_path,
         ):
             invalidate_expansion_config_cache()
@@ -616,7 +624,7 @@ def check_outcome_review() -> int:
     """Pending horizons are graded once; duplicates are skipped."""
     from datetime import UTC, datetime, timedelta
 
-    from hunt_core.analysis.expansion_engine.learning.review import (
+    from hunt_core._dev.expansion_lab.learning.review import (
         pending_review_horizons,
         review_records_with_prices,
     )

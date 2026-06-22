@@ -1,36 +1,9 @@
-"""Outcome Learning Layer — record, review, and calibrate from realized outcomes."""
+"""Lab lane shim → ``hunt_core._dev.expansion_lab``."""
 from __future__ import annotations
-
-from hunt_core.analysis.expansion_engine.learning.calibration import (
-    calibrate_block_weights,
-    maybe_refresh_calibration,
-    write_calibration_rollup,
-)
-from hunt_core.analysis.expansion_engine.learning.outcome_tracker import (
-    REVIEW_HORIZONS_H,
-    grade_record,
-    load_expansion_outcomes,
-    persist_expansion_outcomes,
-    record_expansion_signal,
-    summarize_outcomes,
-)
-from hunt_core.analysis.expansion_engine.learning.review import (
-    pending_review_horizons,
-    review_expansion_outcomes,
-    review_records_with_prices,
-)
-
-__all__ = [
-    "REVIEW_HORIZONS_H",
-    "calibrate_block_weights",
-    "maybe_refresh_calibration",
-    "write_calibration_rollup",
-    "grade_record",
-    "load_expansion_outcomes",
-    "pending_review_horizons",
-    "persist_expansion_outcomes",
-    "record_expansion_signal",
-    "review_expansion_outcomes",
-    "review_records_with_prices",
-    "summarize_outcomes",
-]
+import importlib
+_mod = importlib.import_module('hunt_core._dev.expansion_lab')
+for _name in dir(_mod):
+    if _name.startswith('_'):
+        continue
+    globals()[_name] = getattr(_mod, _name)
+__all__ = ['ExpansionConfig', 'ExpansionExecution', 'ExpansionForecast', 'ExpansionOpportunity', 'ExpansionProbabilities', 'annotations', 'blocks', 'build_expansion_dict', 'build_expansion_opportunity', 'compute_opportunity_score', 'config', 'deltas', 'execution', 'expansion', 'features', 'forecast', 'format', 'format_expansion_card', 'format_expansion_section', 'format_scan', 'history', 'load_expansion_config', 'opportunity_from_row', 'probability_model', 'quality', 'rank_universe', 'ranking', 'rotation', 'stages', 'state_machine', 'types']

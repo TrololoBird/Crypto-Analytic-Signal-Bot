@@ -184,6 +184,20 @@ def _series_chg_pct(values: Any) -> float | None:
     return round((float(values[-1]) / first - 1.0) * 100.0, 2)
 
 
+def _series_ols_slope(values: Any, *, min_n: int = 8) -> float | None:
+    """Normalized OLS slope of the OI (or similar) series tail."""
+    if not isinstance(values, list) or len(values) < min_n:
+        return None
+    try:
+        import polars as pl
+
+        from hunt_core.shared.mathlib import ols_slope
+
+        return ols_slope(pl.Series([float(x) for x in values]), min_n=min_n)
+    except (TypeError, ValueError):
+        return None
+
+
 def stamp_derivative_zscores(
     market: dict[str, Any],
     *,
@@ -209,6 +223,15 @@ def stamp_derivative_zscores(
         chg = _series_chg_pct(series)
         if chg is not None and market.get("oi_chg_4h_pct") is None:
             market["oi_chg_4h_pct"] = chg
+    if market.get("oi_slope_5m") is None:
+        series = pack.get("oi_series")
+        if not isinstance(series, list) and client is not None and symbol:
+            series = client.get_cached_oi_series(symbol)
+        slope = _series_ols_slope(series)
+        if slope is not None:
+            market["oi_slope_5m"] = round(float(slope), 6)
+            if prepared is not None:
+                prepared.oi_slope_5m = float(slope)
 
     if market.get("gls_z") is None:
         gls_series = pack.get("gls_series")
@@ -571,6 +594,12 @@ def apply_rest_enrichments_local(
 ) -> None:
     prepared.oi_current = pack.get("oi") or client.get_cached_open_interest(symbol)
     prepared.oi_change_pct = pack.get("oi_chg_1h") or client.get_cached_oi_change(symbol, "1h")
+    oi_series = pack.get("oi_series")
+    if not isinstance(oi_series, list):
+        oi_series = client.get_cached_oi_series(symbol)
+    oi_slope = _series_ols_slope(oi_series)
+    if oi_slope is not None:
+        prepared.oi_slope_5m = float(oi_slope)
     prepared.ls_ratio = (
         pack.get("ls_1h")
         or pack.get("ls_5m")
@@ -761,6 +790,7 @@ def market_snapshot(
         "oi": prepared.oi_current,
         "oi_chg_5m": pack.get("oi_chg_5m"),
         "oi_chg_1h": pack.get("oi_chg_1h") or prepared.oi_change_pct,
+        "oi_slope_5m": prepared.oi_slope_5m,
         "oi_z": _series_z(pack.get("oi_series")),
         "oi_chg_4h_pct": _series_chg_pct(pack.get("oi_series")),
         "gls_z": _series_z(pack.get("gls_series")),

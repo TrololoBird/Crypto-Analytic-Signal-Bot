@@ -89,12 +89,24 @@ def _check_row(row: dict[str, Any], *, strict_full: bool) -> dict[str, Any]:
 
     dump = row.get("dump") or {}
     long_s = row.get("long") or {}
-    if not dump.get("dump_score") and not long_s.get("long_score"):
-        issues.append("both_scores_zero")
+    has_signal = bool(dump.get("confirmed") or long_s.get("confirmed"))
+    has_fusion = bool(
+        (dump.get("fusion_score") or 0) > 0
+        or (long_s.get("fusion_score") or 0) > 0
+        or dump.get("p_win")
+        or long_s.get("p_win")
+    )
+    phase = str(lc.get("phase") or "neutral").lower()
+    if not has_signal and not has_fusion:
+        missing_scores = not dump.get("dump_score") and not long_s.get("long_score")
+        if missing_scores and phase not in {"neutral", "unknown", ""}:
+            issues.append("both_scores_zero")
     else:
-        checks.append(f"scores short={dump.get('dump_score')} long={long_s.get('long_score')}")
+        checks.append(
+            f"fusion short={dump.get('confirmed')} long={long_s.get('confirmed')}"
+        )
 
-    from hunt_core.detect.routing import route_tick
+    from hunt_core.scanner.detect.routing import route_tick
 
     routes = route_tick(row)
     checks.append(f"routes={len(routes)}")
