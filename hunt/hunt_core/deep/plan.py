@@ -1,12 +1,13 @@
-"""Deep trade plan — uses shared primitives."""
+"""Deep trade plan — single geometry authority (R3)."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from hunt_core.shared.primitives import atr_pad, forecast_band
 
 _MAX_RR = 10.0
 _MIN_RR = 0.3
+PlanDirection = Literal["long", "short"]
 
 
 def _rr(entry: float, target: float, stop: float, direction: str) -> float:
@@ -17,24 +18,25 @@ def _rr(entry: float, target: float, stop: float, direction: str) -> float:
     return reward / risk
 
 
-def validate_plan_geometry(
+def _worst_zone_edge(zone: tuple[float, float], direction: str) -> float:
+    lo, hi = zone
+    return lo if direction == "long" else hi
+
+
+def finalize_plan_geometry(
     plan: dict[str, Any],
     *,
-    direction: str,
+    direction: PlanDirection,
     atr: float,
 ) -> dict[str, Any]:
-    """Fix-in-place geometry errors: SL inside zone, scrambled TPs, 0R/absurd R.
-
-    Returns a corrected copy (never raises).
-    """
+    """Final normalization — nearest→farthest TPs, monotonic R, SL outside zone."""
     p = dict(plan)
     ez = p.get("entry_zone") or [0.0, 0.0]
     ez_lo = float(ez[0]) if len(ez) >= 2 else 0.0
     ez_hi = float(ez[1]) if len(ez) >= 2 else 0.0
-    ez_mid = (ez_lo + ez_hi) / 2.0
+    entry_ref = _worst_zone_edge((ez_lo, ez_hi), direction)
     sl = float(p.get("stop_loss") or p.get("stop") or 0.0)
 
-    # 1. SL must be strictly outside the entry zone
     if direction == "long" and sl >= ez_lo and ez_lo > 0:
         sl = ez_lo - max(atr * 1.2, abs(ez_hi - ez_lo) * 0.5)
         p["stop_loss"] = round(sl, 6)
@@ -42,9 +44,6 @@ def validate_plan_geometry(
         sl = ez_hi + max(atr * 1.2, abs(ez_hi - ez_lo) * 0.5)
         p["stop_loss"] = round(sl, 6)
 
-    entry = ez_mid if ez_mid > 0 else float(p.get("entry") or ez_mid)
-
-    # 2. TPs must be on the correct side and monotonically ordered
     tps_raw = [p.get("tp1"), p.get("tp2"), p.get("tp3")]
     tps: list[float] = []
     for v in tps_raw:
@@ -52,9 +51,9 @@ def validate_plan_geometry(
             continue
         try:
             f = float(v)
-            if direction == "long" and f > entry * 1.0001:
+            if direction == "long" and f > entry_ref * 1.0001:
                 tps.append(f)
-            elif direction == "short" and f < entry * 0.9999:
+            elif direction == "short" and f < entry_ref * 0.9999:
                 tps.append(f)
         except (TypeError, ValueError):
             pass
@@ -64,26 +63,51 @@ def validate_plan_geometry(
     else:
         tps = sorted(tps, reverse=True)
 
-    # Fill missing TPs with ATR multiples
     while len(tps) < 3:
         mult = (len(tps) + 2) * 1.5
         if direction == "long":
-            tps.append(entry + atr * mult)
+            tps.append(entry_ref + atr * mult)
         else:
-            tps.append(entry - atr * mult)
+            tps.append(entry_ref - atr * mult)
 
-    # 3. Reject 0R and clamp absurd R (>MAX_RR)
     for i, tp in enumerate(tps):
-        rr = _rr(entry, tp, sl, direction)
+        rr = _rr(entry_ref, tp, sl, direction)
         if rr < _MIN_RR or rr > _MAX_RR:
             mult = (i + 2) * 1.5
-            tps[i] = (entry + atr * mult) if direction == "long" else (entry - atr * mult)
+            tps[i] = (entry_ref + atr * mult) if direction == "long" else (entry_ref - atr * mult)
+
+    if direction == "long":
+        tps = sorted(tps)
+    else:
+        tps = sorted(tps, reverse=True)
+
+    prev_rr = 0.0
+    for i, tp in enumerate(tps):
+        rr = _rr(entry_ref, tp, sl, direction)
+        if rr < prev_rr:
+            mult = (i + 2) * 1.5
+            tps[i] = (entry_ref + atr * mult) if direction == "long" else (entry_ref - atr * mult)
+        prev_rr = max(prev_rr, _rr(entry_ref, tps[i], sl, direction))
 
     p["tp1"] = round(tps[0], 6)
     p["tp2"] = round(tps[1], 6)
-    if tps[2] is not None:
-        p["tp3"] = round(tps[2], 6)
+    p["tp3"] = round(tps[2], 6)
+    p["entry_reference"] = round(entry_ref, 6)
+    p["rr_tp1"] = round(_rr(entry_ref, tps[0], sl, direction), 2)
+    p["rr_tp2"] = round(_rr(entry_ref, tps[1], sl, direction), 2)
+    p["rr_tp3"] = round(_rr(entry_ref, tps[2], sl, direction), 2)
+    p["rr_base_label"] = "≈R:R (от края зоны)"
     return p
+
+
+def validate_plan_geometry(
+    plan: dict[str, Any],
+    *,
+    direction: str,
+    atr: float,
+) -> dict[str, Any]:
+    """Alias — prefer ``finalize_plan_geometry``."""
+    return finalize_plan_geometry(plan, direction=direction, atr=atr)  # type: ignore[arg-type]
 
 
 def build_trade_plan(row: dict[str, Any], *, side: str, price: float, atr: float) -> dict[str, Any]:
@@ -97,7 +121,7 @@ def build_trade_plan(row: dict[str, Any], *, side: str, price: float, atr: float
         "tp2": round(tgt_hi if side == "long" else tgt_lo, 6),
         "side": side,
     }
-    return validate_plan_geometry(plan, direction=side, atr=atr)
+    return finalize_plan_geometry(plan, direction=side, atr=atr)  # type: ignore[arg-type]
 
 
-__all__ = ["build_trade_plan", "validate_plan_geometry"]
+__all__ = ["build_trade_plan", "finalize_plan_geometry", "validate_plan_geometry"]

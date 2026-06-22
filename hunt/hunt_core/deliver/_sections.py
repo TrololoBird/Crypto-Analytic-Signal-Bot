@@ -343,7 +343,7 @@ def format_accumulation_forecast_section(
 
 
 def format_liquidation_map_section(row: dict[str, Any]) -> str:
-    """Liquidation squeeze zones — realized + forward magnets."""
+    """Liquidation squeeze zones — realized + forward magnets (R9: synthetic honesty)."""
     market = row.get("market") or {}
     maps = row.get("maps") or {}
     liq = maps.get("liquidation") if isinstance(maps, dict) else None
@@ -355,34 +355,54 @@ def format_liquidation_map_section(row: dict[str, Any]) -> str:
     conf = market.get("liq_forward_confidence")
     events = market.get("liq_realized_events")
     venues = market.get("liq_venues") or []
+    synthetic_only = bool(market.get("liq_synthetic_only"))
     if nearest_long is None and nearest_short is None and not cascade:
         return ""
-    lines = ["💥 <b>Карта ликвидаций</b> <i>(пулы маржин-коллов · не стакан)</i>"]
+    if synthetic_only:
+        lines = [
+            "💥 <b>Карта ликвидаций</b> "
+            "<i>(оценка по плечевым тирам · не реальные ликвидации)</i>"
+        ]
+    else:
+        lines = ["💥 <b>Карта ликвидаций</b> <i>(пулы маржин-коллов · не стакан)</i>"]
     if venues:
         lines[0] += f" <i>({', '.join(str(v)[:3].upper() for v in venues)})</i>"
     if nearest_long is not None:
         pull = market.get("liq_magnet_pull_long_pct")
         tail = f" ({pull:.2f}%)" if pull is not None else ""
-        lines.append(f"Магнит лонг-ликвидаций ↓ <code>{_fmt_price(float(nearest_long))}</code>{tail}")
+        tag = " · оценка" if synthetic_only else ""
+        lines.append(
+            f"Магнит лонг-ликвидаций ↓ <code>{_fmt_price(float(nearest_long))}</code>{tail}{tag}"
+        )
     if nearest_short is not None:
         pull = market.get("liq_magnet_pull_short_pct")
         tail = f" ({pull:.2f}%)" if pull is not None else ""
-        lines.append(f"Шорт-сквиз ↑ <code>{_fmt_price(float(nearest_short))}</code>{tail}")
+        tag = " · оценка" if synthetic_only else ""
+        lines.append(
+            f"Шорт-сквиз ↑ <code>{_fmt_price(float(nearest_short))}</code>{tail}{tag}"
+        )
     if cascade:
         label = "лонг-флаш" if cascade == "long_flush" else "шорт-сквиз"
         lines.append(f"Риск каскада: <b>{label}</b>")
-    if conf is not None:
+    show_conf = conf is not None
+    if show_conf and synthetic_only and int(events or 0) == 0 and abs(float(conf) - 0.35) < 0.02:
+        show_conf = False
+    if show_conf:
         lines.append(f"Прогнозная уверенность: <code>{float(conf):.2f}</code>")
     if events is not None and int(events) > 0:
         lines.append(f"Событий за 5m: <code>{int(events)}</code>")
     zones = market.get("liq_density_zones") or []
     hot = [z for z in zones if isinstance(z, dict) and float(z.get("intensity") or 0) >= 0.5][:2]
     if hot:
-        bits = [
-            f"{_fmt_price(float(z['price_center']))} ({float(z['intensity']):.0%})"
-            for z in hot
-            if z.get("price_center") is not None
-        ]
+        bits: list[str] = []
+        for z in hot:
+            if z.get("price_center") is None:
+                continue
+            src = str(z.get("source") or "")
+            src_tag = " · оценка" if src in {"leverage_tier_estimate", "forward", "entry_anchored"} else ""
+            bits.append(
+                f"{_fmt_price(float(z['price_center']))} ({float(z['intensity']):.0%}){src_tag}"
+            )
         if bits:
             lines.append("Горячие зоны: " + " · ".join(bits))
     return "\n".join(lines)
@@ -504,42 +524,93 @@ def format_book_walls_section(row: dict[str, Any]) -> str:
         return ""
     bids = walls.get("bid_levels") or []
     asks = walls.get("ask_levels") or []
-    if not bids and not asks:
+    per_ex = walls.get("per_exchange") or {}
+    venues = walls.get("venues") or []
+    if not bids and not asks and not per_ex:
         return ""
 
-    def _wall_line(side: str, levels: list[Any], emoji: str) -> str:
-        parts: list[str] = []
-        for lvl in levels[:3]:
-            if isinstance(lvl, dict):
-                px = lvl.get("price")
-                notional = lvl.get("notional_usd")
-            elif isinstance(lvl, (list, tuple)) and len(lvl) >= 2:
-                px, qty = float(lvl[0]), float(lvl[1])
-                notional = round(px * qty, 0)
-            else:
-                continue
-            if px is None:
-                continue
-            src = lvl.get("exchange") if isinstance(lvl, dict) else None
-            ex_raw = src or walls.get("source") or walls.get("venue") or "BNC"
-            tag = str(ex_raw)[:3].upper()
-            if tag == "?" or tag == "NON":
-                tag = "BNC"
-            parts.append(f"{tag} {_fmt_price(float(px))} (${float(notional or 0)/1e3:.1f}k)")
-        if not parts:
+    def _fmt_level(side: str, lvl: dict[str, Any], emoji: str) -> str:
+        px = lvl.get("price")
+        notional = lvl.get("notional_usd")
+        if px is None:
             return ""
-        return f"{emoji} {side}: " + " · ".join(parts)
+        ex_raw = lvl.get("exchange") or walls.get("source") or walls.get("venue") or "BNC"
+        tag = str(ex_raw)[:3].upper()
+        if tag in {"?", "NON"}:
+            tag = "BNC"
+        return f"{emoji} {side}: {tag} {_fmt_price(float(px))} (${float(notional or 0)/1e3:.1f}k)"
 
-    lines = ["📋 <b>Карта ордеров (DOM · сейчас)</b>"]
-    venues = walls.get("venues")
+    def _top_per_venue(side_key: str) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for ex, snap in per_ex.items():
+            if not isinstance(snap, dict):
+                continue
+            levels = snap.get(side_key) or []
+            if not levels:
+                continue
+            best = max(
+                (lvl for lvl in levels if isinstance(lvl, dict)),
+                key=lambda r: float(r.get("notional_usd") or 0),
+                default=None,
+            )
+            if best:
+                row_lvl = dict(best)
+                row_lvl["exchange"] = ex
+                out.append(row_lvl)
+        out.sort(key=lambda r: float(r.get("notional_usd") or 0), reverse=True)
+        return out[:3]
+
+    freshness = row.get("freshness") if isinstance(row.get("freshness"), dict) else {}
+    dom_age = freshness.get("dom_age_s")
+    if dom_age is not None and float(dom_age) > 30:
+        dom_label = f"DOM · {float(dom_age):.0f}с назад"
+    else:
+        dom_label = "DOM · сейчас"
+    lines = [f"📋 <b>Карта ордеров ({dom_label})</b>"]
     if isinstance(venues, list) and len(venues) > 1:
         lines[0] += f" <i>({len(venues)} бирж)</i>"
-    bid_line = _wall_line("Покупка", bids, "🟢")
-    ask_line = _wall_line("Продажа", asks, "🔴")
-    if bid_line:
-        lines.append(bid_line)
-    if ask_line:
-        lines.append(ask_line)
+
+    if isinstance(per_ex, dict) and len(per_ex) > 1:
+        bid_levels = _top_per_venue("bid_levels")
+        ask_levels = _top_per_venue("ask_levels")
+        for lvl in bid_levels:
+            line = _fmt_level("Покупка", lvl, "🟢")
+            if line:
+                lines.append(line)
+        for lvl in ask_levels:
+            line = _fmt_level("Продажа", lvl, "🔴")
+            if line:
+                lines.append(line)
+    else:
+        def _wall_line(side: str, levels: list[Any], emoji: str) -> str:
+            parts: list[str] = []
+            for lvl in levels[:3]:
+                if isinstance(lvl, dict):
+                    px = lvl.get("price")
+                    notional = lvl.get("notional_usd")
+                elif isinstance(lvl, (list, tuple)) and len(lvl) >= 2:
+                    px, qty = float(lvl[0]), float(lvl[1])
+                    notional = round(px * qty, 0)
+                else:
+                    continue
+                if px is None:
+                    continue
+                src = lvl.get("exchange") if isinstance(lvl, dict) else None
+                ex_raw = src or walls.get("source") or walls.get("venue") or "BNC"
+                tag = str(ex_raw)[:3].upper()
+                if tag in {"?", "NON"}:
+                    tag = "BNC"
+                parts.append(f"{tag} {_fmt_price(float(px))} (${float(notional or 0)/1e3:.1f}k)")
+            if not parts:
+                return ""
+            return f"{emoji} {side}: " + " · ".join(parts)
+
+        bid_line = _wall_line("Покупка", bids, "🟢")
+        ask_line = _wall_line("Продажа", asks, "🔴")
+        if bid_line:
+            lines.append(bid_line)
+        if ask_line:
+            lines.append(ask_line)
     imb = walls.get("depth_imbalance")
     if imb is not None:
         imb_f = float(imb)
@@ -638,7 +709,7 @@ def _humanize_micro_bias(raw: str) -> str:
 
 
 def format_pinned_deep_analysis(row: dict[str, Any]) -> str:
-    """Deep /signal block via analysis/deep (Module 2 — not detect/deep fusion)."""
+    """Deep /signal block via hunt_core.deep (Module 1 — not scanner lake_panel)."""
     sym = str(row.get("symbol") or "")
     if not sym:
         return ""

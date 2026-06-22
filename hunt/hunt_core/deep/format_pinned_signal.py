@@ -139,11 +139,12 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
     if plan and action in {"LONG", "SHORT"}:
         lo, hi = plan.entry_zone
         entry_type_ru = _ENTRY_TYPE_RU.get(plan.entry_type, plan.entry_type)
+        rr_label = plan.rr_base_label if plan.plan_lifecycle != "active" else "R:R (от входа)"
         lines.extend(
             [
                 f"Зона входа: <code>{_px(lo)}</code> – <code>{_px(hi)}</code> ({entry_type_ru})",
                 f"Stop-loss: <code>{_px(plan.stop_loss)}</code>",
-                f"TP1: <code>{_px(plan.take_profit_1)}</code> ({plan.rr_tp1:.1f}R)",
+                f"TP1: <code>{_px(plan.take_profit_1)}</code> ({plan.rr_tp1:.1f}R · {rr_label})",
                 f"TP2: <code>{_px(plan.take_profit_2)}</code> ({plan.rr_tp2:.1f}R)",
                 f"TP3: <code>{_px(plan.take_profit_3)}</code> ({plan.rr_tp3:.1f}R)",
             ]
@@ -164,10 +165,11 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
     frag_ru = _FRAG_RU.get(frag.label, frag.label)
     trade_ru = _TRADE_RU.get(tq.verdict, tq.verdict)
     lines.append(
-        f"Сила <b>{strength_ru}</b> ({strength.score:.2f}) · "
+        f"Сила сигнала <b>{strength_ru}</b> ({strength.score:.2f}) · "
         f"Хрупкость <b>{frag_ru}</b> · Сделка <b>{trade_ru}</b>"
     )
-    lines.append("<i>ранг, не вероятность</i>")
+    if v2.reconcile_caveats:
+        lines.append(f"⚠️ <i>{html.escape(v2.reconcile_caveats[0])}</i>")
 
     if dec.gates_failed:
         gate_labels = ", ".join(_gate_label(g) for g in dec.gates_failed)
@@ -193,6 +195,21 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
     if act and act != "idle":
         act_ru = _ACT_RU.get(act, act.replace("_", " "))
         lines.append(f"Активация: <b>{html.escape(act_ru)}</b>")
+
+    evt = summary.get("activation_event")
+    if isinstance(evt, dict) and evt.get("event") == "plan_activated":
+        try:
+            fill = float(evt.get("fill_reference") or 0)
+        except (TypeError, ValueError):
+            fill = 0.0
+        if fill > 0:
+            rr_base = str(evt.get("rr_base_label") or "R:R (от входа)")
+            lines.append(
+                f"✅ <b>План активирован</b> @ <code>{_px(fill)}</code> · "
+                f"TP1 {float(evt.get('rr_tp1') or 0):.1f}R · "
+                f"TP2 {float(evt.get('rr_tp2') or 0):.1f}R · "
+                f"TP3 {float(evt.get('rr_tp3') or 0):.1f}R · <i>{html.escape(rr_base)}</i>"
+            )
 
     # Alt paths: only show if different from main path type
     alt_paths = summary.get("secondary_paths") or []

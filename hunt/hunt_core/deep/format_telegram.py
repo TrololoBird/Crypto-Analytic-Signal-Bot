@@ -14,7 +14,7 @@ def _expansion_text(row: dict[str, Any]) -> str:
     if not isinstance(exp, dict) or not exp:
         return ""
     try:
-        from hunt_core.analysis.expansion_engine.format import format_expansion_section_from_dict
+        from hunt_core._dev.expansion_lab.format import format_expansion_section_from_dict
 
         return format_expansion_section_from_dict(exp)
     except Exception:
@@ -29,6 +29,9 @@ def format_deep_analysis_telegram(analysis: DeepAnalysis) -> str:
         header += f" · <code>{fmt_price(price)}</code>"
 
     parts: list[str] = [header]
+    as_of = analysis.row.get("as_of") or (analysis.row.get("freshness") or {}).get("as_of")
+    if as_of:
+        parts.append(f"<i>снимок: {html.escape(str(as_of)[:19].replace('T', ' '))} UTC</i>")
     v2_txt = analysis.verdict_v2_text()
     if v2_txt:
         parts.extend(["", v2_txt])

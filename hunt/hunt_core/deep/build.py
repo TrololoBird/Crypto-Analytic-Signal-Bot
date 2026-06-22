@@ -75,7 +75,7 @@ class DeepAnalysis:
                 if summary.get("gates_failed"):
                     gates = ", ".join(str(g) for g in summary["gates_failed"])
                     lines.append(f"<i>ожидаем: {html.escape(gates)}</i>")
-                lines.append("<i>ранг, не вероятность</i>")
+                lines.append("<i>сила сигнала, не вероятность</i>")
                 return "\n".join(lines)
             return ""
         from hunt_core.deep.format_pinned_signal import format_pinned_signal
@@ -152,7 +152,7 @@ def build_deep_analysis(
     would_deliver: bool | None = None,
     blockers: list[str] | None = None,
 ) -> DeepAnalysis:
-    """Back-compat alias — prefer ``build_deep_report``."""
+    """Build deep analysis report (alias for ``build_deep_report``)."""
     return build_deep_report(
         row,
         full=full,
