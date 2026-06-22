@@ -63,13 +63,7 @@ def factor_poc_migration(window: FeatureWindow) -> FactorScore:
     z4 = C.robust_z(window.col("poc_migration_4h"))
     score, parts = _mean_active({"poc_migration_1h": z1, "poc_migration_4h": z4})
     if score is None:
-        last1 = window.last("poc_migration_1h")
-        last4 = window.last("poc_migration_4h")
-        if last1 is None and last4 is None:
-            return _abstain("poc_migration", DIRECTIONAL, "poc_migration_missing")
-        vals = [v for v in (last1, last4) if v is not None]
-        score = sum(vals) / len(vals)
-        parts = {k: v for k, v in (("poc_migration_1h", last1), ("poc_migration_4h", last4)) if v is not None}
+        return _abstain("poc_migration", DIRECTIONAL, "poc_migration_missing")
     return FactorScore("poc_migration", DIRECTIONAL, score, True, f"poc_mig_z={score:+.2f}", parts)
 
 

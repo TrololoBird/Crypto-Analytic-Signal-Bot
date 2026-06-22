@@ -48,7 +48,7 @@ def robust_z(
     last = float(arr[-1])
     scale = _robust_scale(arr, mad_epsilon=mad_epsilon)
     if scale <= mad_epsilon and float(np.std(arr)) <= mad_epsilon:
-        return 0.0
+        return None  # constant series — no distribution to score against; caller should abstain
     return _clip_z((last - float(np.median(arr))) / scale, clip=clip)
 
 
@@ -84,7 +84,7 @@ def ols_slope(
     if scale <= 0.0:
         scale = float(np.std(arr))
     if scale <= 0.0:
-        return 0.0
+        return None  # constant series — slope is zero but uninformative; caller should abstain
     return slope / scale
 
 
