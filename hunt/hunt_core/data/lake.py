@@ -116,7 +116,7 @@ class FeatureLakeWriter:
                 continue
             path = _parquet_path(symbol, tf)
             path.parent.mkdir(parents=True, exist_ok=True)
-            new_df = pl.DataFrame(rows)
+            new_df = pl.DataFrame(rows, infer_schema_length=len(rows) or None)
             if path.exists():
                 try:
                     old = pl.read_parquet(path)

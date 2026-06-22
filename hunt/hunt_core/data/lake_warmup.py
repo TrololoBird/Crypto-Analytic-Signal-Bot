@@ -56,7 +56,7 @@ async def backfill_cold_lake_symbol(
         return 0
 
     try:
-        work_15m = _prepare_frame(klines)
+        work_15m = _prepare_frame(klines, warmup_ema=50)
     except Exception as exc:
         LOG.debug("lake_warmup_prepare_failed", symbol=sym, error=repr(exc))
         return 0
@@ -71,6 +71,11 @@ async def backfill_cold_lake_symbol(
         base_asset=sym.replace("USDT", ""),
         quote_asset="USDT",
         contract_type="PERPETUAL",
+        status="TRADING",
+        onboard_date_ms=0,
+        quote_volume=0.0,
+        price_change_pct=0.0,
+        last_price=0.0,
     )
     prepared = PreparedSymbol(
         universe=universe,
