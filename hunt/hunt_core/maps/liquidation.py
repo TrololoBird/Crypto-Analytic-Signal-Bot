@@ -1,4 +1,14 @@
-"""Map 2 — Liquidation map: real multi-exchange events + calibrated forward squeeze zones."""
+"""Map 2 — Liquidation map: real multi-exchange events + forward squeeze zones.
+
+**Provenance (plan R9 / Phase 9):**
+- ``source=realized`` — clusters from public CCXT liquidation events (when available).
+- ``source=leverage_tier_estimate`` / ``prospective_source=leverage_tier_estimate`` —
+  synthetic bands at ``price × (1 ± maintenance_margin_rate)`` from default tiers
+  ``(5, 10, 20, 50)×`` when no realized events exist. These are directional magnet
+  hints, not exact liquidation prices. Deep reconcile ignores synthetic bands for
+  trade veto; the formatter labels them explicitly.
+- Improve accuracy only via additional **public** OI/liq feeds — no auth endpoints.
+"""
 from __future__ import annotations
 
 import collections
@@ -73,7 +83,13 @@ class LiquidationMap:
     leverage_tiers_known: bool = True
 
     def to_dict(self) -> dict[str, Any]:
-        base = heatmap_to_market_dict(self.heatmap)
+        base = heatmap_to_market_dict(
+            self.heatmap,
+            prospective_source="leverage_tier_estimate"
+            if self.heatmap.realized_event_count == 0
+            else None,
+        )
+        base["liq_synthetic_only"] = self.heatmap.realized_event_count == 0
         base.update(
             {
                 "liq_forward_zones": self.forward_zones,
@@ -374,7 +390,7 @@ def _build_heatmap_from_map(
                 short_notional=round(row["short"], 2),
                 event_count=int(row["events"]),
                 intensity=round(row["total"] / max_total, 4),
-                source=zone_source if row["events"] <= 0 else "realized",
+                source="realized" if row["events"] > 0 else zone_source,
             )
         )
     clusters.sort(key=lambda c: c.total_notional, reverse=True)
@@ -408,7 +424,7 @@ def _build_heatmap_from_map(
                 intensity=intensity,
                 event_count=int(row["events"]),
                 side_bias=bias,
-                source="realized" if row["events"] > 0 else "forward",
+                source="realized" if row["events"] > 0 else zone_source,
                 consumed=row["events"] <= 0 and intensity < 0.25,
             )
         )
@@ -537,6 +553,7 @@ def build_liquidation_heatmap(
     blend = forward_blend if event_count == 0 else min(forward_blend, 0.15 + event_count * 0.02)
     merged = _merge_cluster_maps(realized, forward_map, blend_weights=(1.0, blend))
     confidence = _resolved_forward_confidence(symbol, event_count=event_count, forward_blend=forward_blend)
+    synth_source = "leverage_tier_estimate" if event_count == 0 else "realized"
 
     return _build_heatmap_from_map(
         merged,
@@ -546,6 +563,7 @@ def build_liquidation_heatmap(
         n_buckets=n_buckets,
         forward_confidence=round(confidence, 3),
         realized_events=event_count,
+        zone_source=synth_source,
     )
 
 
@@ -742,6 +760,8 @@ def heatmap_to_market_dict(
     }
     if prospective_source:
         out["liq_prospective_source"] = prospective_source
+    if heatmap.realized_event_count == 0:
+        out["liq_synthetic_only"] = True
     return out
 
 

@@ -20,8 +20,8 @@ def _synthetic_rows() -> list[dict[str, Any]]:
 
 
 async def _run(*, live: bool) -> int:
-    from hunt_core.analysis.expansion_engine.config import load_expansion_config
-    from hunt_core.analysis.expansion_engine.ranking.scan import rank_universe
+    from hunt_core._dev.expansion_lab.config import load_expansion_config
+    from hunt_core._dev.expansion_lab.ranking.scan import rank_universe
     from hunt_core.runtime.expansion_universe_scan import (
         collect_universe_rows,
         select_universe_alerts,

@@ -9,7 +9,7 @@ from typing import Any
 
 
 def _config_summary() -> dict[str, Any]:
-    from hunt_core.analysis.expansion_engine.config import load_expansion_config
+    from hunt_core._dev.expansion_lab.config import load_expansion_config
 
     cfg = load_expansion_config()
     return {
@@ -25,11 +25,11 @@ def _config_summary() -> dict[str, Any]:
 
 
 def _ledger_summary() -> dict[str, Any]:
-    from hunt_core.analysis.expansion_engine.learning import (
+    from hunt_core._dev.expansion_lab.learning import (
         load_expansion_outcomes,
         summarize_outcomes,
     )
-    from hunt_core.analysis.expansion_engine.learning.review import pending_review_horizons
+    from hunt_core._dev.expansion_lab.learning.review import pending_review_horizons
 
     records = load_expansion_outcomes()
     summary = summarize_outcomes(records)

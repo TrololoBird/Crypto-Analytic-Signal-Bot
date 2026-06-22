@@ -7,9 +7,9 @@ from typing import Any
 
 import structlog
 
-from hunt_core.analysis.expansion_engine.config import ExpansionConfig, load_expansion_config
-from hunt_core.analysis.expansion_engine.ranking.scan import rank_universe
-from hunt_core.analysis.expansion_engine.types import ExpansionOpportunity
+from hunt_core._dev.expansion_lab.config import ExpansionConfig, load_expansion_config
+from hunt_core._dev.expansion_lab.ranking.scan import rank_universe
+from hunt_core._dev.expansion_lab.types import ExpansionOpportunity
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.paths import EXPANSION_SCAN_JSONL
 from hunt_core.runtime.expansion_alerts import (
@@ -91,7 +91,7 @@ async def send_universe_alert_telegram(
     broadcaster: Any,
     alerts: dict[str, list[ExpansionOpportunity]],
 ) -> bool:
-    from hunt_core.analysis.expansion_engine.format import format_universe_alert
+    from hunt_core._dev.expansion_lab.format import format_universe_alert
 
     pump = alerts.get("pre_pump") or []
     dump = alerts.get("pre_dump") or []
@@ -127,7 +127,7 @@ def _record_universe_alerts(
             fp = expansion_change_fingerprint(opp.to_dict())
             mark_expansion_alert_sent(sym, fingerprint=fp, now=now)
             try:
-                from hunt_core.analysis.expansion_engine.learning import record_expansion_signal
+                from hunt_core._dev.expansion_lab.learning import record_expansion_signal
 
                 if opp.dominant != "neutral" and opp.meta.expansion_quality >= 0.45:
                     record_expansion_signal(opp, ts=now.isoformat())
@@ -204,7 +204,7 @@ async def expansion_universe_scan_loop(
         except Exception:
             LOG.exception("expansion_universe_scan_failed")
         try:
-            from hunt_core.analysis.expansion_engine.runtime_state import save_expansion_runtime_state
+            from hunt_core._dev.expansion_lab.runtime_state import save_expansion_runtime_state
 
             save_expansion_runtime_state()
         except Exception:

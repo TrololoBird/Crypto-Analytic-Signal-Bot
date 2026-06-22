@@ -6,18 +6,18 @@ import json
 import sys
 from datetime import UTC, datetime
 
-from hunt_core.analysis.expansion_engine.config import invalidate_expansion_config_cache
-from hunt_core.analysis.expansion_engine.format import (
+from hunt_core._dev.expansion_lab.config import invalidate_expansion_config_cache
+from hunt_core._dev.expansion_lab.format import (
     format_calibration_report,
     format_outcome_stats,
 )
-from hunt_core.analysis.expansion_engine.learning import (
+from hunt_core._dev.expansion_lab.learning import (
     load_expansion_outcomes,
     summarize_outcomes,
     write_calibration_rollup,
 )
-from hunt_core.analysis.expansion_engine.learning.calibration import calibrate_block_weights
-from hunt_core.analysis.expansion_engine.learning.review import pending_review_horizons
+from hunt_core._dev.expansion_lab.learning.calibration import calibrate_block_weights
+from hunt_core._dev.expansion_lab.learning.review import pending_review_horizons
 from hunt_core.paths import EXPANSION_CALIBRATION_JSON
 
 
