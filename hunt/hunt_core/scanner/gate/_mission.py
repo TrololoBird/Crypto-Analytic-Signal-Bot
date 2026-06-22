@@ -125,6 +125,10 @@ def mission_delivery_block(
                 "mission_not_pre_dump",
                 f"Фаза {phase or '—'} вне pre-dump окна (exhaustion/distribution/initiating)",
             )
+        if isinstance(setup, dict) and setup.get("confirmed"):
+            sp = str(setup.get("phase") or "")
+            if sp == "pre_dump":
+                return None
         if phase != "exhaustion_at_high" and fall > break_max:
             return GateResult(
                 False,
@@ -163,6 +167,10 @@ def mission_delivery_block(
                 "mission_not_pre_pump",
                 f"Фаза {phase or '—'} вне pre-pump окна (accumulation/bounce/coil)",
             )
+        if isinstance(setup, dict) and setup.get("confirmed"):
+            sp = str(setup.get("phase") or "")
+            if sp == "pre_pump":
+                return None
         leg = _leg_gain_pct(lc)
         if leg >= 10.0 and phase not in {"post_dump_bounce", "recovery"}:
             return GateResult(
