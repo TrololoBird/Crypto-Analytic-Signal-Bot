@@ -6,7 +6,7 @@
 # --- core ---
 python-dotenv==1.2.2
 polars==1.41.2
-aiohttp==3.13.5
+aiohttp==3.14.1
 aiohttp-socks==0.11.0
 python-socks[asyncio]==2.8.1
 numpy==2.4.6
