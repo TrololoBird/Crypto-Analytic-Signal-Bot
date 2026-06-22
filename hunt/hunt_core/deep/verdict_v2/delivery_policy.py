@@ -91,16 +91,13 @@ def filter_notify_candidates(
     *,
     min_rank: int = 2,
 ) -> list[dict[str, Any]]:
-    """Drop low-rank WAIT rows to reduce TG noise."""
+    """Only LONG/SHORT material changes reach pinned TG (WAIT is monitor-only)."""
+    _ = min_rank  # rank filter applies to queue footer only; WAIT never delivers
     out: list[dict[str, Any]] = []
     for row in changed_rows:
-        sym = str(row.get("symbol") or "").upper()
         summary = row.get("verdict_v2_summary") or {}
-        action = str(summary.get("action") or "wait")
-        rank = symbol_queue_rank(sym, queue)
+        action = str(summary.get("action") or "wait").lower()
         if action in {"long", "short"}:
-            out.append(row)
-        elif rank <= min_rank:
             out.append(row)
     return out
 

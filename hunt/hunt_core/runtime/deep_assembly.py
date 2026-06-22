@@ -41,7 +41,7 @@ def stamp_expansion_on_row(row: dict[str, Any]) -> None:
     never sink the deep tick.
     """
     try:
-        from hunt_core.analysis.expansion_engine import (
+        from hunt_core._dev.expansion_lab import (
             build_expansion_opportunity,
             load_expansion_config,
         )
@@ -234,6 +234,39 @@ async def assemble_deep_tick(
     row["_deep_analysis"] = True
     row["tick_path"] = "deep_assembly"
 
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+    row["as_of"] = now.isoformat()
+    dom_ts = None
+    cx = row.get("cross_microstructure") if isinstance(row.get("cross_microstructure"), dict) else {}
+    walls = cx.get("book_walls") if isinstance(cx.get("book_walls"), dict) else row.get("book_walls")
+    if isinstance(walls, dict) and walls.get("fetched_at"):
+        dom_ts = walls.get("fetched_at")
+    row_ts = row.get("ts")
+    try:
+        tick_dt = datetime.fromisoformat(str(row_ts).replace("Z", "+00:00")) if row_ts else now
+        if tick_dt.tzinfo is None:
+            tick_dt = tick_dt.replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        tick_dt = now
+    dom_age_s: float | None = None
+    if dom_ts:
+        try:
+            dom_dt = datetime.fromisoformat(str(dom_ts).replace("Z", "+00:00"))
+            if dom_dt.tzinfo is None:
+                dom_dt = dom_dt.replace(tzinfo=UTC)
+            dom_age_s = (now - dom_dt).total_seconds()
+        except (TypeError, ValueError):
+            dom_age_s = (now - tick_dt).total_seconds()
+    else:
+        dom_age_s = (now - tick_dt).total_seconds()
+    row["freshness"] = {
+        "as_of": row["as_of"],
+        "tick_age_s": round((now - tick_dt).total_seconds(), 1),
+        "dom_age_s": round(dom_age_s, 1) if dom_age_s is not None else None,
+    }
+
     from hunt_core.maps.forecast import stamp_forecasts_on_row
 
     stamp_forecasts_on_row(row)
@@ -297,6 +330,18 @@ async def send_deep_change_telegram(
 
     sym = str(row.get("symbol") or "").upper()
     if row.get("error"):
+        return False
+    summary = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else {}
+    action = str(summary.get("action") or "wait").lower()
+    if action not in {"long", "short"}:
+        LOG.info("deep_pinned_tg_skipped_wait", symbol=sym, action=action)
+        return False
+    from hunt_core.deep.arbiter import evaluate_deep_delivery
+
+    verdict = summary if summary else {}
+    ok, blockers = evaluate_deep_delivery(symbol=sym, verdict=verdict)
+    if not ok:
+        LOG.info("deep_pinned_tg_skipped_arbiter", symbol=sym, blockers=blockers)
         return False
     blocks: list[str] = []
     pinned_block = format_pinned_signal(row)
@@ -362,6 +407,7 @@ async def deep_pinned_loop(
         v2cfg = load_verdict_v2_config()
         prev_queue = load_signal_queue()
         cycle_changes: list[dict[str, Any]] = []
+        cycle_first_touch: set[str] = set()
         for sym in PINNED_SYMBOLS:
             if should_stop():
                 break
@@ -369,11 +415,13 @@ async def deep_pinned_loop(
                 prev = deep_query_store().get(sym)
                 row = await assemble_deep_tick(sym, client)
                 if row.get("error"):
-                    LOG.warning("deep_pinned_tick_error", symbol=sym, error=row.get("error"))
+                    LOG.info("deep_pinned_tick_error", symbol=sym, error=row.get("error"))
                     continue
                 if material_deep_change(sym, row, prev=prev):
                     cycle_changes.append(row)
-                from hunt_core.analysis.expansion_engine.config import load_expansion_config
+                    if prev is None:
+                        cycle_first_touch.add(sym.upper())
+                from hunt_core._dev.expansion_lab.config import load_expansion_config
                 from hunt_core.runtime.expansion_alerts import (
                     expansion_change_fingerprint,
                     expansion_cooldown_ok,
@@ -398,8 +446,8 @@ async def deep_pinned_loop(
                             fingerprint=expansion_change_fingerprint(exp_dict) if exp_dict else None,
                         )
                         try:
-                            from hunt_core.analysis.expansion_engine import build_expansion_opportunity
-                            from hunt_core.analysis.expansion_engine.learning import (
+                            from hunt_core._dev.expansion_lab import build_expansion_opportunity
+                            from hunt_core._dev.expansion_lab.learning import (
                                 record_expansion_signal,
                             )
 
@@ -418,6 +466,16 @@ async def deep_pinned_loop(
                 queue,
                 min_rank=v2cfg.signal_queue_tg_min_rank,
             )
+            if cycle_first_touch:
+                seen = {str(r.get("symbol") or "").upper() for r in filtered}
+                for row in cycle_changes:
+                    sym_u = str(row.get("symbol") or "").upper()
+                    if sym_u not in cycle_first_touch or sym_u in seen:
+                        continue
+                    summary = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else {}
+                    if str(summary.get("action") or "wait").lower() in {"long", "short"}:
+                        filtered.append(row)
+                        seen.add(sym_u)
             if filtered:
                 if v2cfg.signal_queue_tg_batch:
                     hero = pick_hero_row(filtered, queue)
@@ -425,14 +483,14 @@ async def deep_pinned_loop(
                         hero_sym = str(hero.get("symbol") or "").upper()
                         hero_prev = deep_query_store().get(hero_sym)
                         from hunt_core.deep.arbiter import deep_cooldown_ok, mark_deep_sent
-                        cooldown_h = deep_tg_stale_hours() / 8.0  # min 30min between re-fires
+                        cooldown_h = deep_tg_stale_hours() / 8.0
                         if should_send_pinned_batch(
                             hero,
                             queue=queue,
                             prev_queue=prev_queue,
                             hero_prev=hero_prev,
                             fingerprint_fn=deep_change_fingerprint,
-                        ) and deep_cooldown_ok(hero_sym, hours=max(0.5, cooldown_h)):
+                        ) and deep_cooldown_ok(hero_sym):
                             if await send_deep_change_telegram(
                                 broadcaster,
                                 hero,
@@ -441,12 +499,16 @@ async def deep_pinned_loop(
                                 mark_deep_sent(hero_sym)
                 else:
                     from hunt_core.deep.arbiter import deep_cooldown_ok, mark_deep_sent
+
+                    batch_sent_at = datetime.now(UTC)
+                    sent_syms: list[str] = []
                     for row in filtered:
                         sym = str(row.get("symbol") or "").upper()
-                        prev = deep_query_store().get(sym)
-                        if material_deep_change(sym, row, prev=prev) and deep_cooldown_ok(sym, hours=0.75):
+                        if deep_cooldown_ok(sym):
                             if await send_deep_change_telegram(broadcaster, row):
-                                mark_deep_sent(sym)
+                                sent_syms.append(sym)
+                    for sym in sent_syms:
+                        mark_deep_sent(sym, now=batch_sent_at)
         try:
             await asyncio.sleep(max(30.0, interval))
         except asyncio.CancelledError:
@@ -455,7 +517,7 @@ async def deep_pinned_loop(
 
 
 def expansion_review_interval_s() -> float:
-    from hunt_core.analysis.expansion_engine.config import load_expansion_config
+    from hunt_core._dev.expansion_lab.config import load_expansion_config
 
     return load_expansion_config().review_interval_s
 
@@ -466,8 +528,8 @@ async def expansion_outcome_review_loop(
     interval_s: float | None = None,
 ) -> None:
     """Background task — grade expansion outcome ledger at 24h/48h/72h/7d."""
-    from hunt_core.analysis.expansion_engine.config import load_expansion_config
-    from hunt_core.analysis.expansion_engine.learning.review import review_expansion_outcomes
+    from hunt_core._dev.expansion_lab.config import load_expansion_config
+    from hunt_core._dev.expansion_lab.learning.review import review_expansion_outcomes
     from hunt_core.runtime.state import should_stop
 
     import asyncio
