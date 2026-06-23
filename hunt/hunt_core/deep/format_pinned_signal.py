@@ -196,8 +196,10 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
         act_ru = _ACT_RU.get(act, act.replace("_", " "))
         lines.append(f"Активация: <b>{html.escape(act_ru)}</b>")
 
+    # Activation block is a directional-trade artifact — never show it on a WAIT/poor
+    # row (a WAIT must not read "✅ План активирован" with a degenerate 0R ladder).
     evt = summary.get("activation_event")
-    if isinstance(evt, dict) and evt.get("event") == "plan_activated":
+    if action in {"LONG", "SHORT"} and isinstance(evt, dict) and evt.get("event") == "plan_activated":
         try:
             fill = float(evt.get("fill_reference") or 0)
         except (TypeError, ValueError):
