@@ -89,12 +89,76 @@ def _leg_gain_pct(lc: dict[str, Any]) -> float:
     return 0.0
 
 
+def assess_preparation_readiness(
+    row: dict[str, Any] | None,
+    *,
+    direction: str,
+) -> tuple[bool, list[str]]:
+    """Energy + direction resolve before breakout — predictive scanner gate (P5)."""
+    row = row if isinstance(row, dict) else {}
+    market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    d = direction.lower().strip()
+    reasons: list[str] = []
+
+    energy_hits = 0
+    oi_z = float(market.get("oi_z") or market.get("map_oi_z") or 0)
+    if oi_z >= 0.8:
+        energy_hits += 1
+        reasons.append("oi_build")
+    acc = float(market.get("map_accumulation_score") or market.get("map_vp_accumulation") or 0)
+    if acc >= 0.45:
+        energy_hits += 1
+        reasons.append("vol_coil")
+    imb = abs(float(market.get("depth_imbalance") or market.get("map_book_imbalance_1pct") or 0))
+    if imb >= 0.12:
+        energy_hits += 1
+        reasons.append("flow_imbalance")
+    if int(market.get("map_absorption_count") or 0) >= 1 or int(market.get("map_sticky_wall_count") or 0) >= 1:
+        energy_hits += 1
+        reasons.append("wall_absorption")
+
+    direction_hits = 0
+    cvd = str(market.get("map_cvd_divergence") or "")
+    funding = float(market.get("funding_rate") or 0)
+    poc_mig = market.get("map_poc_migration_1h") or market.get("map_poc_migration_4h")
+    if d == "long":
+        if cvd == "bullish_div":
+            direction_hits += 1
+            reasons.append("cvd_bull")
+        if funding <= 0:
+            direction_hits += 1
+            reasons.append("funding_shorts_pay")
+        if market.get("map_accum_bid_absorption"):
+            direction_hits += 1
+            reasons.append("bid_absorption")
+        if poc_mig == "up":
+            direction_hits += 1
+            reasons.append("poc_up")
+    else:
+        if cvd == "bearish_div":
+            direction_hits += 1
+            reasons.append("cvd_bear")
+        if funding >= 0:
+            direction_hits += 1
+            reasons.append("funding_longs_pay")
+        if market.get("map_ask_thinning"):
+            direction_hits += 1
+            reasons.append("ask_thinning")
+        if poc_mig == "down":
+            direction_hits += 1
+            reasons.append("poc_down")
+
+    ready = energy_hits >= 2 and direction_hits >= 2
+    return ready, reasons[:6]
+
+
 def mission_delivery_block(
     *,
     direction: str,
     lifecycle: dict[str, Any] | None,
     setup: dict[str, Any] | None = None,
     symbol: str = "",
+    row: dict[str, Any] | None = None,
 ) -> GateResult | None:
     """Hard block watch-path TG when the move already started or wrong archetype."""
     from hunt_core.scanner.gate._rr import (
@@ -109,6 +173,7 @@ def mission_delivery_block(
     fall = _fall_pct(lc)
     break_max = short_dump_first_break_max_fall_pct(sym)
     start_max = short_dump_start_max_fall_pct(sym)
+    prep_ready, _prep_reasons = assess_preparation_readiness(row, direction=d)
 
     if d == "short":
         if phase in MID_DUMP_LC_PHASES:
@@ -119,7 +184,7 @@ def mission_delivery_block(
             )
         if phase in COIL_LC_PHASES:
             return None
-        if phase not in PRE_DUMP_LIVE_LC_PHASES:
+        if phase not in PRE_DUMP_LIVE_LC_PHASES and not prep_ready:
             return GateResult(
                 False,
                 "mission_not_pre_dump",
@@ -161,7 +226,7 @@ def mission_delivery_block(
             )
         if phase in COIL_LC_PHASES:
             return None
-        if phase not in PRE_PUMP_LIVE_LC_PHASES:
+        if phase not in PRE_PUMP_LIVE_LC_PHASES and not prep_ready:
             return GateResult(
                 False,
                 "mission_not_pre_pump",
@@ -217,6 +282,7 @@ __all__ = [
     "PRE_DUMP_SETUP_PHASES",
     "PRE_PUMP_LIVE_LC_PHASES",
     "PRE_PUMP_SETUP_PHASES",
+    "assess_preparation_readiness",
     "hunt_skip_reason",
     "is_mid_leg_phase",
     "is_watch_hunt_phase",

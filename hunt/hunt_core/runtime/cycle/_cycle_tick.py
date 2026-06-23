@@ -994,6 +994,32 @@ async def run_tick(
                                 )
                                 and _cooldown_ok(symbol, direction, state, now=now)
                             ):
+                                from hunt_core.signals.lifecycle import build_scanner_signal
+
+                                as_of = str(row.get("ts") or now.isoformat())
+                                scan_transition = build_scanner_signal(
+                                    symbol=symbol,
+                                    direction=direction,
+                                    setup_id=str(setup.get("setup_id") or setup.get("phase") or ""),
+                                    thesis=str(setup.get("phase") or "pre_move"),
+                                    plan={
+                                        "entry_zone": setup.get("entry_zone"),
+                                        "stop_loss": setup.get("stop_loss"),
+                                        "tp1": setup.get("tp1"),
+                                        "trigger_level": (setup.get("entry_zone") or [0])[0]
+                                        if setup.get("entry_zone")
+                                        else setup.get("trigger_level"),
+                                    },
+                                    as_of=as_of,
+                                )
+                                if scan_transition.event == "none":
+                                    LOG.info(
+                                        "scanner_lifecycle_suppressed",
+                                        symbol=symbol,
+                                        direction=direction,
+                                        reason=scan_transition.suppress_reason,
+                                    )
+                                    continue
                                 from hunt_core.scanner.delivery.lab import send_lane_html
                                 from hunt_core.deliver.templates import format_telegram_confirm
 
@@ -1316,6 +1342,32 @@ async def run_tick(
                                 symbol=symbol,
                                 direction=direction,
                                 reason=gate.code if not gate.ok else "stale_tier",
+                            )
+                            continue
+                        from hunt_core.signals.lifecycle import build_scanner_signal
+
+                        as_of = str(row.get("ts") or now.isoformat())
+                        scan_transition = build_scanner_signal(
+                            symbol=symbol,
+                            direction=direction,
+                            setup_id=str(setup.get("setup_id") or setup.get("phase") or ""),
+                            thesis=str(setup.get("phase") or "pre_move"),
+                            plan={
+                                "entry_zone": setup.get("entry_zone"),
+                                "stop_loss": setup.get("stop_loss"),
+                                "tp1": setup.get("tp1"),
+                                "trigger_level": (setup.get("entry_zone") or [0])[0]
+                                if setup.get("entry_zone")
+                                else setup.get("trigger_level"),
+                            },
+                            as_of=as_of,
+                        )
+                        if scan_transition.event == "none":
+                            LOG.info(
+                                "scanner_lifecycle_suppressed",
+                                symbol=symbol,
+                                direction=direction,
+                                reason=scan_transition.suppress_reason,
                             )
                             continue
                         from hunt_core.scanner.delivery.lab import send_lane_html
