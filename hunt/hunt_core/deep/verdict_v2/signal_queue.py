@@ -324,7 +324,7 @@ def format_queue_telegram(queue: dict[str, Any] | None = None) -> str:
         "breakout": "пробой",
         "idle": "",
     }
-    lines = ["📋 <b>Очередь сигналов</b>"]
+    lines = ["📋 <b>Очередь сигналов</b> · <i>Приоритет очереди</i>"]
     shown = len(top3)
     lines[0] += f" (TOP{shown})" if shown else ""
     for item in top3:
