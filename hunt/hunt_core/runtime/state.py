@@ -260,3 +260,10 @@ def new_session_state() -> SymbolStateStore:
     store = SymbolStateStore()
     set_symbol_state(store)
     return store
+
+
+def signal_lifecycle_store():
+    """Shared setup_id cooldown store (P0 spine)."""
+    from hunt_core.signals.lifecycle import SignalLifecycleStore
+
+    return SignalLifecycleStore.load()
