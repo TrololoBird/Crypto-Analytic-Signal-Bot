@@ -57,7 +57,9 @@ def stamp_expansion_on_row(row: dict[str, Any]) -> None:
 
 def append_deep_tick_jsonl(row: dict[str, Any]) -> None:
     from hunt_core.data.jsonl_io import append_jsonl_lines
+    from hunt_core.diagnostics.tick_diagnostics import append_tick_diagnostics
 
+    append_tick_diagnostics(row)
     DEEP_TICKS_JSONL.parent.mkdir(parents=True, exist_ok=True)
     append_jsonl_lines(DEEP_TICKS_JSONL, [serialize_tick_row(row)])
 
@@ -96,6 +98,7 @@ async def assemble_deep_tick(
     client: HuntCcxtClient,
     *,
     stagger_ms: int = 200,
+    ws_feed: Any | None = None,
 ) -> dict[str, Any]:
     """Full deep snapshot — no hunt fusion, structure-first enrichments."""
     import asyncio
@@ -158,7 +161,7 @@ async def assemble_deep_tick(
             btc_work_1m=btc_work_1m,
             exchange_by_sym=exchange_by_sym,
             ticker_by_sym=ticker_by_sym,
-            ws_feed=None,
+            ws_feed=ws_feed,
             spot_companion=None,
             stagger_klines_ms=stagger_ms,
             tier="full",
@@ -200,6 +203,12 @@ async def assemble_deep_tick(
         LOG.warning("deep_microstructure_pack_failed", symbol=sym, error=repr(exc))
 
     row = _enrich_deep_row(row)
+    try:
+        from hunt_core.analysis.manipulation_fusion import stamp_fusion_on_row
+
+        stamp_fusion_on_row(row)
+    except Exception as exc:
+        LOG.debug("deep_manipulation_fusion_skipped", symbol=sym, error=repr(exc))
     row["plane"] = "deep"
     row["_deep_analysis"] = True
     row["tick_path"] = "deep_assembly"
@@ -368,6 +377,7 @@ async def deep_pinned_loop(
     *,
     interval_s: float | None = None,
     send_telegram: bool = True,
+    ws_feed: Any | None = None,
 ) -> None:
     """Background continuous deep analysis for pinned anchors."""
     from hunt_core.runtime.state import should_stop
@@ -391,7 +401,7 @@ async def deep_pinned_loop(
                 break
             try:
                 prev = deep_query_store().get(sym)
-                row = await assemble_deep_tick(sym, client)
+                row = await assemble_deep_tick(sym, client, ws_feed=ws_feed)
                 if row.get("error"):
                     LOG.info("deep_pinned_tick_error", symbol=sym, error=row.get("error"))
                     continue

@@ -13,6 +13,22 @@ BTC_CORR_SIGNIFICANT = BTC_CORR_HARD  # legacy alias
 BTC_TREND_MIN_CHG_PCT = 0.12
 
 
+def _readiness_display_ge(
+    a: float | None, b: float | None, *, slack: float = 0.0
+) -> bool:
+    if a is None or b is None:
+        return False
+    return a >= b - slack
+
+
+def _readiness_display_gt(
+    a: float | None, b: float | None, *, margin: float = 0.0
+) -> bool:
+    if a is None or b is None:
+        return False
+    return a > b + margin
+
+
 def btc_market_context(btc_work_1h: Any | None) -> dict[str, Any]:
     """1h/4h BTC change and trend label from prepared 1h frame."""
     if btc_work_1h is None or getattr(btc_work_1h, "is_empty", lambda: True)():
@@ -224,12 +240,12 @@ def resolve_trade_direction(
     suppress_flip = bias == "wait" and phase in _SHORT_BIAS_PHASES
 
     if direction == "short" and short_geo and not suppress_flip:
-        if not long_geo and long_display >= short_display - 15:
+        if not long_geo and _readiness_display_ge(long_display, short_display, slack=15):
             direction = "long"
             setup = long_setup
             strength = long_strength
             notes.append(f"SHORT headwind ({short_geo}) — показан LONG")
-        elif long_geo and long_display > short_display + 8:
+        elif long_geo and _readiness_display_gt(long_display, short_display, margin=8):
             direction = "long"
             setup = long_setup
             strength = long_strength
@@ -239,12 +255,12 @@ def resolve_trade_direction(
     elif direction == "short" and short_geo and suppress_flip:
         notes.append(f"dump_active/wait — lean SHORT ({short_geo}), без flip на LONG")
     elif direction == "long" and long_geo:
-        if not short_geo and short_display >= long_display - 15:
+        if not short_geo and _readiness_display_ge(short_display, long_display, slack=15):
             direction = "short"
             setup = dump
             strength = short_strength
             notes.append(f"LONG headwind ({long_geo}) — показан SHORT")
-        elif short_geo and short_display > long_display + 8:
+        elif short_geo and _readiness_display_gt(short_display, long_display, margin=8):
             direction = "short"
             setup = dump
             strength = short_strength
@@ -380,12 +396,12 @@ def scenario_summary(
             f"⏸ Monitor · контекст {direction.upper()} ({phase}) · {readiness}"
             " — вход только после confirm"
         )
-    if display_fuel >= 60:
+    if display_fuel is not None and display_fuel >= 60:
         return (
             f"⏳ Ждём confirm · вероятен {direction.upper()} "
             f"({phase}) при закрытии 5m/15m · {readiness}"
         )
-    if display_fuel >= 45:
+    if display_fuel is not None and display_fuel >= 45:
         return (
             f"👀 Формирование · {direction.upper()} {phase} · {readiness}"
             + " — нужен пробой + второй фактор"
@@ -417,7 +433,7 @@ def forming_confirm_gaps(
                 f"5m close below {_fmt_confirm_price(support)} ({tag})"
             )
         score = readiness_score(setup, direction="short")
-        if score < 60:
+        if score is None or score < 60:
             gaps.append(confirm_gap_readiness(score))
         triggers = list(setup.get("triggers") or [])
         if not any("oi_flush" in t or "lost_support" in t or "div" in t for t in triggers):
@@ -431,7 +447,7 @@ def forming_confirm_gaps(
                 f"5m close above {_fmt_confirm_price(res)} ({tag})"
             )
         score = readiness_score(setup, direction="long")
-        if score < 60:
+        if score is None or score < 60:
             gaps.append(confirm_gap_readiness(score))
     return gaps
 

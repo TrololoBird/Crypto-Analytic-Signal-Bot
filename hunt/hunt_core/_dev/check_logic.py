@@ -359,10 +359,18 @@ def main() -> int:
     hunt_root = Path(__file__).resolve().parents[1]
     swallow_re = re.compile(r"except\s+[^:]+:\s*\n(?:[^\n]*\n)*?\s+pass\b", re.MULTILINE)
     swallow_budget: dict[str, int] = {
-        "gate/delivery.py": 12,
-        "data/collect.py": 8,
-        "scan/scoring.py": 6,
-        "contract.py": 4,
+        "deliver/dispatch.py": 0,
+        "scanner/detect/delivery_support.py": 0,
+        "scanner/gate/_strategic.py": 0,
+        "scanner/gate/_quality.py": 0,
+        "scanner/gate/_mission.py": 0,
+        "scanner/gate/_registry.py": 0,
+        "runtime/tick_assembly.py": 0,
+        "signals/emit.py": 0,
+        "data_readiness.py": 0,
+        "scanner/gate/_ev.py": 0,
+        "scanner/gate/_delivery_helpers.py": 4,
+        "features/snapshot.py": 8,
     }
     for rel, budget in swallow_budget.items():
         path = hunt_root / rel
@@ -928,8 +936,13 @@ def main() -> int:
 
     from hunt_core.runtime.cycle._cycle_confirm import _advisory_tg_enabled
 
-    if _advisory_tg_enabled():
-        issues.append("advisory TG must stay off by default after legacy purge")
+    _prev_adv = os.environ.pop("HUNT_ADVISORY_TG", None)
+    try:
+        if _advisory_tg_enabled():
+            issues.append("advisory TG must stay off by default after legacy purge")
+    finally:
+        if _prev_adv is not None:
+            os.environ["HUNT_ADVISORY_TG"] = _prev_adv
 
     # dump_hunt / early advisory paths removed — fusion confirm-only on production lane.
     from hunt_core.scanner.gate._lifecycle_gates import collect_lifecycle_blockers
@@ -1025,8 +1038,10 @@ def main() -> int:
     fusion = evaluate_manipulation_fusion(dist_row)
     if fusion.archetype != "predump_short":
         issues.append(f"distribution fixture expected predump_short got {fusion.archetype}")
-    if fusion.required_n > 0 and fusion.primary_score != round(
-        100.0 * fusion.pass_count / fusion.required_n, 1
+    from hunt_core.analysis.playbook_checks import playbook_pass_ratio
+
+    if fusion.required_n > 0 and fusion.primary_score != playbook_pass_ratio(
+        fusion.archetype, fusion.checks
     ):
         issues.append("primary_score must equal playbook pass ratio")
     from hunt_core.analysis.manipulation_fusion import assessment_to_dict
@@ -1115,6 +1130,8 @@ def main() -> int:
     weak_row["manipulation_fusion"] = assessment_to_dict(fusion)
     weak_checks = dict((weak_row["manipulation_fusion"] or {}).get("checks") or {})
     weak_checks["distribution_phase"] = False
+    weak_checks["bear_cvd_div"] = False
+    weak_checks["sweep_reclaim"] = False
     weak_row["manipulation_fusion"]["checks"] = weak_checks
     pb_blocked = _playbook_check(
         row=weak_row,
@@ -1193,6 +1210,31 @@ def main() -> int:
     mission_mid = mission_delivery_block(direction="short", lifecycle=mid_lc, setup={})
     if mission_mid is None or mission_mid.code != "mission_mid_dump":
         issues.append("fusion mid short must block with mission_mid_dump")
+
+    prep_row = {
+        "market": {
+            "oi_z": 1.1,
+            "map_accumulation_score": 0.55,
+            "depth_imbalance": 0.18,
+            "map_absorption_count": 2,
+            "map_cvd_divergence": "bullish_div",
+            "funding_rate": -0.0002,
+            "map_accum_bid_absorption": True,
+            "map_poc_migration_1h": "up",
+        }
+    }
+    mid_long_lc = {**pre_dump_lc, "phase": "mid", "phase_fusion": "mid", "leg_gain_pct": 4.0}
+    mission_prep_mid = mission_delivery_block(
+        direction="long",
+        lifecycle=mid_long_lc,
+        setup={"phase": "mid"},
+        symbol="BELUSDT",
+        row=prep_row,
+    )
+    if mission_prep_mid is not None:
+        issues.append(
+            f"prep_ready long must bypass mission_mid_pump got {mission_prep_mid.code}"
+        )
 
     flags = fusion_lifecycle_flags(
         side="short", phase=PRE_DUMP, gate_open=False, watch_ok=True
@@ -1279,6 +1321,83 @@ def main() -> int:
         os.environ["HUNT_LONG_TG"] = _prev_long_tg
     if ramp_setup.get("delivery_lane") != "lab" or not ramp_setup.get("long_ramp_reason"):
         issues.append("uncalibrated long must route to lab lane via edge_policy")
+
+    from hunt_core.scanner.detect.delivery_support import liquidity_skip_reason
+    from hunt_core.scanner.gate._quality import (
+        _row_chg24_abs,
+        meme_anomaly_block_code,
+        passes_meme_anomaly_gate,
+    )
+
+    if liquidity_skip_reason(quote_volume="bad", oi=1.0, last_price=1.0) != "liquidity_quote_vol_invalid":
+        issues.append("liquidity_skip_reason must reject invalid quote_volume")
+    if _row_chg24_abs({}) is not None:
+        issues.append("_row_chg24_abs must return None when chg24 missing")
+    _cal = type(
+        "Cal",
+        (),
+        {"anomaly_min_chg_24h_pct": 5.0, "anomaly_min_range_24h_pct": 8.0},
+    )()
+    if passes_meme_anomaly_gate(sym="TESTUSDT", row={}, lc={}, cal=_cal):
+        issues.append("passes_meme_anomaly_gate must fail when chg24 and range missing")
+    if meme_anomaly_block_code(sym="TESTUSDT", row={}, lc={}, cal=_cal) != "data.chg24_missing":
+        issues.append("meme_anomaly_block_code must return data.chg24_missing when inputs absent")
+
+    from hunt_core.deliver.dispatch import unified_cooldown_ok
+
+    now = datetime.now(UTC)
+    if unified_cooldown_ok(
+        {"unified:TESTUSDT:short:confirm": "not-an-iso-timestamp"},
+        symbol="TESTUSDT",
+        direction="short",
+        stage="confirm",
+        now=now,
+    ):
+        issues.append("unified_cooldown_ok must fail-closed on corrupt confirm timestamp")
+
+    from hunt_core.deliver.dispatch import readiness_score
+
+    if readiness_score({}, direction="short") is not None:
+        issues.append("readiness_score must return None when dump_score/fusion absent")
+
+    from hunt_core.scanner.gate._policy_decl import _decl_check_ev_delivery
+
+    ev_gate = _decl_check_ev_delivery(
+        row={"symbol": "TESTUSDT", "market": {}},
+        setup={"confirmed": False},
+        direction="short",
+        lifecycle={},
+        delivery_tier="forming",
+        symbol="TESTUSDT",
+    )
+    if ev_gate is None or getattr(ev_gate, "code", None) != "data.ev_missing":
+        issues.append("_decl_check_ev_delivery must gate data.ev_missing when EV and P(win) absent")
+
+    from hunt_core.deep.format_pinned_signal import (
+        _gate_diagnostic_lines,
+        _hypothesis_header,
+        _show_activation_block,
+        _use_soft_narrative,
+    )
+
+    if _show_activation_block("WAIT", "poor"):
+        issues.append("_show_activation_block must hide activation on WAIT+poor")
+    if not _use_soft_narrative("WAIT", "moderate", 0.6):
+        issues.append("_use_soft_narrative must soften labels on WAIT")
+    if _hypothesis_header("WAIT", ["strength", "rr_primary"]) != "Гипотеза (отклонена)":
+        issues.append("_hypothesis_header must mark rejected hypothesis on strength/RR fail")
+    diag = _gate_diagnostic_lines(
+        ["strength", "rr_primary"],
+        ("стакан против шорта",),
+        strength_score=0.24,
+        strength_min=0.5,
+        fragility_score=0.4,
+        fragility_max=0.65,
+        plan=type("P", (), {"rr_primary": 0.42})(),
+        rr_min=0.75,
+    )
+    if len(diag) < 3 or "0.24" not in diag[0]:
+        issues.append("_gate_diagnostic_lines must expose numeric gate diagnostics")
 
     if issues:
         for item in issues:

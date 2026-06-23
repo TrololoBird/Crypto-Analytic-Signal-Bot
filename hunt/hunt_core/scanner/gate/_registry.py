@@ -302,6 +302,7 @@ def _gate_mission(
         lifecycle=lifecycle if isinstance(lifecycle, dict) else {},
         setup=setup,
         symbol=sym,
+        row=row,
     )
 
 

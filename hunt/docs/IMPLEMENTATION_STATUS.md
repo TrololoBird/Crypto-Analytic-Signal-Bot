@@ -2,9 +2,11 @@
 
 > Canon: **Module 1 = Deep** · **Module 2 = Scanner** · Plan: `abstract-chasing-cerf.md`
 
-## Summary (2026-06-22)
+## Summary (2026-06-23)
 
-**Logic redesign P0–P9 — 100% complete.** Full suite green.
+**Logic redesign P0–P9 — complete** (abstract-chasing-cerf scope). Full offline suite green.
+
+**Architectural debt** (config drift, Signal Ledger, authority funnel stats, backtest gap) is tracked separately in [`ARCHITECTURE_DEBT.md`](ARCHITECTURE_DEBT.md) — not part of P0–P9 closure.
 
 ## Phase checklist (abstract-chasing-cerf)
 
@@ -35,9 +37,11 @@
 | 11 | Scanner → `/signal SYM` link in delivery card | ✅ |
 | 13 | Price sanity withhold | ✅ `shared/price_sanity.py` |
 
-## Removed legacy paths
+## Removed legacy paths (detection stack)
 
-`deep_change_fingerprint` · `_prospective_levels` · `target_signal_rate` · `auto_tune_*` · `should_send_pinned_batch`
+`deep_change_fingerprint` · `_prospective_levels` · `target_signal_rate` · `auto_tune_*` · `should_send_pinned_batch` · `scan/{predump,prepump,…}` · `regime/leg_fsm`
+
+**Compat stubs remain** (`detect/legacy_compat.py`, `probe_compat.py`, `scan/scanner.py` shim) — see `ARCHITECTURE_DEBT.md`. Wording **“legacy detection removed”** is accurate; **“zero legacy”** is not.
 
 ## Legacy marker audit (touched modules)
 

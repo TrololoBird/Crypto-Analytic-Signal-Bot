@@ -292,7 +292,7 @@ async def run_loop(
         from hunt_core.runtime.deep_assembly import deep_pinned_loop
 
         deep_task = asyncio.create_task(
-            deep_pinned_loop(client, broadcaster, send_telegram=send_telegram),
+            deep_pinned_loop(client, broadcaster, send_telegram=send_telegram, ws_feed=ws_feed),
             name="deep_pinned_loop",
         )
         LOG.info("deep_pinned_loop_scheduled")
@@ -447,7 +447,7 @@ async def run_loop(
                             "readiness_direction": _h.readiness_direction,
                             "interval": _h.interval,
                             "cross_venues": _h.cross_venues,
-                            "oi_divergence": _h.oi_divergence,
+                            "oi_divergence": getattr(_h, "oi_divergence", None),
                         }
                 prescan_ready = prescan_debounce.drain_ready()
                 if prescan_ready:
@@ -456,6 +456,15 @@ async def run_loop(
                         count=len(prescan_ready),
                         head=[d.symbol for d in prescan_ready[:6]],
                     )
+                    try:
+                        from hunt_core.diagnostics.universe_audit import (
+                            append_prescan_universe_audit,
+                        )
+
+                        for _d in prescan_ready:
+                            append_prescan_universe_audit(_d, ts=now)
+                    except Exception:
+                        pass
                     for d in prescan_ready[:12]:
                         record_funnel_stage(
                             "prescan",
@@ -498,8 +507,43 @@ async def run_loop(
                         )
                         or prescan_thresholds()["merge_cap"]
                     )
-                    prescan_to_merge = prescan_ready[: max(prescan_merge_cap, 0)]
-                    prescan_pinned_ready = set()
+                    max_chg_merge = float(
+                        os.getenv(
+                            "HUNT_PRESCAN_MAX_CHANGE_PCT",
+                            str(prescan_thresholds()["max_change_pct_for_merge"]),
+                        )
+                        or prescan_thresholds()["max_change_pct_for_merge"]
+                    )
+                    from hunt_core.data.scanner import prescan_merge_eligible
+
+                    prescan_filtered: list[Any] = []
+                    prescan_skipped_late = 0
+                    for _d in prescan_ready:
+                        if prescan_merge_eligible(_d, max_change_pct=max_chg_merge):
+                            prescan_filtered.append(_d)
+                        else:
+                            prescan_skipped_late += 1
+                            try:
+                                from hunt_core.diagnostics.universe_audit import (
+                                    append_prescan_merge_skip_audit,
+                                )
+
+                                append_prescan_merge_skip_audit(
+                                    _d,
+                                    reason="late_chase",
+                                    max_change_pct=max_chg_merge,
+                                    ts=now,
+                                )
+                            except Exception:
+                                pass
+                    if prescan_skipped_late:
+                        LOG.info(
+                            "hunt_prescan_late_chase_skipped",
+                            skipped=prescan_skipped_late,
+                            max_change_pct=max_chg_merge,
+                            eligible=len(prescan_filtered),
+                        )
+                    prescan_to_merge = prescan_filtered[: max(prescan_merge_cap, 0)]
                     if len(prescan_ready) > len(prescan_to_merge):
                         LOG.info(
                             "hunt_prescan_merge_capped",

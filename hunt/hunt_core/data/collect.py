@@ -453,6 +453,10 @@ async def fetch_rest_pack(
         from hunt_core.data.collect import safe_fetch
 
         pack["book_ticker"] = await safe_fetch(client._fetch_book_ticker_rest_detail(symbol))
+    try:
+        pack["_rest_cache_ages"] = client.snapshot_rest_cache_ages(symbol)
+    except Exception:
+        pack["_rest_cache_ages"] = {}
     return pack
 
 

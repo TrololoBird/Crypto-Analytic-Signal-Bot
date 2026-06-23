@@ -11,7 +11,7 @@ PumpEvent = Literal["start", "peak", "end"]
 
 _DEFAULT_CUSUM_THRESHOLD = 2.5
 _DEFAULT_RESIDUAL_THRESHOLD = 2.0
-_CUSUM_CLIP = 50.0
+_CUSUM_CLIP = 500.0
 
 
 def _log_returns(close: pl.Series) -> pl.Series:

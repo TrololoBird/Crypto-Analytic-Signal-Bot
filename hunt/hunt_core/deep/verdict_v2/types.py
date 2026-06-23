@@ -277,6 +277,13 @@ class ScenarioVerdict:
             out["rr_base_label"] = plan.rr_base_label
             out["plan_lifecycle"] = plan.plan_lifecycle
             out["entry_reference"] = plan.entry_reference
+            out["entry_type"] = plan.entry_type
+            from hunt_core.deep.plan import plan_geometry_valid
+
+            out["geometry_valid"] = plan_geometry_valid(
+                {"entry_zone": list(plan.entry_zone), "tp1": plan.take_profit_1},
+                direction=plan.direction,  # type: ignore[arg-type]
+            )
         out["reconcile_level"] = self.reconcile_level
         if self.reconcile_caveats:
             out["reconcile_caveats"] = list(self.reconcile_caveats)

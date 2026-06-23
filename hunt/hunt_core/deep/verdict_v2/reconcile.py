@@ -10,6 +10,7 @@ from hunt_core.deep.verdict_v2.types import EngineOutput, ExpectedPath, PatternC
 ReconcileLevel = Literal["coherent", "mild_conflict", "strong_conflict"]
 
 _DOM_CONFLICT = 0.15
+_DOM_STRONG = 0.28
 _CONF_GAP_MILD = 0.35
 _CONF_GAP_STRONG = 0.55
 _MAGNET_INTENSITY_MIN = 0.50
@@ -53,12 +54,15 @@ def _side_bias(side: str) -> str:
     return "long" if side in {"long", "weak_long"} else "short" if side in {"short", "weak_short"} else "neutral"
 
 
-def _dom_conflict(side: str, imb: float) -> str | None:
+def _dom_conflict(side: str, imb: float) -> tuple[str | None, bool]:
+    """Return (conflict_code, is_strong)."""
     if side == "short" and imb > _DOM_CONFLICT:
-        return "dom_buyers_vs_short"
+        strong = imb >= _DOM_STRONG
+        return "dom_buyers_vs_short", strong
     if side == "long" and imb < -_DOM_CONFLICT:
-        return "dom_sellers_vs_long"
-    return None
+        strong = imb <= -_DOM_STRONG
+        return "dom_sellers_vs_long", strong
+    return None, False
 
 
 def _band_conflicts(side: str, pos: EngineOutput | None) -> list[str]:
@@ -164,7 +168,7 @@ def _poc_conflict(row: dict[str, Any], *, side: str, patterns: PatternConfidence
         return None
     pid = patterns.primary.id
     cites_up = pid in {"short_squeeze", "accumulation", "stop_hunt"} or "above_poc" in patterns.primary.evidence
-    cites_down = pid in {"long_squeeze", "distribution", "liquidity_sweep"} or "below_poc" in patterns.primary.evidence
+    cites_down = pid in {"long_squeeze", "distribution", "bear_continuation", "liquidity_sweep"} or "below_poc" in patterns.primary.evidence
     if side == "short" and cites_up and price > poc:
         return "poc_cite_mismatch"
     if side == "long" and cites_down and price < poc:
@@ -173,7 +177,12 @@ def _poc_conflict(row: dict[str, Any], *, side: str, patterns: PatternConfidence
 
 
 def _classify_level(conflicts: list[str]) -> ReconcileLevel:
-    hard = {"liq_magnet_above_stop", "liq_magnet_below_stop"}
+    hard = {
+        "liq_magnet_above_stop",
+        "liq_magnet_below_stop",
+        "dom_buyers_vs_short_strong",
+        "dom_sellers_vs_long_strong",
+    }
     if any(c in hard for c in conflicts):
         return "strong_conflict"
     if len(conflicts) >= 3:
@@ -218,9 +227,11 @@ def reconcile_context(
     conflicts: list[str] = []
     market = row.get("market") if isinstance(row.get("market"), dict) else {}
     imb = safe_float(market.get("depth_imbalance") or market.get("map_book_imbalance_1pct"))
-    dom = _dom_conflict(side, imb)
+    dom, dom_strong = _dom_conflict(side, imb)
     if dom:
         conflicts.append(dom)
+        if dom_strong:
+            conflicts.append(f"{dom}_strong")
 
     pos = engines.get("positioning")
     conflicts.extend(_band_conflicts(side, pos))

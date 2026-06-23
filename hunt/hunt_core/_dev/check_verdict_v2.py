@@ -196,6 +196,52 @@ def check_reconcile_strong_conflict() -> None:
     assert rec.level in {"mild_conflict", "strong_conflict"}
 
 
+def check_plan_eth_geometry() -> None:
+    """ETH case: zone top must stay below TP1 and below market on pullback_limit."""
+    from hunt_core.deep.plan import finalize_plan_geometry, plan_geometry_valid
+    from hunt_core.deep.verdict_v2.config import TradePlanConfig
+    from hunt_core.deep.verdict_v2.levels import entry_zone
+    from hunt_core.deep.verdict_v2.types import ExpectedPath
+    from hunt_core.deep.verdict_v2.trade_plan import build_trade_plan
+
+    row = {
+        "symbol": "ETHUSDT",
+        "price": 1667.52,
+        "market": {"map_vp_poc": 1731.65, "atr14": 12.0},
+        "structure": {
+            "key_levels": {"resistance": 1667.8, "support": 1650.35, "last_swing_low": 1650.0},
+            "liquidity_pools": {"nearest_below": 1663.36},
+        },
+        "regime": {"poc_1h": 1731.65},
+    }
+    zone, _ = entry_zone(row, "long", 0.35)
+    assert zone[1] < row["price"], f"zone hi {zone[1]} must be below price"
+    path = ExpectedPath(
+        "breakout_up", "long", (1.0, 3.0), (6.0, 24.0), 1725.0, 0.6, "test", [], ""
+    )
+    plan = build_trade_plan(row, path, TradePlanConfig())
+    assert plan is not None
+    assert plan.take_profit_1 > plan.entry_zone[1], (
+        f"tp1 {plan.take_profit_1} must exceed zone top {plan.entry_zone[1]}"
+    )
+    assert plan_geometry_valid(
+        {"entry_zone": list(plan.entry_zone), "tp1": plan.take_profit_1},
+        direction="long",
+    )
+    geom = finalize_plan_geometry(
+        {
+            "entry_zone": [1662.0, 1733.46],
+            "stop_loss": 1650.35,
+            "tp1": 1725.17,
+            "price_hint": 1667.52,
+        },
+        direction="long",
+        atr=12.0,
+    )
+    assert geom["geometry_valid"]
+    assert geom["entry_zone"][1] < geom["tp1"]
+
+
 def check_plan_monotonic_r() -> None:
     from hunt_core.deep.plan import finalize_plan_geometry
 
@@ -277,6 +323,7 @@ def main() -> int:
         check_suggest_gates,
         check_signal_queue_score,
         check_reconcile_strong_conflict,
+        check_plan_eth_geometry,
         check_plan_monotonic_r,
         check_queue_gold_collapse,
     ]

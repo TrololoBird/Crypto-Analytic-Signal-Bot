@@ -136,6 +136,20 @@ def build_detection(
     if gate_decision.gate_open and not phase_info.watch_ok and not coil_armed:
         reasons.append(f"phase_block:{phase_info.phase}")
 
+    # P5: preparation readiness opens the gate when fusion magnitude/phase blocked
+    # but energy+direction resolve (fixes below_abs_floor + mid on violent alts).
+    ctx = context if isinstance(context, dict) else {}
+    if ctx and fusion.side in {"long", "short"}:
+        from hunt_core.scanner.gate._mission import assess_preparation_readiness
+
+        prep_ready, prep_tags = assess_preparation_readiness(ctx, direction=fusion.side)
+        if prep_ready and not gate_open:
+            if phase_info.mid:
+                reasons.append("prep_blocked_mid_leg")
+            else:
+                gate_open = True
+                reasons.append(f"prep_readiness:{','.join(prep_tags) or 'ok'}")
+
     return Detection(
         symbol=window.symbol,
         tf=window.tf,

@@ -51,7 +51,7 @@ def playbook_pass_count(
     archetype: str,
     checks: dict[str, bool],
 ) -> tuple[int, int]:
-    """Return (pass_count, required_n) for archetype checklist."""
+    """Return (pass_count, required_min) for archetype N-of-M gate."""
     from hunt_core.analysis.archetypes import playbook_archetype_key
 
     archetype = playbook_archetype_key(archetype)
@@ -61,16 +61,20 @@ def playbook_pass_count(
     if not keys:
         return 0, 0
     passed = sum(1 for k in keys if checks.get(k))
-    _, required = PLAYBOOK_N_OF_M.get(str(archetype), (len(keys), len(keys)))
-    return passed, required
+    min_pass, _total = PLAYBOOK_N_OF_M.get(str(archetype), (len(keys), len(keys)))
+    return passed, min_pass
 
 
 def playbook_pass_ratio(archetype: str, checks: dict[str, bool]) -> float:
     """0–100 rank score from pass ratio (canonical primary_score)."""
-    passed, required = playbook_pass_count(archetype, checks)
-    if required <= 0:
+    from hunt_core.analysis.archetypes import playbook_archetype_key
+
+    archetype = playbook_archetype_key(archetype)
+    keys = PLAYBOOK_REQUIRED.get(str(archetype), frozenset())
+    if not keys:
         return 0.0
-    return round(100.0 * passed / required, 1)
+    passed = sum(1 for k in keys if checks.get(k))
+    return round(100.0 * passed / len(keys), 1)
 
 
 def playbook_passes(archetype: str, checks: dict[str, bool]) -> bool:
@@ -87,13 +91,18 @@ def best_archetype_by_ratio(checks: dict[str, bool]) -> tuple[str, float, int, i
     best_pc = 0
     best_req = 0
     for arch in ("predump_short", "prepump_long", "ignition_long"):
-        pc, req = playbook_pass_count(arch, checks)
-        ratio = (100.0 * pc / req) if req > 0 else 0.0
+        keys = PLAYBOOK_REQUIRED.get(arch, frozenset())
+        if not keys:
+            continue
+        pc = sum(1 for k in keys if checks.get(k))
+        total = len(keys)
+        ratio = (100.0 * pc / total) if total > 0 else 0.0
+        min_pass, _ = PLAYBOOK_N_OF_M.get(arch, (total, total))
         if ratio > best_ratio or (ratio == best_ratio and pc > best_pc):
             best_arch = arch
             best_ratio = ratio
             best_pc = pc
-            best_req = req
+            best_req = min_pass
     if best_pc <= 0:
         return "none", 0.0, 0, 0
     return best_arch, round(best_ratio, 1), best_pc, best_req

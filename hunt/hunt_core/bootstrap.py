@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import importlib
 import sys
-import warnings
 from pathlib import Path
 
 _FEATURE_STACK: tuple[str, ...] = (
@@ -21,21 +20,6 @@ def bootstrap() -> Path:
     for p in (str(repo), str(hunt_root)):
         if p not in sys.path:
             sys.path.insert(0, p)
-    # `cd hunt && ../.venv/bin/python` makes site.py warn on non-canonical prefix.
-    venv = (repo / ".venv").resolve()
-    if (venv / "pyvenv.cfg").is_file():
-        warnings.filterwarnings(
-            "ignore",
-            message="Unexpected value in sys.prefix.*",
-            category=RuntimeWarning,
-            module="site",
-        )
-        warnings.filterwarnings(
-            "ignore",
-            message="Unexpected value in sys.exec_prefix.*",
-            category=RuntimeWarning,
-            module="site",
-        )
     return repo
 
 

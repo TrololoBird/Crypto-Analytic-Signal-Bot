@@ -23,6 +23,7 @@ from hunt_core.data.completeness import (
     stamp_market_freshness,
 )
 from hunt_core.contract import stamp_market_derivatives_provenance
+from hunt_core.errors import finite_float_or_none
 from hunt_core.features.prepare import _prepare_frame, prepare_symbol
 from hunt_core.features.prepare_columns import (
     book_walls_from_depth,
@@ -261,10 +262,12 @@ def _ensure_kinematic_row_fields(
 ) -> None:
     """Backfill chg fields so kinematic gate is not blocked on hot/carry ticks."""
     if result.get("chg_24h_pct") is None and isinstance(ticker, dict):
-        try:
-            result["chg_24h_pct"] = round(float(ticker.get("price_change_percent") or 0), 2)
-        except (TypeError, ValueError):
-            pass
+        raw = ticker.get("price_change_percent")
+        if raw is not None:
+            try:
+                result["chg_24h_pct"] = round(float(raw), 2)
+            except (TypeError, ValueError):
+                LOG.warning("kinematic_chg24_parse_failed", raw=raw)
     tf = result.get("timeframes")
     if not isinstance(tf, dict):
         return
@@ -318,7 +321,20 @@ async def snapshot_symbol(
             "symbol": symbol,
             "error": f"symbol_meta_or_ticker_missing:{symbol}",
         }
-    price = float(ticker.get("last_price") or 0)
+    last_price = finite_float_or_none(ticker.get("last_price"))
+    quote_volume = finite_float_or_none(ticker.get("quote_volume"))
+    missing_fields = [
+        name
+        for name, val in (("last_price", last_price), ("quote_volume", quote_volume))
+        if val is None
+    ]
+    if missing_fields:
+        return {
+            "ts": datetime.now(UTC).isoformat(),
+            "symbol": symbol,
+            "error": f"data.ticker_field_missing:{','.join(missing_fields)}",
+        }
+    price = last_price
     market_row = {
         "symbol": symbol,
         "base_asset": meta.base_asset,
@@ -326,7 +342,7 @@ async def snapshot_symbol(
         "contract_type": meta.contract_type,
         "status": meta.status,
         "onboard_date_ms": meta.onboard_date_ms,
-        "quote_volume": float(ticker.get("quote_volume") or 0),
+        "quote_volume": quote_volume,
         "price_change_percent": float(ticker.get("price_change_percent") or 0),
         "price_change_pct": float(ticker.get("price_change_percent") or 0),
         "last_price": price,
@@ -776,7 +792,7 @@ async def snapshot_symbol(
         prepared=prepared,
         ws_snap=ws_snap,
     )
-    stamp_market_freshness(market, ws_snap, pack)
+    stamp_market_freshness(market, ws_snap, pack, client=client, symbol=symbol)
     stamp_market_derivatives_provenance(market)
     from hunt_core.domain.snapshot import MarketSnapshot
 
@@ -876,10 +892,29 @@ async def snapshot_symbol(
                 and not mark_1d.is_empty()
                 and not index_1d.is_empty()
             ):
-                aligned = align_series_to_klines(
-                    mark_1d.rename({"close": "mark_close"}),
-                    index_1d.rename({"close": "index_close"}),
+                time_col = (
+                    "time"
+                    if "time" in mark_1d.columns
+                    else ("open_time" if "open_time" in mark_1d.columns else None)
                 )
+                if time_col is not None:
+                    mark_slim = mark_1d.select(
+                        time_col,
+                        pl.col("close").alias("mark_close"),
+                    )
+                    index_slim = index_1d.select(
+                        time_col if time_col in index_1d.columns else "open_time",
+                        pl.col("close").alias("index_close"),
+                    )
+                    aligned = align_series_to_klines(
+                        mark_slim,
+                        index_slim,
+                        on=time_col,
+                        left_cols=("mark_close",),
+                        right_cols=("index_close",),
+                    )
+                else:
+                    aligned = pl.DataFrame()
                 if not aligned.is_empty():
                     latest_mark = float(aligned["mark_close"][-1])
                     latest_index = float(aligned["index_close"][-1])
@@ -897,8 +932,12 @@ async def snapshot_symbol(
                         result["mark_index_slope_7d"] = round(
                             float(basis_s[-1] - basis_s[-7]), 4
                         )
-        except Exception:
-            pass
+        except Exception as exc:
+            LOG.warning(
+                "mark_index_divergence_snapshot_failed | symbol=%s error=%s",
+                symbol,
+                exc,
+            )
         try:
             from hunt_core.shared.market import attach_cross_microstructure
 
@@ -934,7 +973,8 @@ async def snapshot_symbol(
                 oi_bars = await client.fetch_oi_bars_for_maps(symbol, period="1h", limit=48)
                 if oi_bars:
                     store.cache_oi_bars(symbol, oi_bars)
-            except Exception:
+            except Exception as exc:
+                LOG.warning("maps_oi_bars_fetch_failed | symbol=%s error=%s", symbol, exc)
                 oi_bars = None
         if oi_bars is None and isinstance(liq_est, dict):
             cached = liq_est.get("oi_bars")
@@ -1036,6 +1076,12 @@ async def snapshot_symbol(
         long_setup["bars_1h"] = bars_1h
         result["dump"] = dump
         result["long"] = long_setup
+        try:
+            from hunt_core.analysis.manipulation_fusion import stamp_fusion_on_row
+
+            stamp_fusion_on_row(result)
+        except Exception as exc:
+            LOG.debug("manipulation_fusion_stamp_skipped | symbol=%s error=%s", symbol, exc)
         if side in {"long", "short"}:
             from hunt_core.track.outcome_ledger import maybe_append_candidate_ledger
 
@@ -1095,8 +1141,8 @@ async def snapshot_symbol(
         from hunt_core.domain.structure_state import structure_state_from_row
 
         result["structure_state"] = structure_state_from_row(result).to_dict()
-    except Exception:
-        pass
+    except Exception as exc:
+        LOG.warning("structure_state_snapshot_failed | symbol=%s error=%s", symbol, exc)
 
     try:
         from hunt_core.maps.forecast import stamp_forecasts_on_row

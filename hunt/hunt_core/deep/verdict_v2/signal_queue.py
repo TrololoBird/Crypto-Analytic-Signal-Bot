@@ -86,6 +86,9 @@ def compute_opportunity_score(summary: dict[str, Any], *, activation_state: str 
     if path in {"", "range"}:
         return 0.0
     rr = float(summary.get("rr_primary") or 0)
+    rr_cons = float(summary.get("rr_conservative") or 0)
+    if rr_cons > 0 and rr > rr_cons * 1.8:
+        rr = rr_cons
     rr_norm = clamp01(min(rr, 3.0) / 3.0)
     frag = float(summary.get("fragility") or 0)
     tq = str(summary.get("trade_quality") or "marginal")

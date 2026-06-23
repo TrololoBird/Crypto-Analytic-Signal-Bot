@@ -42,7 +42,7 @@ def _gen_trend(row: dict[str, Any], topo: HorizonTopology, mat: MaturityFeatures
     if mat.maturity_score > 0.5:
         score += 0.05
         evidence.append("mature_trend")
-    pid = "trend_continuation" if direction != "short" else "distribution"
+    pid = "trend_continuation" if direction != "short" else "bear_continuation"
     return PatternCandidate(id=pid, raw_score=clamp01(score), direction_hint=direction, evidence=evidence)  # type: ignore[arg-type]
 
 

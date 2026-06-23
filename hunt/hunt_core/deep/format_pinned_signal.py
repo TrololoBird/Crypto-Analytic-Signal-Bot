@@ -4,24 +4,29 @@ from __future__ import annotations
 import html
 from typing import Any
 
-from hunt_core.deep.verdict_v2.types import ScenarioVerdict
+from hunt_core.deep.verdict_v2.types import ScenarioVerdict, TradePlan
 
 _ACTION_RU = {"LONG": "ЛОНГ", "SHORT": "ШОРТ", "WAIT": "ЖДЁМ"}
 _STRENGTH_RU = {"strong": "сильный", "moderate": "средний", "weak": "слабый"}
 _FRAG_RU = {"low": "низкая", "medium": "средняя", "high": "высокая"}
 _TRADE_RU = {"favorable": "благоприятная", "marginal": "слабая", "poor": "плохая"}
 _GATE_RU = {
-    "timing_c": "ждём подтверждения",
+    "timing_c": "нет подтверждения тайминга",
     "timing_a": "рано — ждём",
     "timing_b": "нет триггера",
     "conviction": "низкая убеждённость",
     "structure": "структура не подтверждена",
     "confluence": "нет слияния факторов",
-    "rr": "R:R недостаточный",
-    "rr_primary": "R:R недостаточный",
+    "rr": "R:R ниже порога",
+    "rr_primary": "R:R ниже порога",
     "strength": "сила сигнала низкая",
     "fragility": "высокая хрупкость",
     "regime": "рыночный режим против",
+    "context_conflict": "контекст против сделки",
+    "catalyst": "катализатор слабый",
+    "no_plan": "нет торгового плана",
+    "coverage": "недостаточно данных",
+    "path_neutral": "нейтральный путь",
 }
 _ENTRY_TYPE_RU = {"market": "рынок", "pullback_limit": "лимит на откате", "limit": "лимит"}
 
@@ -42,9 +47,25 @@ _PATH_RU = {
     "liquidity_sweep": "снятие ликвидности",
     "stop_hunt": "охота за стопами",
     "distribution": "распределение",
+    "bear_continuation": "медвежье продолжение",
     "accumulation": "накопление",
     "range": "боковик",
 }
+# Softer display when strength is weak / no trade permission (flow not proven).
+_PATH_SOFT_RU = {
+    "pullback_down": "локальный откат",
+    "pullback_up": "локальный отскок",
+    "distribution": "локальное сопротивление",
+    "accumulation": "локальный спрос",
+    "liquidity_sweep": "отказ у уровня",
+    "stop_hunt": "отскок от уровня",
+    "continuation_down": "локальное давление вниз",
+    "continuation_up": "локальное давление вверх",
+}
+_REJECT_HYPOTHESIS_GATES = frozenset(
+    {"strength", "rr", "rr_primary", "context_conflict", "fragility"}
+)
+_FLOW_HEAVY_PATTERNS = frozenset({"distribution", "bear_continuation", "accumulation"})
 _CATALYST_RU = {
     "Sweep highs then reject": "снятие хаёв и отказ",
     "Sweep lows then reclaim": "снятие лоёв и возврат",
@@ -56,20 +77,22 @@ _CATALYST_RU = {
 }
 
 
-def _ru_path(token: str) -> str:
+def _ru_path(token: str, *, soft: bool = False) -> str:
     key = token.strip().lower().replace(" ", "_")
+    if soft:
+        return _PATH_SOFT_RU.get(key, _PATH_RU.get(key, token.strip()))
     return _PATH_RU.get(key, token.strip())
 
 
-def _ru_narrative(narrative: str) -> str:
+def _ru_narrative(narrative: str, *, soft: bool = False) -> str:
     """Translate engine narrative '<path> via <pattern>' to Russian."""
     narrative = narrative.strip()
     if narrative.startswith("via "):
-        return f"через {_ru_path(narrative[4:])}"
+        return f"через {_ru_path(narrative[4:], soft=soft)}"
     if " via " in narrative:
         left, right = narrative.split(" via ", 1)
-        return f"{_ru_path(left)} через {_ru_path(right)}"
-    return _ru_path(narrative)
+        return f"{_ru_path(left, soft=soft)} через {_ru_path(right, soft=soft)}"
+    return _ru_path(narrative, soft=soft)
 
 
 def _ru_catalyst(label: str) -> str:
@@ -100,6 +123,111 @@ def _gate_label(code: str) -> str:
     return _GATE_RU.get(code.lower(), code.replace("_", " "))
 
 
+def _use_soft_narrative(
+    action: str,
+    strength_label: str,
+    strength_score: float,
+    *,
+    pattern_id: str = "",
+    flow_evidence: bool = False,
+) -> bool:
+    """Weaken flow-heavy pattern words when there is no trade permission or flow proof."""
+    if action == "WAIT":
+        return True
+    if strength_label == "weak" or strength_score < 0.52:
+        return True
+    if pattern_id in _FLOW_HEAVY_PATTERNS and not flow_evidence:
+        return True
+    return False
+
+
+def _flow_evidence_present(v2: ScenarioVerdict) -> bool:
+    flow = v2.engine_outputs.get("flow") if isinstance(v2.engine_outputs, dict) else None
+    if flow is None:
+        return False
+    return bool(flow.evidence) and max(float(flow.long), float(flow.short)) >= 0.55
+
+
+def _hypothesis_header(action: str, gates_failed: tuple[str, ...] | list[str]) -> str:
+    if action != "WAIT":
+        return "Сценарий"
+    codes = {str(g).lower() for g in gates_failed}
+    if codes & _REJECT_HYPOTHESIS_GATES:
+        return "Гипотеза (отклонена)"
+    return "Гипотеза (не для входа)"
+
+
+def _show_activation_block(action: str, trade_verdict: str) -> bool:
+    """Geographic activation must not imply entry when decision is WAIT or trade is poor."""
+    if action != "WAIT":
+        return True
+    return trade_verdict == "favorable"
+
+
+def _gate_diagnostic_lines(
+    gates_failed: tuple[str, ...] | list[str],
+    reconcile_caveats: tuple[str, ...] | list[str],
+    *,
+    strength_score: float,
+    strength_min: float,
+    fragility_score: float,
+    fragility_max: float,
+    plan: TradePlan | None,
+    rr_min: float,
+) -> list[str]:
+    """Explicit failed-gate diagnostics for operator audit."""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for raw in gates_failed:
+        code = str(raw).lower()
+        if code == "strength":
+            line = f"• strength {strength_score:.2f} < {strength_min:.2f}"
+        elif code in {"rr", "rr_primary"} and plan is not None:
+            line = f"• R:R {plan.rr_primary:.2f} < {rr_min:.2f}"
+        elif code == "fragility":
+            line = f"• fragility {fragility_score:.2f} > {fragility_max:.2f}"
+        elif code == "timing_c":
+            line = "• timing C не готов (ждём closed-bar)"
+        elif code == "context_conflict":
+            line = "• контекст против сделки"
+        elif code == "coverage":
+            line = f"• {_gate_label(code)}"
+        else:
+            line = f"• {_gate_label(code)}"
+        if line not in seen:
+            lines.append(line)
+            seen.add(line)
+    for caveat in reconcile_caveats[:3]:
+        text = str(caveat).strip()
+        if not text:
+            continue
+        dom_hint = "DOM" in text or "стакан" in text
+        line = f"• {text}" if not dom_hint else f"• DOM: {text}"
+        if line not in seen:
+            lines.append(line)
+            seen.add(line)
+    return lines
+
+
+def _why_wait_lines(
+    gates_failed: tuple[str, ...] | list[str],
+    reconcile_caveats: tuple[str, ...] | list[str],
+) -> list[str]:
+    lines: list[str] = []
+    seen: set[str] = set()
+    for code in gates_failed:
+        label = _gate_label(str(code))
+        if label not in seen:
+            lines.append(f"• {label}")
+            seen.add(label)
+    for caveat in reconcile_caveats[:3]:
+        text = str(caveat).strip()
+        if text and text not in seen:
+            lines.append(f"• {text}")
+            seen.add(text)
+    return lines
+
+
 def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = None) -> str:
     v2 = verdict or row.get("verdict_v2")
     # Defensive: a JSONL-roundtripped row carries verdict_v2 as a plain dict, which
@@ -119,19 +247,57 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
     action = dec.action.upper()
     action_ru = _ACTION_RU.get(action, action)
     emoji = {"LONG": "🟢", "SHORT": "🔴", "WAIT": "⏳"}.get(action, "⏳")
+    from hunt_core.deep.verdict_v2.config import load_verdict_v2_config
 
-    path_type_str = html.escape(_ru_path(path.type))
+    cfg = load_verdict_v2_config()
+    pattern_id = v2.pattern_confidence.primary.id
+    flow_ok = _flow_evidence_present(v2)
+    soft_narr = _use_soft_narrative(
+        action,
+        strength.label,
+        strength.score,
+        pattern_id=pattern_id,
+        flow_evidence=flow_ok,
+    )
+
+    path_type_str = html.escape(_ru_path(path.type, soft=soft_narr))
     narr = _dedup_narrative(path.type, path.narrative[:80])
-    narr_str = html.escape(_ru_narrative(narr)) if narr else ""
+    narr_str = html.escape(_ru_narrative(narr, soft=soft_narr)) if narr else ""
 
     lines = [f"{emoji} <b>{sym} — {action_ru}</b>"]
+    if action == "WAIT":
+        lines.append("📌 <b>Итог: НЕТ СДЕЛКИ</b> · вход не разрешён")
+        reasons = _gate_diagnostic_lines(
+            dec.gates_failed,
+            v2.reconcile_caveats,
+            strength_score=strength.score,
+            strength_min=cfg.gates.strength_min,
+            fragility_score=frag.score,
+            fragility_max=cfg.gates.fragility_max,
+            plan=plan,
+            rr_min=cfg.gates.rr_primary_min,
+        )
+        if reasons:
+            hdr = (
+                "Причины отказа"
+                if {str(g).lower() for g in dec.gates_failed} & _REJECT_HYPOTHESIS_GATES
+                else "Почему ждём"
+            )
+            lines.append(f"{hdr}:")
+            lines.extend(html.escape(line) for line in reasons)
+
+    scenario_hdr = _hypothesis_header(action, dec.gates_failed)
     if narr_str and narr_str != path_type_str:
-        lines.append(f"Сценарий: <b>{path_type_str}</b> · {narr_str}")
+        lines.append(f"{scenario_hdr}: <b>{path_type_str}</b> · {narr_str}")
     else:
-        lines.append(f"Сценарий: <b>{path_type_str}</b>")
+        lines.append(f"{scenario_hdr}: <b>{path_type_str}</b>")
 
     cat_label_ru = html.escape(_ru_catalyst(cat.label))
-    if cat.trigger_level:
+    if action == "WAIT":
+        lines.append(f"Условие гипотезы: {cat_label_ru}" + (
+            f" @ <code>{_px(cat.trigger_level)}</code>" if cat.trigger_level else ""
+        ))
+    elif cat.trigger_level:
         lines.append(f"Катализатор: {cat_label_ru} @ <code>{_px(cat.trigger_level)}</code>")
     else:
         lines.append(f"Катализатор: {cat_label_ru}")
@@ -164,16 +330,13 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
     strength_ru = _STRENGTH_RU.get(strength.label, strength.label)
     frag_ru = _FRAG_RU.get(frag.label, frag.label)
     trade_ru = _TRADE_RU.get(tq.verdict, tq.verdict)
+    strength_note = " · <i>индекс, не P(win)</i>" if action == "WAIT" else ""
     lines.append(
-        f"Сила сигнала <b>{strength_ru}</b> ({strength.score:.2f}) · "
+        f"Сила сигнала <b>{strength_ru}</b> ({strength.score:.2f}){strength_note} · "
         f"Хрупкость <b>{frag_ru}</b> · Сделка <b>{trade_ru}</b>"
     )
-    if v2.reconcile_caveats:
+    if v2.reconcile_caveats and action != "WAIT":
         lines.append(f"⚠️ <i>{html.escape(v2.reconcile_caveats[0])}</i>")
-
-    if dec.gates_failed:
-        gate_labels = ", ".join(_gate_label(g) for g in dec.gates_failed)
-        lines.append(f"<i>Ожидаем: {html.escape(gate_labels)}</i>")
 
     summary = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else {}
     act = str(summary.get("activation") or "")
@@ -192,12 +355,11 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
         "breakout": "пробой",
         "reversal": "разворот",
     }
-    if act and act != "idle":
+    if act and act != "idle" and _show_activation_block(action, tq.verdict):
         act_ru = _ACT_RU.get(act, act.replace("_", " "))
         lines.append(f"Активация: <b>{html.escape(act_ru)}</b>")
 
-    # Activation block is a directional-trade artifact — never show it on a WAIT/poor
-    # row (a WAIT must not read "✅ План активирован" with a degenerate 0R ladder).
+    # Plan activation is a directional-trade artifact — never on WAIT/poor rows.
     evt = summary.get("activation_event")
     if action in {"LONG", "SHORT"} and isinstance(evt, dict) and evt.get("event") == "plan_activated":
         try:
@@ -221,12 +383,10 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
         if str(p).lower().replace("_", " ") != main_path_key
     ]
     if unique_alts:
-        alt_ru = ", ".join(_ru_path(str(p)) for p in unique_alts)
+        alt_ru = ", ".join(_ru_path(str(p), soft=soft_narr) for p in unique_alts)
         lines.append(f"<i>Альт. сценарий: {html.escape(alt_ru)}</i>")
 
-    from hunt_core.deep.verdict_v2.config import load_verdict_v2_config
-
-    if load_verdict_v2_config().tg_verbose:
+    if cfg.tg_verbose:
         pc = v2.pattern_confidence
         pat_line = f"Паттерны: {pc.primary.id}"
         if pc.alternatives:
@@ -238,3 +398,14 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
         )
 
     return "\n".join(lines)
+
+
+__all__ = [
+    "_flow_evidence_present",
+    "_gate_diagnostic_lines",
+    "_hypothesis_header",
+    "_show_activation_block",
+    "_use_soft_narrative",
+    "_why_wait_lines",
+    "format_pinned_signal",
+]

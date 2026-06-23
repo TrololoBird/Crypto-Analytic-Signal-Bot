@@ -435,6 +435,39 @@ class HuntCcxtClient:
         return entry is not None and (time.monotonic() - entry[0]) < ttl
 
     @staticmethod
+    def _cache_age_s(entry: tuple[float, Any] | None) -> float | None:
+        if entry is None:
+            return None
+        return max(0.0, time.monotonic() - float(entry[0]))
+
+    def snapshot_rest_cache_ages(self, symbol: str) -> dict[str, float]:
+        """Monotonic ages (seconds) for REST enrichment caches — P0 data-plane audit."""
+        sym = self._bin_sym(symbol)
+        ages: dict[str, float] = {}
+
+        def _put(key: str, entry: tuple[float, Any] | None) -> None:
+            age = self._cache_age_s(entry)
+            if age is not None:
+                ages[key] = round(age, 2)
+
+        _put("oi", self._open_interest_cache.get(sym))
+        _put("oi_chg_5m", self._open_interest_change_cache.get((sym, "5m")))
+        _put("oi_chg_1h", self._open_interest_change_cache.get((sym, "1h")))
+        _put("ls_5m", self._long_short_ratio_cache.get((sym, "5m")))
+        _put("ls_1h", self._long_short_ratio_cache.get((sym, "1h")))
+        _put("top_ls_5m", self._top_position_ls_ratio_cache.get((sym, "5m")))
+        _put("top_ls_1h", self._top_position_ls_ratio_cache.get((sym, "1h")))
+        _put("global_ls_5m", self._global_ls_ratio_cache.get((sym, "5m")))
+        _put("global_ls_1h", self._global_ls_ratio_cache.get((sym, "1h")))
+        _put("taker_5m", self._taker_ratio_cache.get((sym, "5m")))
+        _put("taker_15m", self._taker_ratio_cache.get((sym, "15m")))
+        _put("taker_1h", self._taker_ratio_cache.get((sym, "1h")))
+        _put("funding", self._funding_rate_cache.get(sym))
+        _put("book_depth", self._order_book_depth_cache.get((sym, 100)))
+        _put("basis_5m", self._basis_cache.get((sym, "5m")))
+        return ages
+
+    @staticmethod
     def _ccxt_has(exchange: ccxt.Exchange, method: str) -> bool:
         return ccxt_method_available(exchange, method)
 

@@ -112,9 +112,10 @@ def _hunt_scenario_lines(
     )
     zone_txt = f" · <i>{zone}</i>" if zone else ""
 
+    ready_disp = f"{readiness:.0f}" if readiness is not None else "н/д"
     lines = [
         (
-            f"{emoji} <b>{label}</b>{star} · готовность <code>{readiness:.0f}</code>"
+            f"{emoji} <b>{label}</b>{star} · готовность <code>{ready_disp}</code>"
             f"{htf} · <code>{html.escape(phase)}</code>"
         ),
         (
@@ -262,8 +263,9 @@ def _alt_scenario_one_liner(
         return f"↔ <i>{label}: контр-сценарий · {html.escape(str(geo))}</i>"
     if setup.get("levels_viable") is False:
         return f"↔ <i>{label}: контр-сценарий · уровни не для входа</i>"
+    ready_txt = f"{readiness:.0f}/100" if readiness is not None else "н/д"
     return (
-        f"↔ <i>{label}: контр-сценарий · готовность {readiness:.0f}/100 "
+        f"↔ <i>{label}: контр-сценарий · готовность {ready_txt} "
         f"(не вход до confirm)</i>"
     )
 
@@ -358,7 +360,7 @@ def format_signal_brief_telegram(
         from hunt_core.deliver.dispatch import display_readiness_score
 
         alt_ready = display_readiness_score(alt_setup, direction=alt_dir, row=row)
-        if alt_ready >= 45.0:
+        if alt_ready is not None and alt_ready >= 45.0:
             lines.append("")
             lines.append(_alt_scenario_one_liner(alt_setup, direction=alt_dir, row=row))
     elif show_alt_full:

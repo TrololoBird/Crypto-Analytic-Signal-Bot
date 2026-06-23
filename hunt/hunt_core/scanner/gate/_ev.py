@@ -1,8 +1,11 @@
 """EV-primary delivery resolution — replaces fuel/min_fuel gate (X2)."""
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Literal
+
+LOG = logging.getLogger(__name__)
 
 from hunt_core.contract import compute_rule_based_ev
 from hunt_core.params.store import delivery_thresholds
@@ -35,7 +38,8 @@ def resolve_delivery_ev(
                 source = key
                 break
             except (TypeError, ValueError):
-                pass
+                LOG.debug("resolve_delivery_ev_parse_failed key=%s raw=%r", key, raw)
+                continue
 
     shadow = setup.get("ev_shadow") if isinstance(setup.get("ev_shadow"), dict) else {}
     if ev is None and shadow.get("ev") is not None:
@@ -43,7 +47,7 @@ def resolve_delivery_ev(
             ev = float(shadow["ev"])
             source = "ev_shadow"
         except (TypeError, ValueError):
-            pass
+            LOG.debug("resolve_delivery_ev_shadow_ev_parse_failed raw=%r", shadow.get("ev"))
 
     for key in ("delivery_p_win", "p_win", "catalog_p_win"):
         raw = setup.get(key)
@@ -52,12 +56,13 @@ def resolve_delivery_ev(
                 p_win = float(raw)
                 break
             except (TypeError, ValueError):
-                pass
+                LOG.debug("resolve_delivery_ev_pwin_parse_failed key=%s raw=%r", key, raw)
+                continue
     if p_win is None and shadow.get("p_win") is not None:
         try:
             p_win = float(shadow["p_win"])
         except (TypeError, ValueError):
-            pass
+            LOG.debug("resolve_delivery_ev_shadow_pwin_parse_failed raw=%r", shadow.get("p_win"))
 
     struct = structure
     if struct is None and row is not None:
@@ -134,7 +139,7 @@ def setup_fusion_score(setup: dict[str, Any]) -> float | None:
         if 0.0 <= score <= 100.0:
             return score
     except (TypeError, ValueError):
-        pass
+        LOG.debug("setup_fusion_score_parse_failed raw=%r", raw)
     return None
 
 
@@ -157,7 +162,7 @@ def setup_p_win(setup: dict[str, Any]) -> float | None:
             if 0.0 <= p <= 1.0:
                 return p
         except (TypeError, ValueError):
-            pass
+            LOG.debug("setup_p_win_shadow_parse_failed raw=%r", shadow.get("p_win"))
     return None
 
 
@@ -296,7 +301,11 @@ def setup_meets_strength(
     slack_conv: float = 0.0,
     row: dict[str, Any] | None = None,
 ) -> bool:
-    """Advisory/forming threshold — playbook first when P(win) gate off."""
+    """DEPRECATED for production confirm — use ``detect/setup_fields.setup_meets_strength``.
+
+    This copy still references ``confirm_min_score`` for legacy report paths. Hot delivery
+    imports ``setup_fields`` (fusion ``confirmed`` only). See docs/AUTHORITY_MODEL.md §1.
+    """
     if not pwin_gate_enabled() and row is not None:
         from hunt_core.scanner.playbook import setup_meets_playbook
 

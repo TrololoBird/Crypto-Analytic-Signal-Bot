@@ -1,5 +1,30 @@
 # Hunt Changelog (session notes)
 
+## 2026-06-23 — Authority model (deep architecture audit)
+
+- New [`AUTHORITY_MODEL.md`](AUTHORITY_MODEL.md) — code-verified answers to 10 structural risks (dual confirm, single-side fusion, score vs gate, backtest gap, factor floors, fast tier, scanner recall, lifecycle FSM, veto funnel, direction vs mission).
+- `[confirm.short]` in `config.defaults.toml` marked **reporting only**.
+- `HUNT_ARCHITECTURE.md`: threshold matrix, score hierarchy, lifecycle glossary aligned with code.
+- `ARCHITECTURE_DEBT.md`: P0 dual confirm, P1 factor coverage + alternate-side telemetry.
+
+## 2026-06-23 — Documentation audit (architecture spec alignment)
+
+- **IMPLEMENTATION_STATUS:** P0–P9 “complete” decoupled from open architectural debt; link to new `ARCHITECTURE_DEBT.md`.
+- **Terminology:** “fusion-driven candidate selection” replaces misleading “fusion-only / zero legacy”; compat stubs documented.
+- **Delivery authority:** single canonical order across `HUNT_ARCHITECTURE.md`, `METHODOLOGY.md`, `AUTHORITY_MAP_v2.md`.
+- **Tier capability matrix:** full vs fast vs fail-closed spelled out in architecture.
+- **Lifecycle glossary:** `confirmed` vs `activated` vs `armed` table.
+- **SCANNER_CONSOLIDATION_MAP:** explicit `maps/forecast` retention rationale.
+- **Debt register:** P0 scanner config drift, Signal Ledger, authority funnel stats, god-objects, backtest gap.
+
+## 2026-06-23 — Plan geometry + prescan universe (audit follow-up)
+
+- **Plan geometry (R3):** long pullback zone no longer spans to POC above price; `finalize_plan_geometry` clamps zone width and enforces `tp1 > entry_hi` (long). Gate `plan_geometry` blocks delivery on invalid geometry.
+- **Activation:** `pullback_limit` at resistance / above zone mid → `armed` (not `active`); fixes «лимит на откате» + «план активирован» conflict.
+- **Priority:** `opportunity_score` uses conservative RR when headline RR is inflated; no in-zone boost unless truly in zone.
+- **Prescan:** `max_change_pct_for_merge` default **8%**; late-chase filter before merge cap; `prescan_late_chase_blocked` at scan ingress.
+- **Audit:** `rr_geometry_audit.jsonl` adds `geometry_valid`; `check_plan_eth_geometry` regression.
+
 ## 2026-06-22 — Logic redesign (abstract-chasing-cerf P0–P9)
 
 - **P0:** `hunt_core/signals/` — unified lifecycle (`forming→signal→activated→tracking`), `setup_id` dedup replaces `deep_change_fingerprint`.

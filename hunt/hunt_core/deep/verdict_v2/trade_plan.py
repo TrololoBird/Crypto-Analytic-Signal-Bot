@@ -54,10 +54,12 @@ def build_trade_plan(
             "tp1": targets[0],
             "tp2": targets[1],
             "tp3": targets[2],
+            "price_hint": price,
         },
         direction=direction,
         atr=atr_for_geom,
     )
+    zone = (round(float(geom["entry_zone"][0]), 6), round(float(geom["entry_zone"][1]), 6))
     stop = float(geom.get("stop_loss") or stop)
     tp1 = float(geom.get("tp1") or targets[0])
     tp2 = float(geom.get("tp2") or targets[1])
@@ -68,14 +70,18 @@ def build_trade_plan(
     rr3 = float(geom.get("rr_tp3") or 0)
     sources = [zone_src, stop_src, *tgt_factors[:2]]
 
-    summary_stub = {"entry_lo": zone[0], "entry_hi": zone[1]}
-    act_state = str(assess_activation(row, summary_stub).get("state") or "idle")
+    summary_stub = {
+        "entry_lo": zone[0],
+        "entry_hi": zone[1],
+        "entry_type": entry_type,
+    }
+    act_state = str(assess_activation(row, summary_stub, entry_type=entry_type).get("state") or "idle")
     lifecycle = plan_lifecycle_from_activation(act_state)
 
     plan = TradePlan(
         direction=direction,  # type: ignore[arg-type]
         entry_type=entry_type,  # type: ignore[arg-type]
-        entry_zone=(round(zone[0], 6), round(zone[1], 6)),
+        entry_zone=zone,
         stop_loss=round(stop, 6),
         take_profit_1=round(tp1, 6),
         take_profit_2=round(tp2, 6),

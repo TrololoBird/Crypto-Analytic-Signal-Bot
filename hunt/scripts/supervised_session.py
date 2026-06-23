@@ -25,7 +25,9 @@ from hunt_core.paths import HUNT_SCAN_JSONL, WATCH_LOG
 DATA = HUNT / "data"
 TICK_JSONL = HUNT_SCAN_JSONL
 WATCH_SH = HUNT / "scripts" / "watch.sh"
-PY = ROOT / ".venv/bin/python"
+_hunt_py = HUNT / ".venv/bin/python"
+PY = _hunt_py if _hunt_py.is_file() else ROOT / ".venv/bin/python"
+_CHECK_LOGIC_CWD = HUNT if _hunt_py.is_file() else ROOT
 
 _ERROR_MARKERS = (
     "Traceback (most recent call last)",
@@ -179,12 +181,16 @@ def _tick_stats(*, since_bytes: int) -> dict:
 
 
 def _run_check_logic() -> tuple[bool, str]:
+    env = {k: v for k, v in os.environ.items()}
+    for key in ("HUNT_ADVISORY_TG", "HUNT_LONG_TG", "HUNT_WIDE_MODE"):
+        env.pop(key, None)
     proc = subprocess.run(
         [str(PY), "-m", "hunt_core._dev.check_logic"],
-        cwd=str(HUNT),
+        cwd=str(_CHECK_LOGIC_CWD),
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     tail = (proc.stderr or proc.stdout or "")[-400:]
     return proc.returncode == 0, tail

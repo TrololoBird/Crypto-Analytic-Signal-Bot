@@ -65,12 +65,43 @@ def build_scenario_verdict(
         topology_kind=topology.kind,
     )
     reconcile = reconcile_context(row, path, plan, engines, patterns)
+    from hunt_core.deep.verdict_v2.path_shadow import (
+        append_reconcile_path_shadow,
+        compute_shadow_path,
+        reconcile_flip_path_enabled,
+    )
+
+    shadow_path = compute_shadow_path(
+        row,
+        path,
+        reconcile_conflicts=reconcile.conflicts,
+        patterns=patterns,
+        topology=topology,
+    )
+    path_for_decision = path
+    if reconcile_flip_path_enabled() and shadow_path is not None:
+        path_for_decision = shadow_path
+        plan = build_trade_plan(row, path_for_decision, cfg.trade_plan)
+        path_for_decision = adjust_expected_move_from_plan(path_for_decision, plan)
+        fragility = compute_fragility(
+            path_for_decision, topology, disagreement, patterns, cfg, plan=plan, row=row
+        )
+        strength = compute_signal_strength(
+            path_for_decision,
+            horizons,
+            fragility,
+            disagreement,
+            data_quality,
+            symbol=sym,
+            topology_kind=topology.kind,
+        )
+        reconcile = reconcile_context(row, path_for_decision, plan, engines, patterns)
     strength = apply_reconcile_to_strength(strength, reconcile)
     trade_q = compute_trade_quality(plan, cfg)
     trade_q = apply_reconcile_to_trade_quality(trade_q, reconcile)
-    timing = assess_timing_gate(row, path.direction, horizons=horizons)
+    timing = assess_timing_gate(row, path_for_decision.direction, horizons=horizons)
     decision = decide_signal(
-        path,
+        path_for_decision,
         strength,
         fragility,
         trade_q,
@@ -80,6 +111,7 @@ def build_scenario_verdict(
         cfg,
         timing=timing,
         reconcile=reconcile,
+        row=row,
     )
 
     evidence = [
@@ -96,7 +128,7 @@ def build_scenario_verdict(
     h_c = horizons.get("C")
     if h_c:
         evidence.append(f"range_p={h_c.range_probability:.2f}")
-    return ScenarioVerdict(
+    verdict = ScenarioVerdict(
         signal_decision=decision,
         trade_plan=plan,
         expected_path=path,
@@ -119,3 +151,22 @@ def build_scenario_verdict(
         reconcile_caveats=reconcile.caveats,
         factor_contributions=reconcile.factor_contributions,
     )
+    try:
+        from hunt_core.deep.verdict_v2.rr_audit import append_rr_geometry_audit
+
+        append_rr_geometry_audit(row, plan=plan, verdict=verdict)
+    except Exception:
+        pass
+    try:
+        append_reconcile_path_shadow(
+            row,
+            path=path,
+            shadow_path=shadow_path,
+            reconcile_level=reconcile.level,
+            reconcile_conflicts=reconcile.conflicts,
+            reconcile_caveats=reconcile.caveats,
+            action=str(decision.action),
+        )
+    except Exception:
+        pass
+    return verdict

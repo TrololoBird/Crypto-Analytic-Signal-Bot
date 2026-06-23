@@ -1,7 +1,10 @@
 """Strategic gate mode — shadow until Phase 8 OOS promotion."""
 from __future__ import annotations
 
+import logging
 import os
+
+LOG = logging.getLogger(__name__)
 
 
 def strategic_gates_hard() -> bool:
@@ -12,15 +15,15 @@ def strategic_gates_hard() -> bool:
     if env in {"0", "false", "no"}:
         return False
     try:
-        from hunt_core.domain.config import load_hunt_config
+        from hunt_core.domain.config import load_settings
 
-        cfg = load_hunt_config()
+        cfg = load_settings()
         gate = getattr(cfg, "gate", None)
         strategic = getattr(gate, "strategic", None) if gate is not None else None
         if strategic is not None and hasattr(strategic, "hard"):
             return bool(strategic.hard)
     except Exception:
-        pass
+        LOG.warning("strategic_gates_config_load_failed", exc_info=True)
     return False
 
 

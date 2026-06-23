@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 import html
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -17,6 +18,9 @@ from hunt_core.shared.geometry import (
     resolve_min_rr as _resolve_min_rr,
     setup_risk_reward as _setup_rr,
 )
+
+
+LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -64,7 +68,11 @@ def unified_cooldown_ok(
         if not production_cooldown_ok(state, symbol=sym, direction=direc, now=now, minutes=minutes):
             return False
     except Exception:
-        pass
+        LOG.exception(
+            "production_cooldown_check_failed",
+            extra={"symbol": sym, "direction": direc, "stage": stage},
+        )
+        return False
     if stage == "confirm":
         raw = state.get(_unified_key(sym, direc, "confirm"))
         if raw:
@@ -73,7 +81,11 @@ def unified_cooldown_ok(
                 if now - last < timedelta(minutes=minutes):
                     return False
             except ValueError:
-                pass
+                LOG.warning(
+                    "unified_cooldown_bad_timestamp",
+                    extra={"symbol": sym, "direction": direc, "stage": stage, "raw": raw},
+                )
+                return False
         return True
     for other in ADVISORY_STAGES:
         raw = state.get(_unified_key(sym, direc, other))
@@ -102,7 +114,10 @@ def mark_unified_sent(
 
         mark_cross_channel_sent(state, symbol=symbol, direction=direction, now=now)
     except Exception:
-        pass
+        LOG.exception(
+            "mark_cross_channel_sent_failed",
+            extra={"symbol": symbol, "direction": direction, "stage": stage},
+        )
 
 
 def _contract_issues_for_setup(
@@ -384,8 +399,11 @@ def format_delivery_telegram(
             footer = format_grid_telegram(grid)
             if footer:
                 body = f"{body}\n\n{footer}"
-        except Exception:
-            pass
+        except Exception as exc:
+            LOG.warning(
+                "delivery_confluence_grid_failed",
+                extra={"symbol": sym, "error": repr(exc)},
+            )
     cx = row.get("cross_exchange")
     if isinstance(cx, dict) and cx:
         from hunt_core.deliver.telegram import format_cross_exchange_section
@@ -534,7 +552,7 @@ def _squeeze_note(row: dict[str, Any], *, direction: str) -> str | None:
         if top_ls is not None and float(top_ls) >= 2.0:
             bits.append(f"top-traders long-heavy ({float(top_ls):.2f})")
     except (TypeError, ValueError):
-        pass
+        LOG.debug("squeeze_note_top_ls_parse_failed", top_ls=top_ls)
     funding_pct_raw = market.get("funding_pct")
     funding_rate_raw = market.get("funding_rate")
     try:
@@ -546,8 +564,11 @@ def _squeeze_note(row: dict[str, Any], *, direction: str) -> str | None:
         if pct is not None and abs(pct) >= 0.005:
             bits.append(f"funding {pct:+.3f}%")
     except (TypeError, ValueError):
-        pass
-    if not bits:
+        LOG.debug(
+            "squeeze_note_funding_parse_failed",
+            funding_pct=funding_pct_raw,
+            funding_rate=funding_rate_raw,
+        )
         return None
     return " · ".join(bits) + " — контекст, не сигнал " + ("шорт" if direction == "short" else "лонг")
 
@@ -867,23 +888,26 @@ def invalidate_detail_human(detail: str, *, reason: str = "") -> str:
 # --- merged from deliver/readiness_labels.py ---
 
 
-def readiness_score(setup: dict[str, Any], *, direction: str) -> float:
+def readiness_score(setup: dict[str, Any], *, direction: str) -> float | None:
     score = setup.get("dump_score" if direction == "short" else "long_score")
     if score is not None:
         try:
             return float(score)
         except (TypeError, ValueError):
-            pass
+            LOG.debug("readiness_score_parse_failed", score=score)
     fusion = setup.get("fusion_score")
     if fusion is not None:
         try:
             return float(fusion)
         except (TypeError, ValueError):
-            pass
-    return 0.0
+            LOG.debug("readiness_score_parse_failed", score=fusion)
+    LOG.debug("readiness_score_missing direction=%s", direction)
+    return None
 
 
-def readiness_tier(score: float) -> str:
+def readiness_tier(score: float | None) -> str:
+    if score is None:
+        return "unknown"
     if score >= 70:
         return "strong"
     if score >= 60:
@@ -899,17 +923,21 @@ def display_readiness_score(
     direction: str,
     row: dict[str, Any] | None = None,
     min_rr: float = _DEFAULT_MIN_RR,
-) -> float:
+) -> float | None:
     """Fuel capped for display when geometry is not tradable."""
     min_rr = _resolve_min_rr(setup, direction=direction)
     fuel = readiness_score(setup, direction=direction)
+    if fuel is None:
+        return None
     if geometry_block_reason(setup, min_rr=min_rr, row=row, direction=direction):
         return min(fuel, 59.0)
     return fuel
 
 
-def readiness_label_ru(score: float) -> str:
+def readiness_label_ru(score: float | None) -> str:
     """User-facing tier — never say «fuel»."""
+    if score is None:
+        return "готовность н/д"
     tier = readiness_tier(score)
     s = f"{score:.0f}/100"
     if tier == "strong":
@@ -933,17 +961,21 @@ def readiness_label_for_setup(
     display = display_readiness_score(
         setup, direction=direction, row=row, min_rr=min_rr
     )
+    if display is None:
+        return "готовность н/д"
     base = readiness_label_ru(display)
     reason = geometry_block_reason(
         setup, min_rr=min_rr, row=row, direction=direction
     )
     if not reason:
         return base
-    raw_note = f" (raw {raw:.0f})" if raw > display + 0.5 else ""
+    raw_note = (
+        f" (raw {raw:.0f})" if raw is not None and raw > display + 0.5 else ""
+    )
     return f"{base}{raw_note} · ⚠️ {reason}"
 
 
-def readiness_short_ru(score: float) -> str:
+def readiness_short_ru(score: float | None) -> str:
     return readiness_label_ru(score).split("·", 1)[0].strip()
 
 
@@ -958,8 +990,10 @@ def readiness_short_for_setup(
     ].strip()
 
 
-def confirm_gap_readiness(score: float) -> str:
+def confirm_gap_readiness(score: float | None) -> str:
     """Gap line for confirm checklist."""
+    if score is None:
+        return "готовность≥60 (score отсутствует)"
     if score >= 60:
         return f"готовность OK ({score:.0f}/100)"
     return f"готовность≥60 (сейчас {score:.0f}/100)"

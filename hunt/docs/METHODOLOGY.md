@@ -6,9 +6,22 @@
 
 **Shared:** CCXT facts, prepare pipeline, mathlib, primitives, shadow ledger.
 
-## Delivery invariant (Scanner production)
+## Delivery invariant (Scanner production — canonical order)
 
-`confirmed` + playbook pass + mission pass + gate pipeline + arbiter → contract → Telegram
+One pipeline only. Full detail: [`HUNT_ARCHITECTURE.md`](HUNT_ARCHITECTURE.md) § Delivery authority · [`AUTHORITY_MAP_v2.md`](AUTHORITY_MAP_v2.md).
+
+```text
+fusion gate_open → setup.confirmed → route_tick (candidate side)
+  → validate_signal_contract + must_pass + family_vote
+  → mission + playbook N-of-M + RR + EV (+ freshness)
+  → evaluate_confirm_authorities (arbiter)
+  → run_gate_pipeline → production Telegram
+  → tracker (only after telegram_sent)
+```
+
+**Terminology:** fusion is **fusion-driven candidate selection** — it picks side and `confirmed`, but does **not** own final delivery. Playbook, mission, RR, EV, and arbiter remain blocking authorities.
+
+Lifecycle states: `HUNT_ARCHITECTURE.md` § Lifecycle state glossary · full model [`AUTHORITY_MODEL.md`](AUTHORITY_MODEL.md).
 
 ## Strategic gates (Phase 1.5, shadow until Phase 8)
 

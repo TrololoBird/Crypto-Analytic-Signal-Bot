@@ -8,9 +8,25 @@ from hunt_core.maps.oi import OiRegime, oi_regime_from_row
 
 Archetype = Literal["predump_short", "prepump_long", "ignition_long", "none"]
 
-_PREDUMP_PHASES = frozenset({"exhaustion_at_high", "distribution", "dump_initiating"})
-_COIL_PHASES = frozenset({"accumulation", "breakout_arming", "recovery"})
-_IGNITION_PHASES = frozenset({"post_dump_bounce", "accumulation"})
+_PREDUMP_PHASES = frozenset(
+    {
+        "exhaustion_at_high",
+        "distribution",
+        "dump_initiating",
+        "pre_dump",  # fusion CUSUM pre-window
+    }
+)
+_COIL_PHASES = frozenset(
+    {
+        "accumulation",
+        "breakout_arming",
+        "recovery",
+        "pre_pump",
+        "coil",
+    }
+)
+_IGNITION_PHASES = frozenset({"post_dump_bounce", "accumulation", "pre_pump"})
+_MID_PHASES = frozenset({"mid"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +77,7 @@ def _bool_market(row: dict[str, Any], key: str) -> bool:
 
 def _phase(row: dict[str, Any]) -> str:
     lc = row.get("lifecycle") if isinstance(row.get("lifecycle"), dict) else {}
-    return str(lc.get("phase") or "")
+    return str(lc.get("phase_fusion") or lc.get("phase") or "")
 
 
 def _pos_in_range(row: dict[str, Any]) -> float:
@@ -146,7 +162,7 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
 
     # --- predump domain ---
     predump = 0.0
-    if _apply_check(checks, check_sources, "distribution_phase", phase in _PREDUMP_PHASES, "wyckoff"):
+    if _apply_check(checks, check_sources, "distribution_phase", phase in _PREDUMP_PHASES and phase not in _MID_PHASES, "wyckoff"):
         predump += 22.0
         factors.append(FactorHit("D3", "distribution_phase", phase, 22.0, "wyckoff"))
     price = float(row.get("price") or 0)
@@ -199,7 +215,7 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
     if _apply_check(checks, check_sources, "vp_accumulation", acc >= 0.55, "coinxsight"):
         coil += 20.0
         factors.append(FactorHit("D4", "vp_accumulation", acc, 20.0, "coinxsight"))
-    if _apply_check(checks, check_sources, "coil_phase", phase in _COIL_PHASES, "wyckoff"):
+    if _apply_check(checks, check_sources, "coil_phase", phase in _COIL_PHASES and phase not in _MID_PHASES, "wyckoff"):
         coil += 18.0
         factors.append(FactorHit("D4", "coil_phase", phase, 18.0, "wyckoff"))
     contraction = market.get("map_vp_va_contraction")

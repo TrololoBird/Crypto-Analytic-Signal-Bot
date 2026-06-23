@@ -828,6 +828,7 @@ async def run_tick(
                             lifecycle=_lc,
                             setup=setup,
                             symbol=symbol,
+                            row=row,
                         )
                         if _mission is not None:
                             append_signal_event(

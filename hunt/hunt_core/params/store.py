@@ -431,6 +431,7 @@ def prescan_thresholds() -> dict[str, float | int]:
         "debounce_s": debounce,
         "merge_cap": int(ps.get("merge_cap", 12)),
         "cadence_s": int(ps.get("cadence_s", 90)),
+        "max_change_pct_for_merge": float(ps.get("max_change_pct_for_merge", 8.0)),
     }
 
 

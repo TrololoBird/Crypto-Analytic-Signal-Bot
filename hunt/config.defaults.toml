@@ -32,6 +32,8 @@ max_dynamic_symbols = 12
 debounce_s = 90
 merge_cap = 12
 cadence_s = 90
+# Skip late-chase prescan outliers already extended on 24h (pre-pump mission).
+max_change_pct_for_merge = 8.0
 # Advisory digest: optional periodic summary (additive). 0 = no top-N cap.
 # HUNT_DIGEST_MAX_ENTRIES=0 HUNT_DIGEST_TOP_N=5 HUNT_ADVISORY_MAX_PER_HOUR=0
 # Liquidation burst advisory (P1.9): HUNT_LIQ_BURST_TG=1 to enable cascade radar TG
@@ -48,6 +50,8 @@ entry_confirm_tf_long = "5m"
 dump_fast_confirm = true
 
 [confirm.short]
+# REPORTING ONLY — /signals gaps, stats cards (gate/_report.py). Does NOT set setup.confirmed.
+# Production confirm authority = fusion gate_open → setup.confirmed (see docs/AUTHORITY_MODEL.md).
 min_score = 60
 min_score_without_div = 68
 forming_min_score = 45
@@ -130,10 +134,10 @@ signal_queue_tg_min_rank = 2
 signal_queue_ttl_hours = 2.5
 
 [deep.verdict_v2.signal_gates]
-strength_min = 0.50
+strength_min = 0.45
 fragility_max = 0.65
 trade_quality_min = 0.45
-rr_primary_min = 0.75
+rr_primary_min = 0.65
 data_coverage_min = 0.50
 require_timing_c = true
 

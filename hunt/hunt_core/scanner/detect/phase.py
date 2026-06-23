@@ -1,6 +1,7 @@
 """PRE-vs-MID phase with CUSUM change-point + sticky MID hysteresis."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 import polars as pl
@@ -25,6 +26,16 @@ class _PhaseSticky:
 
 
 _phase_sticky: dict[str, _PhaseSticky] = {}
+
+
+def phase_sticky_enabled() -> bool:
+    """When false (HUNT_PHASE_NO_STICKY=1), MID latch is disabled for A/B replay."""
+    return os.getenv("HUNT_PHASE_NO_STICKY", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def clear_phase_sticky() -> None:
@@ -53,7 +64,8 @@ def assess_phase(
     min_n = fp.min_n if min_n is None else min_n
 
     sym = window.symbol.upper()
-    sticky = _phase_sticky.setdefault(sym, _PhaseSticky())
+    sticky_enabled = phase_sticky_enabled()
+    sticky = _phase_sticky.setdefault(sym, _PhaseSticky()) if sticky_enabled else None
 
     close = window.close
     if close is None or close.len() < max(12, min_n):
@@ -69,7 +81,7 @@ def assess_phase(
     band = C.quantile_gate(cusum_series.abs(), q_phase, min_n=min_n)
     raw_mid = band is not None and band > 0.0 and abs(cusum_now) >= band
 
-    if sticky.mid_latched:
+    if sticky_enabled and sticky is not None and sticky.mid_latched:
         exit_level = band * fp.phase_mid_exit_ratio if band is not None else None
         if exit_level is not None and abs(cusum_now) < exit_level:
             sticky.below_band_streak += 1
@@ -82,8 +94,9 @@ def assess_phase(
             return PhaseInfo(MID, cusum_now, band, True, False)
 
     if raw_mid:
-        sticky.mid_latched = True
-        sticky.below_band_streak = 0
+        if sticky_enabled and sticky is not None:
+            sticky.mid_latched = True
+            sticky.below_band_streak = 0
         return PhaseInfo(MID, cusum_now, band, True, False)
 
     if side == "long":
@@ -103,4 +116,5 @@ __all__ = [
     "PhaseInfo",
     "assess_phase",
     "clear_phase_sticky",
+    "phase_sticky_enabled",
 ]

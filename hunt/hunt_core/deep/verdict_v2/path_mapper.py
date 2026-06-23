@@ -21,6 +21,7 @@ _PATTERN_PATH: dict[str, PathType] = {
     "bear_rally": "pullback_up",
     "trend_continuation": "continuation_up",
     "trend_acceleration": "continuation_up",
+    "bear_continuation": "continuation_down",
     "distribution": "pullback_down",
     "accumulation": "pullback_up",
     "long_squeeze": "squeeze_down",
@@ -74,7 +75,7 @@ def _time_bounds(path: PathType) -> tuple[float, float]:
     return (8.0, 72.0)
 
 
-_CONTINUATION_PATTERNS = frozenset({"trend_continuation", "trend_acceleration"})
+_CONTINUATION_PATTERNS = frozenset({"trend_continuation", "trend_acceleration", "bear_continuation"})
 
 
 def adjust_expected_move_from_plan(path: ExpectedPath, plan: TradePlan | None) -> ExpectedPath:

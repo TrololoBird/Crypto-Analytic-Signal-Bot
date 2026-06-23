@@ -54,6 +54,10 @@ BASELINE_DIR = DATA / "baseline"
 LAB_OUTCOME_LEDGER = DATA / "hunt_lab_outcome_ledger.jsonl"
 OUTCOME_LEDGER = DATA / "hunt_outcome_ledger.jsonl"
 DELIVERY_STATE = DATA / "hunt_delivery_state.json"
+DATA_PLANE_AUDIT_JSONL = DATA / "data_plane_audit.jsonl"
+UNIVERSE_AUDIT_JSONL = DATA / "universe_audit.jsonl"
+RR_GEOMETRY_AUDIT_JSONL = DATA / "rr_geometry_audit.jsonl"
+RECONCILE_PATH_SHADOW_JSONL = DATA / "reconcile_path_shadow.jsonl"
 
 __all__ = [
     "ADAPTIVE_THRESHOLDS",
@@ -61,6 +65,7 @@ __all__ = [
     "BACKTEST_OUTCOMES_ENRICHED",
     "BASELINE_DIR",
     "DATA",
+    "DATA_PLANE_AUDIT_JSONL",
     "DEEP_TICKS_JSONL",
     "DEEP_WATCH_GLOB",
     "DELIVERY_STATE",
@@ -86,7 +91,9 @@ __all__ = [
     "PREP_SHADOW_EVENTS",
     "PREP_SHADOW_STATE",
     "PUMP_HISTORY",
+    "RECONCILE_PATH_SHADOW_JSONL",
     "ROOT",
+    "RR_GEOMETRY_AUDIT_JSONL",
     "SESSION_DIR",
     "SETUP_CANDIDATES_EVENTS",
     "SETUP_CANDIDATES_STATE",
@@ -98,6 +105,7 @@ __all__ = [
     "TELEGRAM_COOLDOWN",
     "TICK_JSONL",
     "UNIFIED_LABELS",
+    "UNIVERSE_AUDIT_JSONL",
     "VERDICT_V2_CALIBRATION_JSON",
     "VERDICT_V2_GATE_OVERRIDES_JSON",
     "VERDICT_V2_PATTERN_AUDIT_JSONL",

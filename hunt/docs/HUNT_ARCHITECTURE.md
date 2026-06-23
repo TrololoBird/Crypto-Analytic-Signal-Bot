@@ -46,7 +46,17 @@ hunt/
 └── data/baseline/          # smoke regression snapshots
 ```
 
-Fusion migration **done** (2026-06-20): legacy `scan/{predump,prepump,…}` and `regime/leg_fsm` deleted; detection is `detect/*` only.
+Fusion migration **done** (2026-06-20): legacy `scan/{predump,prepump,…}` and `regime/leg_fsm` deleted; detection is `detect/*` only. **Compat stubs** remain — see [`ARCHITECTURE_DEBT.md`](ARCHITECTURE_DEBT.md).
+
+## Terminology (avoid doc drift)
+
+| Term | Meaning |
+|------|---------|
+| **Fusion-driven** | Fusion picks side, phase, and `setup.confirmed` — **candidate** only |
+| ~~Fusion-only~~ | **Do not use** — playbook, mission, RR, EV, arbiter still block delivery |
+| **Legacy detection removed** | Old scan/regime stack deleted |
+| ~~Zero legacy~~ | **Do not use** — `legacy_compat.py` / `probe_compat.py` stubs remain |
+| **P0–P9 complete** | Redesign phase scope — not “no architectural debt” |
 
 ## Hot path (watch tick — Module 2 Scanner only)
 
@@ -78,11 +88,16 @@ No emission quota (`target_signal_rate` removed). WAIT → silence.
 
 ```
 
-### Delivery invariant
+### Delivery invariant (canonical — same as § Delivery authority)
 
+```text
+fusion gate_open → setup.confirmed → route_tick
+  → validate_signal_contract + must_pass + family_vote
+  → mission + playbook N-of-M + RR + EV
+  → evaluate_confirm_authorities (arbiter) → telegram → tracker
 ```
-validate_signal_contract(setup) → must_pass → family_vote → evaluate_delivery (gate) → telegram.send
-```
+
+See [`METHODOLOGY.md`](METHODOLOGY.md) and [`AUTHORITY_MAP_v2.md`](AUTHORITY_MAP_v2.md). **Do not** reorder gates in new code without updating all three docs.
 
 ## Entrypoints
 
@@ -136,6 +151,8 @@ hunt_core/market/
 
 ## Score hierarchy (post-fusion)
 
+**Recall vs precision:** Scanner `hunt_score` controls **who fusion sees** (recall). Fusion `confirmed` controls **who may deliver** (precision). See [`AUTHORITY_MODEL.md`](AUTHORITY_MODEL.md) §7.
+
 Each stage owns a **different score namespace**. They do not override each other — conflicts resolve by stage order.
 
 ```mermaid
@@ -151,8 +168,8 @@ flowchart LR
 |-------|--------|--------------|--------|
 | **Discovery** | `data/scanner.py` | `hunt_score` (0–100) | Candidacy ≥25; watchlist ≥45; priority minute watch ≥60 |
 | **Universe** | `data/universe.py` | scanner row + pinned table | Merge pinned → DEFAULT_SYMBOLS → watchlist; scanner `watch_bias` does **not** overwrite pinned modes |
-| **Detection** | `detect/fusion.py`, `detect/phase.py` | `fusion_score`, `q_gate`, `gate_open` | `gate_open = magnitude_quantile_pass AND phase.watch_ok` (MID closes gate) |
-| **Routing** | `detect/routing.py` | `setup.confirmed` | `confirmed := gate_open` from delivery_bridge — one direction per symbol |
+| **Detection** | `detect/fusion.py`, `detect/phase.py` | `fusion_score`, `q_gate`, `gate_open` | `gate_open = magnitude quantile ∧ agreement ∧ min_active_factors ∧ phase.watch_ok`. **`fusion_score` is display-only** — see [`AUTHORITY_MODEL.md`](AUTHORITY_MODEL.md) §3 |
+| **Routing** | `detect/routing.py` | `setup.confirmed` | Single-side fusion: one active setup per bar; stub opposite side. Not dual long/short scores |
 | **Delivery** | `gate/delivery.py` | playbook N-of-M, RR, EV, lifecycle | Blocks even when fusion confirmed; codes in `watch_alert_blocked` |
 | **Tracker** | `track/tracker.py` | — | Opens only after `telegram_sent=True`; structural invalidate / TP follow-ups |
 
@@ -164,21 +181,40 @@ Fusion parameter detail: [FUSION_PARAMS.md](FUSION_PARAMS.md). Scanner/delivery 
 
 | Threshold | Default | Owner module | Config key |
 |-----------|---------|--------------|------------|
-| Candidacy floor | 25 | `data/scanner.py` | hardcoded (`score < 25.0` filter) |
+| Candidacy floor | 25 | `data/scanner.py` | hardcoded (`score < 25.0` filter) — **P0 debt** |
 | Watchlist | 45 | `data/scanner.py` | `[scanner] score_watch` (+ `HUNT_SCORE_WATCH_THRESHOLD`) |
 | Priority minute watch | 60 | `data/scanner.py` | `[scanner] score_priority` |
 | Fusion gate quantile | 0.92 | `detect/fusion.py` | `[fusion] q_gate` |
 | Fusion score scale | 25 | `detect/fusion.py` | `[fusion] fusion_score_scale` |
-| Confirm min (legacy path) | 60 | `params/store.py` | `[confirm.short] min_score` |
-| Forming telemetry floor | 45 | `params/store.py` | `[confirm.short] forming_min_score` |
+| Confirm min (legacy path) | 60 | `params/store.py` | `[confirm.short] min_score` — **reporting only** ([`AUTHORITY_MODEL.md`](AUTHORITY_MODEL.md) §1) |
+| Forming telemetry floor | 45 | `params/store.py` | `[confirm.short] forming_min_score` — **reporting only** |
 | Entry TG cooldown | 45 min | `deliver/dispatch.py` | `[watch] telegram_cooldown_min` |
 | Max dynamic symbols | 12 | `data/universe.py` | `[watch] max_dynamic_symbols` |
 
 **Drift risk:** scanner constants in `data/scanner.py` duplicate `config.defaults.toml`. When tuning, change both or migrate scanner to read `[scanner]` from settings (open debt).
 
-## Missing-data policy
+**Drift risk (P0):** scanner constants in `data/scanner.py` duplicate `config.defaults.toml`. When tuning, change both or migrate scanner to read `[scanner]` from settings. Tracked in [`ARCHITECTURE_DEBT.md`](ARCHITECTURE_DEBT.md).
 
-Policy is **layered** — not a single global switch.
+## Tier capability matrix (full vs fast)
+
+Resolves fail-closed vs fast-tier ambiguity. `HuntLoadPlanner` assigns **full** (pinned + budget headroom) or **fast** (rotatable, derivatives REST skipped).
+
+| Capability | Full tier | Fast tier | Tick blocked (`strict_data_quality`)? | Fusion | Delivery |
+|------------|-----------|-----------|--------------------------------------|--------|----------|
+| OHLCV / structure | ✓ | ✓ | yes if core OHLCV missing | factors abstain if inputs missing | block if contract incomplete |
+| OI history REST | ✓ | skipped | **no** — tick proceeds; OI factors **abstain** | needs ≥2 active directional factors | `delivery_derivatives_complete` **blocks TG** if derivatives required for lane |
+| Funding REST | ✓ | partial / cached | same as OI | abstain per factor | block via completeness registry |
+| Order book / DOM | ✓ WS + REST | WS snapshot | block if `strict` + required book keys missing | abstain | quality gates may block |
+| Cross-venue REST | budget permitting | often skipped | no tick block | abstain | block if delivery keys missing |
+
+**Rules:**
+
+1. **Tick path:** `strict_data_quality=True` (default) blocks the **whole tick** only when **required keys for that tier’s assembly** are missing — not merely because fast tier chose not to fetch OI.
+2. **Fusion:** missing factor inputs → `active=False`; fusion may fail `gate_open` from insufficient active factors — this is abstain, not silent pass.
+3. **Delivery:** fail-closed on **incomplete derivatives for production lane** regardless of tier; fast-tier symbols may reach fusion with weaker factor coverage but should not TG without completeness pass.
+4. **Pinned symbols:** always **full** tier.
+
+## Missing-data policy (layer summary)
 
 | Layer | Module | Missing OI/funding/book | Behavior |
 |-------|--------|-------------------------|----------|
@@ -190,7 +226,29 @@ Policy is **layered** — not a single global switch.
 
 Telemetry: `data_quality.fields_missing` on each tick row in `dump_minute_watch.jsonl`; health log `data_missing` in watch_tick.
 
-**Rule:** strict path = fail-closed at tick; fusion abstains per factor; delivery never ships on incomplete derivatives (full tier).
+**Rule:** strict path = fail-closed at delivery; fusion abstains per factor; fast tier ≠ permission to ship incomplete derivatives on production lane.
+
+## Lifecycle state glossary
+
+Cross-module vocabulary — one row per **observable** state. Full authority split: [`AUTHORITY_MODEL.md`](AUTHORITY_MODEL.md) §8–10.
+
+| State | Module | Meaning | TG? |
+|-------|--------|---------|-----|
+| `forming` | tick / bar | Open bar or pre-gate telemetry | silence |
+| `gate_open` | `detect/fusion.py` | Quantile pass (internal; pre-phase) | — |
+| `confirmed` | `setup.confirmed` | Fusion final gate (`gate_open ∧ watch_ok`) | Scanner candidate |
+| `armed` | coil / scanner card | Bracket / near trigger; advisory | ARMED |
+| `signal` | `signals/` spine (Deep) | Emitted reconciled thesis | once |
+| `activated` | Deep `activation.py` | In zone / fill reference | once (Deep) |
+| `wait` | `verdict_v2` | Gates failed | silence |
+| `delivery_attempt` | `deliver/dispatch.py` | Arbiter passed; transport invoked | — |
+| `delivery_failed` | transport / ledger | Confirm-pass but TG error | — |
+| `tracking` | `track/tracker.py` | `telegram_sent=True`; TP/SL FSM | follow-ups |
+| `closed` | tracker + outcomes | Outcome recorded | outcome msg |
+
+**Note:** `confirmed` (Scanner) ≠ `signal` (Deep). `setup.confirmed` is set only on the fusion-winning side; the opposite `dump`/`long` stub stays `confirmed=False`.
+
+**Gap (open debt):** `delivery_failed` is not a first-class tracker state today — see Signal Ledger in [`ARCHITECTURE_DEBT.md`](ARCHITECTURE_DEBT.md).
 
 ## Pre-TG observability
 
@@ -202,7 +260,7 @@ Telemetry: `data_quality.fields_missing` on each tick row in `dump_minute_watch.
 | Deliver/block audit | `track/outcome_ledger.py` → JSONL | Delivery decision |
 | Active tracker | `data/hunt_signal_state.json` | **Only** after successful Telegram |
 
-Gap: structural follow-ups (invalidate/TP) require `telegram_sent=True`. Confirm-pass + TG-fail is visible in tick JSONL + setup_candidates, not in tracker FSM.
+Gap: structural follow-ups require `telegram_sent=True`. Confirm-pass + TG-fail is visible in tick JSONL + setup_candidates, not in tracker FSM. **Target:** unified Signal Ledger (`forming → confirmed → delivery_attempt → …`) — [`ARCHITECTURE_DEBT.md`](ARCHITECTURE_DEBT.md).
 
 ## REST/WS capacity (`market/capacity.py`)
 
@@ -236,6 +294,8 @@ Lookahead check: same closed bar, compare live tick vs `replay_fusion` with matc
 
 ## Delivery authority (canonical — resolves doc conflicts)
 
+Full model: [`AUTHORITY_MODEL.md`](AUTHORITY_MODEL.md) (code-verified 2026-06-23).
+
 ```text
 FUSION gate_open  →  setup.confirmed  →  route_tick candidate
   →  contract + must_pass + family_vote
@@ -253,7 +313,9 @@ FUSION gate_open  →  setup.confirmed  →  route_tick candidate
 | PRE phase source | CUSUM only (`detect/phase.py`); legacy FSM removed from tick writer |
 | Cross-module conflict | `shared/delivery/cross_module.py` blocks opposing Deep/Expansion vs Scanner |
 
-**Audit:** every deliver/block writes `hunt_outcome_ledger.jsonl` with `fusion_gate_open`, `playbook_pass_ok`, `mission_pass`, `authority_violation`. Run `python -m hunt_core._dev.authority_audit` after sessions.
+**Audit (invariant):** every deliver/block writes `hunt_outcome_ledger.jsonl` with `fusion_gate_open`, `playbook_pass_ok`, `mission_pass`, `authority_violation`. Run `python -m hunt_core._dev.authority_audit` after sessions.
+
+**Audit (funnel — open):** per-layer block rates (`fusion_pass`, `playbook_pass`, `mission_pass`, `rr_pass`, `ev_pass`) and outcome lift — planned extension; see [`ARCHITECTURE_DEBT.md`](ARCHITECTURE_DEBT.md) § P1 authority block funnel.
 
 **Pre-TG funnel:** `setup_candidates.jsonl` + `dump_minute_watch.jsonl` — not tracker FSM.
 
@@ -268,8 +330,17 @@ Universe scan ranks on **expansion readiness energy**, not `abs(change_pct)` (`d
 | `debounce_s` | 90 | Min dwell before a symbol joins the watch universe |
 | `cadence_s` | 90 | How often prescan hits are offered to the debounce queue |
 | `merge_cap` | 12 | Max symbols promoted into Full-tier slots per cycle |
+| `max_change_pct_for_merge` | 8 | Reject 24h late-chase prescan outliers (OI-divergence exempt) |
 
 This closes the 15‑min blind spot between full universe REST scans and Layer‑1/2 WS fan-out.
+
+**Plan geometry invariants** (`deep/plan.py` + `verdict_v2/levels.py`):
+
+| Rule | Long |
+|------|------|
+| Entry zone | Pullback below price when POC is above market |
+| TP1 vs zone | `tp1 > entry_hi` (gate `plan_geometry` if violated) |
+| Activation | `pullback_limit` + at resistance → `armed`, not `active` |
 
 ## Liquidation map approximation (Phase 9)
 

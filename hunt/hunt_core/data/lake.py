@@ -21,9 +21,11 @@ _cooldown_flush: tuple[dict[str, str], Path] | None = None
 
 
 def buffer_tick_rows(rows: list[dict[str, Any]]) -> None:
+    from hunt_core.diagnostics.tick_diagnostics import append_tick_diagnostics
     from hunt_core.runtime.tick_jsonl import serialize_tick_row
 
     for row in rows:
+        append_tick_diagnostics(row)
         _tick_lines.append(serialize_tick_row(row))
 
 

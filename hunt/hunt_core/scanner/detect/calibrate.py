@@ -126,7 +126,7 @@ def ols_slope(
 # Used by detect/phase.py to derive the PRE/MID activation band per symbol from the
 # standardized-return change-point, replacing the 10-state lifecycle FSM.
 
-_CUSUM_CLIP = 50.0
+_CUSUM_CLIP = 500.0
 
 
 def log_returns(close: pl.Series | None) -> pl.Series:
@@ -146,7 +146,7 @@ def standardized_returns(returns: pl.Series, *, span: int = 96) -> pl.Series:
     return ((returns - mu) / dev).fill_null(0.0).fill_nan(0.0)
 
 
-def cusum_series(z: pl.Series, *, threshold: float) -> pl.Series:
+def cusum_series(z: pl.Series, *, threshold: float, clip: bool = True) -> pl.Series:
     """Signed CUSUM on standardized values, mean-reverting via EWM anchor."""
     pos = 0.0
     neg = 0.0
@@ -158,7 +158,10 @@ def cusum_series(z: pl.Series, *, threshold: float) -> pl.Series:
             x = 0.0
         pos = max(0.0, pos + x - threshold * 0.25)
         neg = min(0.0, neg + x + threshold * 0.25)
-        out.append(max(-_CUSUM_CLIP, min(_CUSUM_CLIP, pos if x >= 0 else neg)))
+        raw = pos if x >= 0 else neg
+        if clip:
+            raw = max(-_CUSUM_CLIP, min(_CUSUM_CLIP, raw))
+        out.append(raw)
     return pl.Series(out, dtype=pl.Float64)
 
 

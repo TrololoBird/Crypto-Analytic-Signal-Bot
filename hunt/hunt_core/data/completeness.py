@@ -847,17 +847,40 @@ def delivery_derivatives_complete(row: dict[str, Any], *, tier: str) -> tuple[bo
     return (not violations, violations)
 
 
+_REST_CACHE_TO_MARKET: dict[str, str] = {
+    "oi": "oi",
+    "oi_chg_5m": "oi_chg_5m",
+    "oi_chg_1h": "oi_chg_1h",
+    "ls_5m": "ls_5m",
+    "ls_1h": "ls_1h",
+    "top_ls_5m": "top_ls_5m",
+    "top_ls_1h": "top_ls_1h",
+    "global_ls_5m": "global_ls_5m",
+    "global_ls_1h": "global_ls_1h",
+    "taker_5m": "taker_5m",
+    "taker_15m": "taker_15m",
+    "taker_1h": "taker_1h",
+    "funding": "funding",
+    "basis_5m": "basis_5m",
+}
+
+
 def stamp_market_freshness(
     market: dict[str, Any],
     ws_snap: dict[str, Any] | None,
     pack: dict[str, Any] | None,
+    *,
+    client: Any | None = None,
+    symbol: str = "",
 ) -> None:
-    """Attach per-field age seconds when WS last-message age is known."""
+    """Attach truthful per-field ages — REST from cache/pack, WS only for live fields."""
     if not isinstance(market, dict):
         return
 
     ws_age: float | None = None
+    ws_connected = False
     if isinstance(ws_snap, dict):
+        ws_connected = bool(ws_snap.get("ws_connected"))
         raw = ws_snap.get("ws_last_msg_age_s")
         if raw is not None:
             try:
@@ -867,24 +890,47 @@ def stamp_market_freshness(
 
     if ws_age is not None:
         market["ws_last_msg_age_s"] = ws_age
-        for key in DELIVERY_MARKET_KEYS_FULL:
-            if _market_derivative_finite(market, key):
-                market[f"{key}_age_seconds"] = ws_age
 
-    if not isinstance(pack, dict):
-        return
-    for key, fetched_at in pack.items():
-        if not key.endswith("_fetched_at"):
-            continue
-        base = key[: -len("_fetched_at")]
-        if base not in DELIVERY_MARKET_KEYS_FULL:
-            continue
+    ages: dict[str, float] = {}
+    if isinstance(pack, dict):
+        cached = pack.get("_rest_cache_ages")
+        if isinstance(cached, dict):
+            for key, raw_age in cached.items():
+                try:
+                    ages[str(key)] = float(raw_age)
+                except (TypeError, ValueError):
+                    continue
+        for key, fetched_at in pack.items():
+            if not key.endswith("_fetched_at"):
+                continue
+            base = key[: -len("_fetched_at")]
+            try:
+                ages[base] = max(0.0, time.monotonic() - float(fetched_at))
+            except (TypeError, ValueError):
+                continue
+
+    if client is not None and symbol and hasattr(client, "snapshot_rest_cache_ages"):
         try:
-            age_s = max(0.0, time.monotonic() - float(fetched_at))
-        except (TypeError, ValueError):
+            for key, raw_age in client.snapshot_rest_cache_ages(symbol).items():
+                ages.setdefault(str(key), float(raw_age))
+        except Exception:
+            pass
+
+    for cache_key, delivery_key in _REST_CACHE_TO_MARKET.items():
+        age = ages.get(cache_key)
+        if age is None:
             continue
-        if _market_derivative_finite(market, base) and f"{base}_age_seconds" not in market:
-            market[f"{base}_age_seconds"] = round(age_s, 1)
+        if _market_derivative_finite(market, delivery_key):
+            market[f"{delivery_key}_age_seconds"] = round(age, 1)
+
+    if ws_age is not None and ws_connected:
+        of_src = str(market.get("orderflow_source") or "")
+        if ("ws" in of_src or "ccxt_watch" in of_src) and market.get("agg_trade_delta_30s") is not None:
+            market["agg_trade_delta_30s_age_seconds"] = ws_age
+        if str(market.get("depth_imbalance_source") or "") == "ws_book" and market.get(
+            "depth_imbalance"
+        ) is not None:
+            market["depth_imbalance_age_seconds"] = ws_age
 
 
 def series_z_strict(values: list[float], *, field: str) -> float:

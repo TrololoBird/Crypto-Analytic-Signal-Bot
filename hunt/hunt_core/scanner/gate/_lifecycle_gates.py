@@ -33,6 +33,7 @@ def collect_lifecycle_blockers(
         lifecycle=lc,
         setup=setup,
         symbol=sym,
+        row=row,
     )
     if mission is not None:
         blockers.append(mission)

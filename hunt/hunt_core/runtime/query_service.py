@@ -316,11 +316,16 @@ def format_query_telegram(q: QueryResult, *, added_watch: bool = False) -> str:
         confirmed = bool(setup.get("confirmed"))
         _DIR_RU = {"short": "шорт", "long": "лонг"}
         dir_ru = _DIR_RU.get(focus.direction, focus.direction)
+        bias_ru = "медвежье" if focus.direction == "short" else "бычье"
         if confirmed:
-            watch_lines.append(f"<i>Сканер: {dir_ru} подтверждён · фаза={html.escape(phase)}</i>")
+            watch_lines.append(
+                f"<i>Сканер: {bias_ru} наблюдение · closed-bar · "
+                f"фаза={html.escape(phase)} · <b>не</b> доставка TG</i>"
+            )
         else:
             watch_lines.append(
-                f"<i>Сканер: {dir_ru} формируется · {html.escape(phase)} · отдельный контур</i>"
+                f"<i>Сканер: формирование {dir_ru}-сценария · "
+                f"{html.escape(phase)} · watch-фаза · отдельный контур</i>"
             )
     else:
         watch_lines.append("<i>Сканер: нет тика по символу (динамический скан)</i>")

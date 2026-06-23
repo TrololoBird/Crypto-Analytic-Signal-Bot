@@ -1,16 +1,27 @@
 #!/usr/bin/env bash
-# Canonical hunt watch launcher — avoids venv sys.prefix RuntimeWarning from hunt/../.venv.
+# Canonical hunt watch launcher — use hunt/.venv from hunt/ or repo .venv from repo root
+# so Python 3.14 site.py sees a canonical sys.prefix (no hunt/../.venv mismatch).
 set -euo pipefail
 HUNT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$HUNT_DIR/.." && pwd)"
-cd "$HUNT_DIR"
-mkdir -p data
+if [[ -x "$HUNT_DIR/.venv/bin/python" ]]; then
+  PY_BIN="$HUNT_DIR/.venv/bin/python"
+  WORK_DIR="$HUNT_DIR"
+elif [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+  PY_BIN="$REPO_ROOT/.venv/bin/python"
+  WORK_DIR="$REPO_ROOT"
+else
+  echo "hunt watch: no .venv (expected hunt/.venv or repo .venv)" >&2
+  exit 1
+fi
+cd "$WORK_DIR"
+mkdir -p "$HUNT_DIR/data"
 export HUNT_WATCHDOG_S="${HUNT_WATCHDOG_S:-900}"
 # Drop stale lock left by a dead PID.
-if [[ -f data/watch.pid ]]; then
-  old_pid="$(tr -d '[:space:]' <data/watch.pid 2>/dev/null || true)"
+if [[ -f "$HUNT_DIR/data/watch.pid" ]]; then
+  old_pid="$(tr -d '[:space:]' <"$HUNT_DIR/data/watch.pid" 2>/dev/null || true)"
   if [[ -n "$old_pid" ]] && ! kill -0 "$old_pid" 2>/dev/null; then
-    rm -f data/watch.pid
+    rm -f "$HUNT_DIR/data/watch.pid"
   fi
 fi
 if pgrep -f "[h]unt_core watch" >/dev/null 2>&1; then
@@ -19,9 +30,7 @@ if pgrep -f "[h]unt_core watch" >/dev/null 2>&1; then
 fi
 
 PY=(
-  "$REPO_ROOT/.venv/bin/python"
-  -W "ignore:Unexpected value in sys.prefix:RuntimeWarning"
-  -W "ignore:Unexpected value in sys.exec_prefix:RuntimeWarning"
+  "$PY_BIN"
   -m hunt_core watch
   "$@"
 )

@@ -145,6 +145,27 @@ class PrescanEngine:
             direction = "dump"
         else:
             direction = "coil"
+        import os
+
+        max_chg = float(
+            os.getenv(
+                "HUNT_PRESCAN_MAX_CHANGE_PCT",
+                os.getenv("HUNT_PRESCAN_MAX_CHANGE_PCT_FOR_MERGE", "8"),
+            )
+            or 8
+        )
+        probe = PrescanHit(
+            symbol=sym,
+            interval="readiness",
+            change_pct=round(change_24h, 2),
+            threshold_pct=readiness.energy,
+            quote_volume=qvol,
+            direction=direction,
+            energy=readiness.energy,
+            readiness_direction=readiness.direction,
+        )
+        if prescan_late_chase_blocked(probe, max_change_pct=max_chg, oi_change_pct=oi_change_pct):
+            return []
         return [
             PrescanHit(
                 symbol=sym,
@@ -216,6 +237,39 @@ def _cross_overlay_for(
         if strongest is None or abs(chg) > abs(strongest):
             strongest = chg
     return count, strongest
+
+
+
+
+
+
+def prescan_late_chase_blocked(
+    hit: PrescanHit | Any,
+    *,
+    max_change_pct: float = 12.0,
+    oi_change_pct: float | None = None,
+) -> bool:
+    """True when 24h move is too extended for pre-pump universe (OI div exempt)."""
+    try:
+        chg = abs(float(getattr(hit, "change_pct", hit) if not isinstance(hit, (int, float)) else hit))
+    except (TypeError, ValueError):
+        return False
+    if chg <= max_change_pct:
+        return False
+    div = getattr(hit, "oi_divergence", None) if not isinstance(hit, (int, float)) else None
+    if div in {"price_up_oi_down", "price_down_oi_up"}:
+        return False
+    if oi_change_pct is not None and div is None:
+        cp = float(getattr(hit, "change_pct", 0) if not isinstance(hit, (int, float)) else hit)
+        div = oi_price_divergence(change_pct=cp, oi_change_pct=oi_change_pct)
+        if div in {"price_up_oi_down", "price_down_oi_up"}:
+            return False
+    return True
+
+
+def prescan_merge_eligible(hit: PrescanHit, *, max_change_pct: float = 12.0) -> bool:
+    """Reject prescan outliers that are already extended on 24h (late-chase universe bug)."""
+    return not prescan_late_chase_blocked(hit, max_change_pct=max_change_pct)
 
 
 def prescan_from_tickers(
@@ -314,6 +368,7 @@ class _DebouncedSymbol:
     last_seen: float
     merged: bool = False
     energy: float = 0.0
+    oi_divergence: str | None = None
 
 
 class PrescanDebounceQueue:
@@ -349,6 +404,7 @@ class PrescanDebounceQueue:
                     energy=h.energy,
                     first_seen=mono,
                     last_seen=mono,
+                    oi_divergence=h.oi_divergence,
                 )
             else:
                 prev.direction = h.direction
@@ -356,6 +412,7 @@ class PrescanDebounceQueue:
                 prev.change_pct = h.change_pct
                 prev.quote_volume = h.quote_volume
                 prev.energy = h.energy
+                prev.oi_divergence = h.oi_divergence
                 prev.last_seen = mono
 
     def drain_ready(self, *, now: float | None = None) -> list[_DebouncedSymbol]:

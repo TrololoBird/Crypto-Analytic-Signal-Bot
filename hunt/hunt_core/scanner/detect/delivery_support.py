@@ -42,18 +42,20 @@ def liquidity_skip_reason(
     symbol: str = "",
 ) -> str | None:
     """Skip symbols too illiquid to trade cleanly (data quality, public-only)."""
-    try:
-        if quote_volume is not None and float(quote_volume) < _MIN_QUOTE_VOL_24H:
-            return f"liquidity_quote_vol_low:{float(quote_volume):.0f}"
-    except (TypeError, ValueError):
-        pass
-    try:
-        if oi is not None and last_price is not None:
+    if quote_volume is not None:
+        try:
+            qv = float(quote_volume)
+            if qv < _MIN_QUOTE_VOL_24H:
+                return f"liquidity_quote_vol_low:{qv:.0f}"
+        except (TypeError, ValueError):
+            return "liquidity_quote_vol_invalid"
+    if oi is not None and last_price is not None:
+        try:
             oi_usd = float(oi) * float(last_price)
             if 0 < oi_usd < _MIN_OI_USD:
                 return f"liquidity_oi_low:{oi_usd:.0f}"
-    except (TypeError, ValueError):
-        pass
+        except (TypeError, ValueError):
+            return "liquidity_oi_invalid"
     return None
 
 
@@ -81,6 +83,7 @@ def mission_delivery_block(
     lifecycle: dict[str, Any] | None = None,
     setup: dict[str, Any] | None = None,
     symbol: str = "",
+    row: dict[str, Any] | None = None,
     **_k: Any,
 ) -> GateResult | None:
     """PRE/MID mission gate for Module 1 hunt scan TG — blocks mid-leg chase."""
@@ -91,6 +94,7 @@ def mission_delivery_block(
         lifecycle=lifecycle,
         setup=setup,
         symbol=symbol,
+        row=row,
     )
     if result is None:
         return None

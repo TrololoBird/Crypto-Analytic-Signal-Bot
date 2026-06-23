@@ -22,7 +22,9 @@ Metrics are printed, never written to a file:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 
 import polars as pl
@@ -31,7 +33,7 @@ from hunt_core.scanner.detect import build_detection
 from hunt_core.scanner.detect import factors as F
 from hunt_core.scanner.detect.fusion import fuse, vol_adjusted_magnitude
 from hunt_core.scanner.detect.magnitude_cache import clear_magnitude_cache
-from hunt_core.scanner.detect.phase import clear_phase_sticky
+from hunt_core.scanner.detect.phase import clear_phase_sticky, phase_sticky_enabled
 from hunt_core.scanner.detect.windows import DEFAULT_LOOKBACK, build_window
 from hunt_core.paths import LAKE_PARQUET
 
@@ -225,6 +227,59 @@ def replay(
     return m
 
 
+def replay_phase_mix(
+    symbol: str,
+    *,
+    warmup: int = DEFAULT_WARMUP,
+    q_gate: float = 0.90,
+    lookback: int = DEFAULT_LOOKBACK,
+    sticky: bool = True,
+) -> Counter[str]:
+    """Count lifecycle phases over eligible bars — sticky on/off A/B (P0-C)."""
+    prev = os.environ.get("HUNT_PHASE_NO_STICKY")
+    if sticky:
+        os.environ.pop("HUNT_PHASE_NO_STICKY", None)
+    else:
+        os.environ["HUNT_PHASE_NO_STICKY"] = "1"
+    try:
+        df = load_symbol_lake(symbol)
+        if df.height <= warmup:
+            return Counter()
+        clear_magnitude_cache()
+        clear_phase_sticky()
+        phases: Counter[str] = Counter()
+        mag_hist: list[float] = []
+        for i in range(df.height):
+            window = build_window(df.head(i + 1), symbol=symbol, lookback=lookback)
+            hist = pl.Series(mag_hist, dtype=pl.Float64) if mag_hist else None
+            det = build_detection(window, magnitude_history=hist, q_gate=q_gate)
+            atr_pct = window.last("atr_pct")
+            mag_hist.append(vol_adjusted_magnitude(det.fusion.magnitude, atr_pct))
+            if i < warmup:
+                continue
+            phases[str(det.phase or "unknown")] += 1
+        return phases
+    finally:
+        if prev is None:
+            os.environ.pop("HUNT_PHASE_NO_STICKY", None)
+        else:
+            os.environ["HUNT_PHASE_NO_STICKY"] = prev
+
+
+def _print_phase_ab(symbol: str, *, warmup: int, q_gate: float) -> None:
+    on = replay_phase_mix(symbol, warmup=warmup, q_gate=q_gate, sticky=True)
+    off = replay_phase_mix(symbol, warmup=warmup, q_gate=q_gate, sticky=False)
+    total_on = sum(on.values()) or 1
+    total_off = sum(off.values()) or 1
+    print(f"\n== {symbol.upper()} phase A/B (sticky on vs HUNT_PHASE_NO_STICKY=1) ==")
+    keys = sorted(set(on) | set(off))
+    for k in keys:
+        on_pct = 100.0 * on.get(k, 0) / total_on
+        off_pct = 100.0 * off.get(k, 0) / total_off
+        print(f"  {k:<12} sticky={on.get(k, 0):4d} ({on_pct:5.1f}%)  no_sticky={off.get(k, 0):4d} ({off_pct:5.1f}%)")
+    print(f"  sticky_enabled_now={phase_sticky_enabled()}")
+
+
 def _print_metrics(m: ReplayMetrics) -> None:
     print(f"\n== {m.symbol} ==")
     print(f"  bars={m.bars} eligible={m.eligible} signals={m.signals} hits={m.hits}")
@@ -294,7 +349,23 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FRAC",
         help="In-sample fraction; when --walk-forward unset, holdout = 1-train_frac",
     )
+    p.add_argument(
+        "--phase-ab",
+        action="store_true",
+        help="Print MID/pre phase mix with sticky on vs HUNT_PHASE_NO_STICKY=1",
+    )
     args = p.parse_args(argv)
+
+    if args.phase_ab:
+        sym = (args.symbol or "").upper()
+        if not sym:
+            syms = _lake_symbols()
+            if not syms:
+                print("no lake parquet under", LAKE_PARQUET)
+                return 1
+            sym = syms[0]
+        _print_phase_ab(sym, warmup=args.warmup, q_gate=args.q_gate)
+        return 0
 
     walk_forward = args.walk_forward
     if walk_forward <= 0 and args.train_frac > 0:

@@ -1,6 +1,7 @@
 """Phase-quality delivery gates — migrated from delivery.py monolith."""
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from hunt_core.data.universe import PINNED_SYMBOLS
@@ -32,24 +33,67 @@ def passes_meme_anomaly_gate(
         return True
     chg24 = _row_chg24_abs(row)
     rng24 = _row_rng24(row)
+    if chg24 is None and rng24 is None:
+        return False
     min_chg = float(cal.anomaly_min_chg_24h_pct)
     min_rng = float(cal.anomaly_min_range_24h_pct)
-    return chg24 >= min_chg or rng24 >= min_rng
+    chg_ok = chg24 is not None and chg24 >= min_chg
+    rng_ok = rng24 is not None and rng24 >= min_rng
+    return chg_ok or rng_ok
 
 
-def _row_chg24_abs(row: dict[str, Any]) -> float:
-    sess = row.get("session") or {}
+def meme_anomaly_block_code(
+    *,
+    sym: str,
+    row: dict[str, Any],
+    lc: dict[str, Any],
+    cal: Any,
+) -> str | None:
+    """Fail-closed gate code when meme anomaly check blocks; None when allowed."""
+    _ = lc
+    if sym in PINNED_SYMBOLS or bool(row.get("young_listing")):
+        return None
+    if passes_meme_anomaly_gate(sym=sym, row=row, lc=lc, cal=cal):
+        return None
+    chg24 = _row_chg24_abs(row)
+    rng24 = _row_rng24(row)
+    if chg24 is None and rng24 is None:
+        return "data.chg24_missing"
+    if chg24 is None:
+        return "data.chg24_missing"
+    if rng24 is None:
+        return "data.range24_missing"
+    return "not_anomaly"
+
+
+def _row_chg24_abs(row: dict[str, Any]) -> float | None:
+    sess = row.get("session") if isinstance(row.get("session"), dict) else {}
     raw = (
         row.get("chg_24h_pct")
         or row.get("change_24h_pct")
         or sess.get("change_24h_pct")
     )
-    return abs(float(raw or 0))
+    if raw is None:
+        return None
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(val):
+        return None
+    return abs(val)
 
 
-def _row_rng24(row: dict[str, Any]) -> float:
-    sess = row.get("session") or {}
-    return float(sess.get("range_pct_24h") or row.get("range_pct_24h") or 0)
+def _row_rng24(row: dict[str, Any]) -> float | None:
+    sess = row.get("session") if isinstance(row.get("session"), dict) else {}
+    raw = sess.get("range_pct_24h") or row.get("range_pct_24h")
+    if raw is None:
+        return None
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return val if math.isfinite(val) else None
 
 
 _FADE_PHASES_SHORT = FADE_PHASES_SHORT
@@ -419,6 +463,7 @@ __all__ = [
     "check_lifecycle_chg24_sanity",
     "check_meme_pump_volume_ratio",
     "passes_meme_anomaly_gate",
+    "meme_anomaly_block_code",
     "run_quality_gates",
     "_row_chg24_abs",
     "_row_rng24",

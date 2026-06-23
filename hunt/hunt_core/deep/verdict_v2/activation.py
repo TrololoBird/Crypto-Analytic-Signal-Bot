@@ -9,7 +9,12 @@ from hunt_core.deep.verdict_v2.types import PlanLifecycle, TradePlan
 ActivationState = Literal["idle", "near_entry", "in_entry_zone", "near_catalyst", "at_catalyst"]
 
 
-def assess_activation(row: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
+def assess_activation(
+    row: dict[str, Any],
+    summary: dict[str, Any],
+    *,
+    entry_type: str | None = None,
+) -> dict[str, Any]:
     price = safe_float(row.get("price"))
     if price <= 0:
         return {"state": "idle", "dist_catalyst_pct": None, "dist_entry_pct": None, "detail": ""}
@@ -17,6 +22,7 @@ def assess_activation(row: dict[str, Any], summary: dict[str, Any]) -> dict[str,
     state: ActivationState = "idle"
     dist_cat: float | None = None
     dist_entry: float | None = None
+    et = str(entry_type or summary.get("entry_type") or "")
 
     cat = summary.get("catalyst_level")
     if cat is not None:
@@ -35,8 +41,19 @@ def assess_activation(row: dict[str, Any], summary: dict[str, Any]) -> dict[str,
     try:
         el, eh = float(lo), float(hi)
         if el > 0 and eh > 0:
+            zone_mid = (el + eh) / 2.0
+            at_resistance = False
+            struct = row.get("structure") if isinstance(row.get("structure"), dict) else {}
+            kl = struct.get("key_levels") if isinstance(struct.get("key_levels"), dict) else {}
+            resist = safe_float(kl.get("resistance") or kl.get("last_swing_high"))
+            if resist > 0 and price >= resist * 0.997:
+                at_resistance = True
             if el <= price <= eh:
-                state = "in_entry_zone"
+                if et == "pullback_limit" and (price > zone_mid or at_resistance):
+                    state = "near_entry"
+                    dist_entry = min(abs(price - el), abs(price - eh)) / price * 100.0
+                else:
+                    state = "in_entry_zone"
             else:
                 dist_entry = min(abs(price - el), abs(price - eh)) / price * 100.0
                 if dist_entry <= 0.35 and state in {"idle", "near_catalyst"}:

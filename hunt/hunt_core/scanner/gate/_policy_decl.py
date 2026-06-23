@@ -350,6 +350,13 @@ def _decl_check_ev_delivery(
         setup["delivery_p_win"] = p_win
     setup["delivery_ev_source"] = resolved.get("source")
 
+    if ev is None and p_win is None:
+        return GateResult(
+            False,
+            "data.ev_missing",
+            "EV и P(win) отсутствуют после resolve",
+        )
+
     if ev is None:
         reason = resolved.get("reason") or "incomplete_levels"
         return GateResult(
@@ -545,6 +552,7 @@ def _decl_check_meme_anomaly(
     from hunt_core.scanner.gate._quality import (  # noqa: PLC0415
         _row_chg24_abs,
         _row_rng24,
+        meme_anomaly_block_code,
         passes_meme_anomaly_gate,
     )
     from hunt_core.scanner.gate.delivery import GateResult  # noqa: PLC0415
@@ -556,12 +564,15 @@ def _decl_check_meme_anomaly(
     lc = lifecycle if isinstance(lifecycle, dict) else {}
     if passes_meme_anomaly_gate(sym=sym, row=row, lc=lc, cal=cal):
         return None
+    block_code = meme_anomaly_block_code(sym=sym, row=row, lc=lc, cal=cal) or "not_anomaly"
     chg24 = _row_chg24_abs(row)
     rng24 = _row_rng24(row)
+    chg_s = f"{chg24:.1f}" if chg24 is not None else "n/a"
+    rng_s = f"{rng24:.1f}" if rng24 is not None else "n/a"
     return GateResult(
         False,
-        "not_anomaly",
-        f"Не meme-аномалия: chg24={chg24:.1f}% range={rng24:.1f}% "
+        block_code,
+        f"Не meme-аномалия: chg24={chg_s}% range={rng_s}% "
         f"(нужно ≥{cal.anomaly_min_chg_24h_pct}% или ≥{cal.anomaly_min_range_24h_pct}%)",
     )
 

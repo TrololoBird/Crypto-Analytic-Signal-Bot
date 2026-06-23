@@ -152,12 +152,21 @@ def entry_zone(row: dict[str, Any], direction: str, pad_atr: float) -> tuple[tup
         anchor = levels.get("poc") or levels.get("support") or safe_float(regime.get("poc_1h"))
         if anchor <= 0:
             anchor = safe_float(market.get("map_vp_poc"))
+        structural = levels.get("support") or levels.get("pool_below") or 0.0
+        if anchor > price * 1.002:
+            # POC above price — pullback zone stays below market (limit on dip).
+            hi = round(price - pad * 0.08, 6)
+            lo_anchor = structural if structural > 0 and structural < price else price - pad * 1.4
+            lo = round(min(lo_anchor, hi - pad * 0.35), 6)
+            if lo >= hi:
+                lo = round(hi - max(pad * 0.8, atr * 0.45), 6)
+            return (lo, hi), "pullback_below_price"
         if anchor <= 0:
             anchor = price
         lo = round(min(anchor, price) - pad * 0.5, 6)
-        hi = round(max(anchor, price) + pad * 0.25, 6)
+        hi = round(min(max(anchor, price) + pad * 0.2, price), 6)
         if lo >= hi:
-            lo, hi = round(price - pad, 6), round(price, 6)
+            lo, hi = round(price - pad, 6), round(price - pad * 0.05, 6)
         return (lo, hi), "struct_pullback_zone"
     anchor = levels.get("poc") or levels.get("resistance") or safe_float(regime.get("poc_1h"))
     if anchor <= 0:

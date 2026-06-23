@@ -175,6 +175,33 @@ def mission_delivery_block(
     start_max = short_dump_start_max_fall_pct(sym)
     prep_ready, _prep_reasons = assess_preparation_readiness(row, direction=d)
 
+    # Prep-ready setups bypass mid/not-pre cascade; late-chase guards still apply.
+    if prep_ready:
+        if d == "short":
+            if fall > break_max:
+                return GateResult(
+                    False,
+                    "mission_dump_already_falling",
+                    f"Уже −{fall:.1f}% от хая (> {break_max:.0f}%) — дамп начался, не «вот-вот»",
+                )
+            if isinstance(setup, dict):
+                sp = str(setup.get("phase") or "")
+                if sp == "dump_confirmed" and fall > start_max:
+                    return GateResult(
+                        False,
+                        "mission_dump_confirmed_late",
+                        f"dump_confirmed при −{fall:.1f}% — поздний вход, не pre-dump",
+                    )
+        if d == "long":
+            leg = _leg_gain_pct(lc)
+            if leg >= 10.0 and phase not in {"post_dump_bounce", "recovery"}:
+                return GateResult(
+                    False,
+                    "mission_pump_already_rising",
+                    f"Leg уже +{leg:.1f}% — памп начался, не «вот-вот»",
+                )
+        return None
+
     if d == "short":
         if phase in MID_DUMP_LC_PHASES:
             return GateResult(
