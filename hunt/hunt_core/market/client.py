@@ -2083,7 +2083,7 @@ def aggregate_cross_exchange_walls(
     *,
     top_n: int = _TOP_BOOK_WALL_LEVELS,
 ) -> dict[str, Any]:
-    """Merge venue depth snapshots — rank walls globally by notional."""
+    """Merge venue depth snapshots — aggregate same-price buckets across venues."""
     bid_pool: list[dict[str, Any]] = []
     ask_pool: list[dict[str, Any]] = []
     venues: list[str] = []
@@ -2107,10 +2107,40 @@ def aggregate_cross_exchange_walls(
                 row["exchange"] = ex
                 pool.append(row)
 
-    def _top(pool: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return sorted(pool, key=lambda r: float(r.get("notional_usd") or 0), reverse=True)[
-            :top_n
-        ]
+    def _merge_pool(pool: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        buckets: dict[float, dict[str, Any]] = {}
+        for row in pool:
+            price = float(row.get("price") or 0)
+            if price <= 0:
+                continue
+            bucket = round(price, 4)
+            acc = buckets.setdefault(
+                bucket,
+                {
+                    "price": bucket,
+                    "qty": 0.0,
+                    "notional_usd": 0.0,
+                    "venues": set(),
+                },
+            )
+            acc["qty"] += float(row.get("qty") or 0)
+            acc["notional_usd"] += float(row.get("notional_usd") or 0)
+            acc["venues"].add(str(row.get("exchange") or ""))
+        merged: list[dict[str, Any]] = []
+        for bucket, acc in buckets.items():
+            merged.append(
+                {
+                    "price": bucket,
+                    "qty": round(acc["qty"], 4),
+                    "notional_usd": round(acc["notional_usd"], 2),
+                    "venues": sorted(v for v in acc["venues"] if v),
+                    "venue_count": len(acc["venues"]),
+                }
+            )
+        return sorted(merged, key=lambda r: float(r.get("notional_usd") or 0), reverse=True)[:top_n]
+
+    bid_levels = _merge_pool(bid_pool)
+    ask_levels = _merge_pool(ask_pool)
 
     total_bid = sum(
         float(lvl.get("notional_usd") or 0)
@@ -2132,8 +2162,8 @@ def aggregate_cross_exchange_walls(
 
     return {
         "venues": venues,
-        "bid_levels": _top(bid_pool),
-        "ask_levels": _top(ask_pool),
+        "bid_levels": bid_levels,
+        "ask_levels": ask_levels,
         "depth_imbalance": imb,
         "bid_depth_usd_total": round(total_bid, 2),
         "ask_depth_usd_total": round(total_ask, 2),
