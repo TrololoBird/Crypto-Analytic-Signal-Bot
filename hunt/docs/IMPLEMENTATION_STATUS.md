@@ -59,11 +59,9 @@ cd hunt && .venv/bin/python -m hunt_core._dev.check_imports
 
 **Docs:** root `CLAUDE.md` Hunter row expanded; `.claude/rules/hunt-logic-redesign.md` added.
 
-## Out of scope (plan §6 / operator)
+## Git (§0 plan — committed 2026-06-22)
 
-| Item | Note |
-|------|------|
-| Phase git commits | `redesign-<phase>:` — only when operator requests |
-| Supervised live `watch` soak | ✅ smoke: `watch --once --no-telegram` exit 0 (2026-06-22); full multi-hour soak — operator |
-| `mission_mid_*` safety blocks | Kept for active-move monitor-only; prep bypass fixes dominant `mission_not_pre_*` dead scanner |
-| Bare `except` in decision path | **0** remaining in `hunt_core/` (project-wide sweep complete) |
+`redesign-p0` … `redesign-p9` on branch `dev` — 10 phase commits. Suite green post-commit.
+
+## Out of scope (operator)
+| Supervised live `watch` soak | ✅ smoke `watch --once` exit 0; multi-hour soak — operator |
