@@ -230,6 +230,49 @@ def run_derivatives(row: dict[str, Any]) -> EngineOutput:
     return _pack(long, short, coverage=coverage_ratio(present, 6), info=info, evidence=evidence, used=present, avail=6, base_priority=0.15)
 
 
+def _micro_nudge(row: dict[str, Any], *, long: float, short: float, evidence: list[str]) -> tuple[float, float]:
+    """Magnitude-aware microstructure from maps — abstain when missing."""
+    market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    cvd = str(market.get("map_cvd_divergence") or "")
+    if cvd == "bullish_div":
+        long += 0.10
+        evidence.append("cvd_bullish_div")
+    elif cvd == "bearish_div":
+        short += 0.10
+        evidence.append("cvd_bearish_div")
+    abs_count = int(market.get("map_absorption_count") or 0)
+    if abs_count > 0:
+        if market.get("map_accum_bid_absorption"):
+            long += min(0.12, 0.04 * abs_count)
+            evidence.append("bid_absorption")
+        if market.get("map_ask_thinning"):
+            long += 0.06
+            evidence.append("ask_thinning")
+    fp_delta = safe_float(market.get("map_footprint_delta"))
+    if fp_delta != 0:
+        if fp_delta > 0:
+            long += min(0.10, abs(fp_delta) * 0.08)
+            evidence.append("footprint_buy")
+        else:
+            short += min(0.10, abs(fp_delta) * 0.08)
+            evidence.append("footprint_sell")
+    iceberg = int(market.get("map_iceberg_count") or 0)
+    sticky = int(market.get("map_sticky_wall_count") or 0)
+    if iceberg + sticky >= 2:
+        conv = min(0.08, (iceberg + sticky) * 0.02)
+        imb = safe_float(market.get("depth_imbalance") or market.get("map_book_imbalance_1pct"))
+        if imb > 0:
+            long += conv
+            evidence.append("iceberg_bid_conviction")
+        elif imb < 0:
+            short += conv
+            evidence.append("iceberg_ask_conviction")
+    voids = int(market.get("map_void_count") or 0)
+    if voids >= 1:
+        evidence.append("liquidity_void")
+    return long, short
+
+
 def run_flow(row: dict[str, Any]) -> EngineOutput:
     market = row.get("market") if isinstance(row.get("market"), dict) else {}
     evidence: list[str] = []
@@ -253,12 +296,14 @@ def run_flow(row: dict[str, Any]) -> EngineOutput:
         else:
             short += 0.08
             evidence.append("agg_delta_sell")
-    if market.get("map_cvd_divergence"):
-        evidence.append("cvd_divergence")
-        short += 0.06
-    present = sum(1 for k in ("taker_5m", "taker_15m", "taker_1h", "agg_trade_delta") if market.get(k) is not None)
+    long, short = _micro_nudge(row, long=long, short=short, evidence=evidence)
+    present = sum(
+        1
+        for k in ("taker_5m", "taker_15m", "taker_1h", "agg_trade_delta", "map_cvd_divergence")
+        if market.get(k) is not None
+    )
     info = clamp01(0.4 + abs(accel) * 2.0)
-    return _pack(long, short, coverage=coverage_ratio(present, 4), info=info, evidence=evidence, used=present, avail=4, base_priority=0.15)
+    return _pack(long, short, coverage=coverage_ratio(present, 5), info=info, evidence=evidence, used=present, avail=5, base_priority=0.15)
 
 
 def run_execution_pressure(row: dict[str, Any]) -> EngineOutput:
@@ -292,7 +337,12 @@ def run_execution_pressure(row: dict[str, Any]) -> EngineOutput:
         elif direction == "short" and score > 0.1:
             short += score * 0.15
             evidence.append(label)
-    present = sum(1 for k in ("depth_imbalance", "microprice_bias", "map_book_imbalance_1pct") if market.get(k) is not None) + (1 if ms else 0)
+    long, short = _micro_nudge(row, long=long, short=short, evidence=evidence)
+    present = sum(
+        1
+        for k in ("depth_imbalance", "microprice_bias", "map_book_imbalance_1pct", "map_absorption_count")
+        if market.get(k) is not None
+    ) + (1 if ms else 0)
     info = clamp01(0.35 + present * 0.12)
     return _pack(long, short, coverage=coverage_ratio(present, 4), info=info, evidence=evidence, used=present, avail=4, base_priority=0.12)
 

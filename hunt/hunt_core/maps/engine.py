@@ -389,6 +389,11 @@ def derive_map_features(
         out["map_absorption_count"] = len(ob.absorption_zones)
         out["map_spoof_count"] = len(ob.spoof_flags)
         out["map_cvd_divergence"] = ob.cvd_divergence
+        if ob.footprint_bins:
+            delta_sum = sum(float(b.get("delta") or 0) for b in ob.footprint_bins if isinstance(b, dict))
+            total = sum(abs(float(b.get("delta") or 0)) for b in ob.footprint_bins if isinstance(b, dict))
+            if total > 0:
+                out["map_footprint_delta"] = round(delta_sum / total, 4)
         out.update(derive_ob_accumulation_features(ob, current_price=current_price))
 
     if bundle.liquidation:
