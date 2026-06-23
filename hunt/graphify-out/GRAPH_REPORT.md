@@ -1,16 +1,16 @@
 # Graph Report - hunt  (2026-06-22)
 
 ## Corpus Check
-- 393 files · ~273,454 words
+- 403 files · ~276,195 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 6764 nodes · 18869 edges · 329 communities (312 shown, 17 thin omitted)
-- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 1462 edges (avg confidence: 0.52)
+- 6885 nodes · 19153 edges · 329 communities (312 shown, 17 thin omitted)
+- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 1511 edges (avg confidence: 0.52)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `24ffea20`
+- Built from commit: `1940e2fa`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -344,7 +344,7 @@
 2. `BlockResult` - 134 edges
 3. `BlockContext` - 121 edges
 4. `HuntCcxtStreams` - 103 edges
-5. `run_tick()` - 100 edges
+5. `run_tick()` - 101 edges
 6. `snapshot_symbol()` - 97 edges
 7. `main()` - 94 edges
 8. `TelegramBroadcaster` - 90 edges
@@ -356,12 +356,12 @@
   tests/test_calibrate.py → hunt_core/scanner/detect/factors.py
 - `TestRobustZ` --uses--> `FactorScore`  [INFERRED]
   tests/test_calibrate.py → hunt_core/scanner/detect/factors.py
-- `BlockContext` --uses--> `BlockContext`  [INFERRED]
-  hunt_core/_dev/expansion_lab/features.py → hunt_core/_dev/expansion_lab/types.py
-- `str` --uses--> `BlockContext`  [INFERRED]
-  hunt_core/_dev/expansion_lab/features.py → hunt_core/_dev/expansion_lab/types.py
 - `float` --uses--> `ExpansionOpportunity`  [INFERRED]
   hunt_core/_dev/expansion_lab/format.py → hunt_core/_dev/expansion_lab/types.py
+- `ExpansionOpportunity` --uses--> `ExpansionOpportunity`  [INFERRED]
+  hunt_core/_dev/expansion_lab/learning/outcome_tracker.py → hunt_core/_dev/expansion_lab/types.py
+- `float` --uses--> `ExpansionOpportunity`  [INFERRED]
+  hunt_core/_dev/expansion_lab/learning/outcome_tracker.py → hunt_core/_dev/expansion_lab/types.py
 
 ## Import Cycles
 - 1-file cycle: `hunt_core/contract.py -> hunt_core/contract.py`
@@ -381,35 +381,35 @@
 - 1-file cycle: `hunt_core/runtime/expansion_alerts.py -> hunt_core/runtime/expansion_alerts.py`
 - 1-file cycle: `hunt_core/runtime/expansion_universe_scan.py -> hunt_core/runtime/expansion_universe_scan.py`
 - 1-file cycle: `hunt_core/runtime/state.py -> hunt_core/runtime/state.py`
+- 1-file cycle: `hunt_core/signals/lifecycle.py -> hunt_core/signals/lifecycle.py`
 - 1-file cycle: `hunt_core/track/candidates.py -> hunt_core/track/candidates.py`
 - 1-file cycle: `hunt_core/track/prep_shadow.py -> hunt_core/track/prep_shadow.py`
-- 1-file cycle: `hunt_core/track/pump_history.py -> hunt_core/track/pump_history.py`
 
 ## Communities (329 total, 17 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.06
-Nodes (45): Any, DataFrame, float, int, str, aggregate_cross_exchange_walls(), depth_imbalance_by_zone(), depth_snapshot_from_book() (+37 more)
+Nodes (57): AggTradeSnapshot, AggTradeSnapshot, SymbolMeta, Any, binance, bool, DataFrame, Exchange (+49 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.14
-Nodes (30): Any, bool, datetime, float, int, str, active_params(), apply_snapshot() (+22 more)
+Cohesion: 0.07
+Nodes (54): add_ols_trend_features(), add_polars_trading_features(), compute_return_entropy_50(), detect_volume_regime_break(), _last_finite(), polars_ds_available(), polars_ols_available(), polars_trading_available() (+46 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.20
-Nodes (40): Any, float, int, str, basis_thresholds(), btc_corr_thresholds(), collect_thresholds(), confirm_thresholds() (+32 more)
+Cohesion: 0.14
+Nodes (53): universal_section_from_defaults(), Any, bool, float, int, Path, str, basis_thresholds() (+45 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.07
-Nodes (44): AggTradeSnapshot, AggTradeSnapshot, SymbolMeta, Any, BaseException, bool, float, int (+36 more)
+Cohesion: 0.11
+Nodes (22): Any, BaseException, bool, float, int, str, float, int (+14 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.13
-Nodes (46): Any, float, str, adaptive_level_params(), AdaptiveLevelParams, _apply_fast_flush_tp1_buffer(), apply_liquidity_tp_ladder_long(), apply_liquidity_tp_ladder_short() (+38 more)
+Cohesion: 0.09
+Nodes (62): AdaptiveLevelParams, main(), Level geometry self-check — §R.2 / B1 vol-floor., int, Any, bool, Direction, float (+54 more)
 
 ### Community 5 - "Community 5"
-Cohesion: 0.19
-Nodes (27): batch_delivery_replay(), compare_shadow_live(), _count_codes(), delivery_replay_report(), find_tick_row(), _impulse_bounds(), _load_jsonl_rows(), _load_parquet_rows() (+19 more)
+Cohesion: 0.17
+Nodes (29): _append(), _baseline_path(), baseline_zscores(), batch_update_baselines(), load_baseline(), multi_tf_z(), Persistent per-symbol baseline history (P0-A).  Rolling samples for volume / quo, _safe_float() (+21 more)
 
 ### Community 6 - "Community 6"
 Cohesion: 0.07
@@ -417,247 +417,247 @@ Nodes (76): chart_pattern_snapshot(), _confirmed_close(), detect_double_bottom()
 
 ### Community 7 - "Community 7"
 Cohesion: 0.07
-Nodes (74): DataIncompleteError, Raised when required market/analytics inputs are missing or non-finite., series_z_strict(), legacy_trend_label(), apply_cross_exchange_flat(), apply_rest_enrichments_local(), attach_cross_market_fields(), attach_research_setup_fields() (+66 more)
+Nodes (78): DataIncompleteError, Raised when required market/analytics inputs are missing or non-finite., series_z_strict(), enrich_research_columns(), Apply OLS trend + trading metrics when columns are not already present., Latest scalar research columns for TF snapshots / setup dicts., research_snapshot_fields(), apply_cross_exchange_flat() (+70 more)
 
 ### Community 8 - "Community 8"
-Cohesion: 0.09
-Nodes (63): Any, bool, datetime, float, str, _apply_early_breakeven_lock(), _backfill_signal_geometry(), _close_already_notified() (+55 more)
+Cohesion: 0.10
+Nodes (59): Any, bool, datetime, float, str, _backfill_signal_geometry(), _close_already_notified(), close_signal() (+51 more)
 
 ### Community 9 - "Community 9"
 Cohesion: 0.08
-Nodes (58): build_confluence_grid(), format_grid_telegram(), /signals level map grid (§N.2)., Level map: POC/structure/fib magnets per TF., _apply_delivery_latch(), build_delivery_contract(), _contract_issues_for_setup(), effective_top_ls() (+50 more)
+Nodes (59): Advisory TG helpers — squeeze cooldown only (legacy early/dump_hunt/liq removed), Delivery orchestration extracted from cycle/_impl.py (Phase 8 / X3)., _apply_delivery_latch(), build_delivery_contract(), confirm_gap_readiness(), _contract_issues_for_setup(), display_readiness_score(), effective_top_ls() (+51 more)
 
 ### Community 10 - "Community 10"
-Cohesion: 0.09
-Nodes (64): DataType, date, add_microstructure_features(), Add lightweight microstructure features from available L1/flow columns., _add_advanced_indicators(), _add_polars_ols_features(), add_rolling_cvd_24h(), add_session_cvd() (+56 more)
+Cohesion: 0.08
+Nodes (68): DataType, date, group_active(), ichimoku_lines(), _add_advanced_indicators(), _add_polars_ols_features(), add_rolling_cvd_24h(), add_session_cvd() (+60 more)
 
 ### Community 11 - "Community 11"
 Cohesion: 0.14
 Nodes (30): Any, bool, float, int, str, TelegramBroadcaster, float, _backtest_snippet() (+22 more)
 
 ### Community 12 - "Community 12"
-Cohesion: 0.13
-Nodes (19): build_window(), Trailing feature window — the single input surface for the fusion engine.  Both, Build a trailing window from frame rows ending at the current bar.      When ``t, _check_symbol(), _lake_symbols(), main(), Smoke + determinism check for the fusion detection engine over the parquet lake., _check_quarantine_symbol() (+11 more)
+Cohesion: 0.14
+Nodes (18): build_window(), Trailing feature window — the single input surface for the fusion engine.  Both, Build a trailing window from frame rows ending at the current bar.      When ``t, _check_symbol(), _lake_symbols(), main(), Smoke + determinism check for the fusion detection engine over the parquet lake., _check_quarantine_symbol() (+10 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.09
-Nodes (39): ClientTimeout, bool, ClientSession, float, int, Path, str, Rotate proxy only between ticks — never during concurrent symbol gather. (+31 more)
+Cohesion: 0.11
+Nodes (33): ClientTimeout, bool, ClientSession, float, int, Path, str, aiohttp_request_proxy() (+25 more)
 
 ### Community 14 - "Community 14"
-Cohesion: 0.08
+Cohesion: 0.09
 Nodes (53): AdaptiveStore, adaptive_extreme_pct(), adaptive_hot_pct(), apply_quality_gates(), change_24h_tier(), _cross_overlay_for(), _DebouncedSymbol, enrich_candidates_with_percentile_ranks() (+45 more)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.09
-Nodes (48): _bias_1h(), _bias_4h(), _book_enrichment_signature(), cache_stats(), _cached_prepare_frame(), _enrich_with_book_data(), _as_optional_float(), _tail_value_signature() (+40 more)
+Cohesion: 0.07
+Nodes (59): _bias_1h(), _bias_4h(), _book_enrichment_signature(), cache_stats(), _cached_prepare_frame(), _enrich_with_book_data(), _as_optional_float(), _FrameCache (+51 more)
 
 ### Community 16 - "Community 16"
-Cohesion: 0.09
-Nodes (53): Any, binance, bool, DataFrame, datetime, Exchange, int, Path (+45 more)
+Cohesion: 0.08
+Nodes (58): Any, binance, bool, DataFrame, datetime, Exchange, int, Path (+50 more)
 
 ### Community 17 - "Community 17"
-Cohesion: 0.14
-Nodes (37): HuntCcxtClient, int, Any, bool, float, HuntCcxtClient, int, SnapshotTier (+29 more)
+Cohesion: 0.09
+Nodes (53): build_confluence_grid(), format_grid_telegram(), /signals level map grid (§N.2)., Level map: POC/structure/fib magnets per TF., format_telegram_confirm(), Closed-bar confirm card + optional confluence grid., btc_market_context(), forming_confirm_gaps() (+45 more)
 
 ### Community 18 - "Community 18"
-Cohesion: 0.12
-Nodes (44): audit_beat_dump_tick(), audit_kline_fetch(), audit_kline_frame(), audit_kline_integrity(), audit_kline_staleness(), audit_market_derivatives(), audit_prepared_indicators(), audit_rest_pack() (+36 more)
+Cohesion: 0.13
+Nodes (42): audit_beat_dump_tick(), audit_kline_fetch(), audit_kline_frame(), audit_kline_integrity(), audit_kline_staleness(), audit_market_derivatives(), audit_prepared_indicators(), audit_rest_pack() (+34 more)
 
 ### Community 19 - "Community 19"
-Cohesion: 0.20
-Nodes (30): _closed_bar_ts(), Closed (penultimate) 15m bar close_time as a stable per-bar key.      The featur, run_tick(), Loop-scoped cache for all-symbol REST batch fetches., TickBatchCache, FeatureLakeWriter, Buffered parquet feature writer — flush on close., FeatureExtractError (+22 more)
+Cohesion: 0.08
+Nodes (61): _cooldown_ok(), _entry_past_tp1(), _advisory_tg_enabled(), _confirm_blocked_bias_wait(), _confirm_delivery_suppressed(), hunt_auto_confirm_blocked(), _maybe_emit_scanner_continuation_wait(), Confirm delivery suppression and blocked-telemetry helpers (cycle split). (+53 more)
 
 ### Community 20 - "Community 20"
-Cohesion: 0.10
-Nodes (37): build_structural_down_forecast(), build_structural_up_forecast(), _factor_confidence(), _oi_new_money_short(), Deep-owned structural forecasts — shared facts only (no maps.forecast / scanner), Upside structural band for deep analysis (prepump / coil context)., Downside structural band for deep analysis (predump context)., Any (+29 more)
+Cohesion: 0.09
+Nodes (35): build_structural_down_forecast(), build_structural_up_forecast(), _factor_confidence(), _oi_new_money_short(), Deep-owned structural forecasts — shared facts only (no maps.forecast / scanner), Upside structural band for deep analysis (prepump / coil context)., Downside structural band for deep analysis (predump context)., Any (+27 more)
 
 ### Community 21 - "Community 21"
 Cohesion: 0.04
-Nodes (45): 2026-06-10 — Initial pump + mega leg + professional prompt, 2026-06-10 — phase-hunt-impl-1 (forensic replay + phase-aware filters), 2026-06-10 — phase-hunt-impl-2 (calibration data + early-alert hygiene + live mark stream), 2026-06-11 — P0: feature-vector latching + order-book walls (v-Complete data gap), 2026-06-11 — P1: backtest pump/dump leg events (sample growth), 2026-06-11 — P2: intel dossier (Layer 3 scaffold), 2026-06-11 — W26: depth_imbalance as secondary confirm factor, 2026-06-11 — W27: SPACEUSDT instant TP1 + lifecycle_stale ping-pong (+37 more)
+Nodes (46): 2026-06-10 — Initial pump + mega leg + professional prompt, 2026-06-10 — phase-hunt-impl-1 (forensic replay + phase-aware filters), 2026-06-10 — phase-hunt-impl-2 (calibration data + early-alert hygiene + live mark stream), 2026-06-11 — P0: feature-vector latching + order-book walls (v-Complete data gap), 2026-06-11 — P1: backtest pump/dump leg events (sample growth), 2026-06-11 — P2: intel dossier (Layer 3 scaffold), 2026-06-11 — W26: depth_imbalance as secondary confirm factor, 2026-06-11 — W27: SPACEUSDT instant TP1 + lifecycle_stale ping-pong (+38 more)
 
 ### Community 22 - "Community 22"
-Cohesion: 0.15
-Nodes (35): add_microstructure_context_columns(), aggregate_microstructure_contexts(), _bottleneck_move_mean(), _bottleneck_move_std(), build_microstructure_context(), _clamp(), _direction_sign(), _finite_float() (+27 more)
+Cohesion: 0.14
+Nodes (37): add_microstructure_context_columns(), add_microstructure_features(), aggregate_microstructure_contexts(), _bottleneck_move_mean(), _bottleneck_move_std(), build_microstructure_context(), _clamp(), _direction_sign() (+29 more)
 
 ### Community 23 - "Community 23"
 Cohesion: 0.10
-Nodes (43): _apply_cross_exchange_flat(), _apply_rest_enrichments(), _attach_cross_market_fields(), _attach_research_setup_fields(), _book_from_pack(), _btc_beta_1h(), _btc_corr_1h(), _enrich_work_research_frames() (+35 more)
+Nodes (45): _apply_cross_exchange_flat(), _apply_rest_enrichments(), _attach_cross_market_fields(), _attach_research_setup_fields(), _book_from_pack(), _btc_beta_1h(), _btc_corr_1h(), _enrich_work_research_frames() (+37 more)
 
 ### Community 24 - "Community 24"
-Cohesion: 0.16
+Cohesion: 0.15
 Nodes (24): Any, DataFrame, deque, float, int, LiqEvent, MapsConfig, Path (+16 more)
 
 ### Community 25 - "Community 25"
-Cohesion: 0.09
-Nodes (30): bar_magnitude(), magnitude_history_for_frame(), Incremental vol-adjusted fused-magnitude history (O(1) per new bar).  Recomputin, Vol-adjusted fused magnitude for one decision bar., Trailing vol-adjusted magnitude series for bars strictly before the last row., assess_phase(), PhaseInfo, _PhaseSticky (+22 more)
+Cohesion: 0.06
+Nodes (44): compute_quarantine_factors(), Shadow factor readings (registry status=quarantine only)., Statistical fusion detection engine (replaces scan/* + regime FSM + gate/*).  Si, bar_magnitude(), magnitude_history_for_frame(), Incremental vol-adjusted fused-magnitude history (O(1) per new bar).  Recomputin, Vol-adjusted fused magnitude for one decision bar., Trailing vol-adjusted magnitude series for bars strictly before the last row. (+36 more)
 
 ### Community 26 - "Community 26"
 Cohesion: 0.17
 Nodes (42): adx_from_polars_ta(), aroon_series(), atr_series(), bbands_series(), cci_from_polars_ta(), _clean(), ema_series(), _kdj_exprs() (+34 more)
 
 ### Community 27 - "Community 27"
-Cohesion: 0.11
-Nodes (35): DeepPanel, FeatureWindow, float, DeepPanel, float, str, FeatureWindow, int (+27 more)
+Cohesion: 0.08
+Nodes (44): DeepPanel, FeatureWindow, float, DeepPanel, float, str, FactorScore, FeatureWindow (+36 more)
 
 ### Community 28 - "Community 28"
-Cohesion: 0.12
-Nodes (38): Any, float, int, str, apply_cross_snapshot_to_market(), attach_cross_fields(), attach_cross_microstructure(), configured_secondary_exchanges() (+30 more)
+Cohesion: 0.11
+Nodes (42): Any, float, int, str, aggregate_cross_exchange_walls(), Merge venue depth snapshots — aggregate same-price buckets across venues., apply_cross_exchange_env(), apply_cross_snapshot_to_market() (+34 more)
 
 ### Community 29 - "Community 29"
 Cohesion: 0.10
-Nodes (26): advisory_digest_enabled(), AdvisoryDigest, _digest_enabled(), _digest_intervals_s(), _digest_top_n(), DigestEntry, DigestScheduler, _flush_interval_s() (+18 more)
+Nodes (27): advisory_digest_enabled(), AdvisoryDigest, _digest_enabled(), _digest_intervals_s(), _digest_top_n(), DigestEntry, DigestScheduler, _flush_interval_s() (+19 more)
 
 ### Community 30 - "Community 30"
 Cohesion: 0.13
 Nodes (34): Any, bool, datetime, float, int, Path, str, LegKind (+26 more)
 
 ### Community 31 - "Community 31"
-Cohesion: 0.10
-Nodes (41): align_series_to_klines(), attach_metric_series(), book_walls_from_depth(), book_walls_from_row(), _expand_group_dependencies(), feature_vector_from_row(), group_active(), hull_moving_average() (+33 more)
+Cohesion: 0.12
+Nodes (35): align_series_to_klines(), attach_metric_series(), book_walls_from_depth(), book_walls_from_row(), _expand_group_dependencies(), expected_indicator_columns_for_symbol(), hull_moving_average(), join_derivative_series_asof() (+27 more)
 
 ### Community 32 - "Community 32"
 Cohesion: 0.08
-Nodes (42): _advisory_tg_enabled(), Advisory TG (squeeze/ignition/dump_hunt) off by default — log-only until edge pr, _build_digest_candidates(), Watch main loop — universe, prescan, tick scheduling (Phase 8 split)., Score gated tickers into pump/dump candidates for the scheduled digest.      Sco, run_loop(), PrescanDebounceQueue, PrescanEngine (+34 more)
+Nodes (43): _build_digest_candidates(), Watch main loop — universe, prescan, tick scheduling (Phase 8 split)., Score gated tickers into pump/dump candidates for the scheduled digest.      Sco, run_loop(), PrescanDebounceQueue, PrescanEngine, Internal-only debounce for prescan outliers before watchlist merge.      A symbo, DigestCandidate (+35 more)
 
 ### Community 33 - "Community 33"
 Cohesion: 0.11
-Nodes (37): humanize_trigger(), trigger_human(), format_accumulation_forecast_section(), format_book_walls_section(), format_cross_exchange_section(), format_cross_microstructure_section(), format_intraday_maps_telegram(), format_liquidation_map_section() (+29 more)
+Nodes (37): format_accumulation_forecast_section(), format_book_walls_section(), format_cross_exchange_section(), format_cross_microstructure_section(), format_forecast_section(), format_intraday_maps_telegram(), format_liquidation_map_section(), format_liquidity_heatmap_section() (+29 more)
 
 ### Community 34 - "Community 34"
 Cohesion: 0.33
 Nodes (5): factors, funding_velocity, kind, status, schema_version
 
 ### Community 35 - "Community 35"
-Cohesion: 0.13
-Nodes (32): __getattr__(), Data ingest, universe, lake store, tick I/O, collection., append_feature_row(), append_tick_rows(), buffer_cooldown_state(), buffer_tick_rows(), buffer_tracker_state(), flush_cooldown_state() (+24 more)
+Cohesion: 0.06
+Nodes (72): __getattr__(), Data ingest, universe, lake store, tick I/O, collection., append_feature_row(), append_tick_rows(), buffer_cooldown_state(), buffer_tick_rows(), buffer_tracker_state(), flush_cooldown_state() (+64 more)
 
 ### Community 36 - "Community 36"
 Cohesion: 0.19
 Nodes (31): Any, deque, float, int, MapsConfig, str, build_orderbook_map(), _depth_heatmap_matrix() (+23 more)
 
 ### Community 37 - "Community 37"
-Cohesion: 0.13
-Nodes (28): add_ols_trend_features(), add_polars_trading_features(), compute_return_entropy_50(), detect_volume_regime_break(), enrich_research_columns(), _last_finite(), polars_ds_available(), polars_ols_available() (+20 more)
+Cohesion: 0.11
+Nodes (26): fusion_params(), FusionParams, _merge_fusion(), Official fusion-engine hyperparameters (explicit, not hidden).  Self-calibration, Explicit fusion tunables — documented in docs/FUSION_PARAMS.md., Merged [fusion] from config.defaults.toml + hunt_calibration universal block., bar_vol_adjusted_magnitude(), _fp() (+18 more)
 
 ### Community 38 - "Community 38"
-Cohesion: 0.17
-Nodes (33): SymbolFrames, UniverseSymbol, MarketSnapshot, Per-field provenance wrapper for tick-row ``snapshot`` block., enrich_work_research_frames(), Attach OLS trend + trading metrics to primary work frames (Phases 11A/11B)., Any, bool (+25 more)
+Cohesion: 0.11
+Nodes (46): get_frame_cache(), SymbolFrames, UniverseSymbol, MarketSnapshot, Per-field provenance wrapper for tick-row ``snapshot`` block., Skip doomed relaxed prepare when 4h history is thin but 1h is usable., Young/partial listings — do not hard-reject before lite prepare path., should_bypass_kline_integrity() (+38 more)
 
 ### Community 39 - "Community 39"
 Cohesion: 0.17
 Nodes (33): Any, BaseException, float, int, str, TelegramBroadcaster, build_poc_level_scenarios(), build_signals_report_text() (+25 more)
 
 ### Community 40 - "Community 40"
-Cohesion: 0.06
-Nodes (78): DeliveryStageKind, AggTrade, PipelineResult, Result container for signal analysis pipeline.      Replaces legacy PipelineResu, assert_runtime_call_path_is_clean(), assert_runtime_import_contract(), build_public_feature_snapshot(), build_setup_delivery_contract() (+70 more)
+Cohesion: 0.12
+Nodes (24): DeliveryStageKind, assert_runtime_call_path_is_clean(), assert_runtime_import_contract(), build_setup_delivery_contract(), DumpBlock, imported_module_names(), LifecycleBlock, LongBlock (+16 more)
 
 ### Community 41 - "Community 41"
-Cohesion: 0.15
-Nodes (35): add_to_watchlist(), _bias_to_mode(), cache_is_fresh(), _cache_path(), clear_signal_notify(), correlated_asset_tag(), early_telegram_enabled(), effective_watch_mode() (+27 more)
+Cohesion: 0.14
+Nodes (39): add_to_watchlist(), asset_equivalence_key(), _bias_to_mode(), cache_is_fresh(), _cache_path(), clear_signal_notify(), collapse_equivalent_opportunities(), correlated_asset_tag() (+31 more)
 
 ### Community 42 - "Community 42"
-Cohesion: 0.09
-Nodes (10): is_signal_contract_violation(), True when Signal.__post_init__ rejected an invalid trade plan., Deterministic hash of symbol + direction + setup + rounded prices.          Used, Signal, Any, BaseException, bool, float (+2 more)
+Cohesion: 0.10
+Nodes (6): Deterministic hash of symbol + direction + setup + rounded prices.          Used, Signal, Any, float, int, str
 
 ### Community 43 - "Community 43"
-Cohesion: 0.17
-Nodes (31): Any, deque, float, int, MapsConfig, str, _bucket_events(), _build_heatmap_from_map() (+23 more)
+Cohesion: 0.18
+Nodes (30): Any, deque, float, int, MapsConfig, str, _bucket_events(), _build_heatmap_from_map() (+22 more)
 
 ### Community 44 - "Community 44"
 Cohesion: 0.15
 Nodes (26): collect_report_blockers(), delivery_freshness_block(), delivery_hard_block(), disabled_phase_pairs(), effective_min_rr_for_delivery(), evaluate_alert_gate(), evaluate_formation(), evaluate_stale_advice() (+18 more)
 
 ### Community 45 - "Community 45"
-Cohesion: 0.13
-Nodes (30): Any, bool, str, Any, bool, str, LookupError, gate_symbol_dict_keys() (+22 more)
+Cohesion: 0.10
+Nodes (37): Any, bool, str, Any, bool, str, Any, bool (+29 more)
 
 ### Community 46 - "Community 46"
-Cohesion: 0.05
-Nodes (53): defensive_exc_types(), Flatten DEFENSIVE_EXC with extra types for ``except`` clauses (never nest the tu, Any, bool, deque, Exception, float, int (+45 more)
+Cohesion: 0.16
+Nodes (26): Any, bool, float, GateResult, HuntCcxtClient, int, str, build_query_result() (+18 more)
 
 ### Community 47 - "Community 47"
 Cohesion: 0.17
 Nodes (25): check_lake_schema(), main(), Validate feature lake schema alignment with registry and FeatureVector., build_feature_vector(), _closed_frame_block(), _coerce_float(), _encode_signed_label(), FeatureVector (+17 more)
 
 ### Community 48 - "Community 48"
-Cohesion: 0.16
-Nodes (14): Any, bool, ClientSession, float, int, str, build_hunt_telegram_commands(), HuntTelegramCommands (+6 more)
+Cohesion: 0.14
+Nodes (24): _candle_close(), _closes_beyond(), correlated_direction(), _f_signed(), _fmt_confirm_price(), forming_confirm_gaps(), _level_within_pct(), local_confirm_label() (+16 more)
 
 ### Community 49 - "Community 49"
-Cohesion: 0.09
-Nodes (61): _base_row(), check_r11_strength_disclaimer(), check_r12_trade_quality_advisory(), check_r13_range_probability(), check_r14_timing_gate(), check_r14_timing_not_in_blend(), check_r1_quality_blend(), check_r6_exec_zero_on_a() (+53 more)
+Cohesion: 0.08
+Nodes (67): _base_row(), check_queue_gold_collapse(), check_r11_strength_disclaimer(), check_r12_trade_quality_advisory(), check_r13_range_probability(), check_r14_timing_gate(), check_r14_timing_not_in_blend(), check_r1_quality_blend() (+59 more)
 
 ### Community 50 - "Community 50"
 Cohesion: 0.10
-Nodes (42): backfill_cold_lake_symbol(), ensure_lake_warm(), Lightweight lake warmup for cold-start symbols.  Fetches 15m OHLCV from CCXT, bu, Backfill multiple cold symbols concurrently (max 4 at once)., Backfill the feature lake for *symbol* using 15m OHLCV only.      Returns the nu, PreparedSymbol, attach_pp_flags(), Merge PP swing wick-zone break flags into a TF snapshot (1h/15m only). (+34 more)
+Nodes (40): backfill_cold_lake_symbol(), ensure_lake_warm(), Lightweight lake warmup for cold-start symbols.  Fetches 15m OHLCV from CCXT, bu, Backfill multiple cold symbols concurrently (max 4 at once)., Backfill the feature lake for *symbol* using 15m OHLCV only.      Returns the nu, PreparedSymbol, Any, bool (+32 more)
 
 ### Community 51 - "Community 51"
-Cohesion: 0.12
-Nodes (36): append_jsonl_lines(), Append-only JSONL helpers for data-layer writers (tick buffer, lake flush)., Rotate oversized JSONL logs: ``path`` → ``path.1`` … ``path.{keep}``., Append raw JSONL lines with size-based rotation (TICK_JSONL pattern)., rotate_jsonl_if_needed(), int, Path, str (+28 more)
+Cohesion: 0.08
+Nodes (59): append_jsonl_lines(), Append-only JSONL helpers for data-layer writers (tick buffer, lake flush)., Rotate oversized JSONL logs: ``path`` → ``path.1`` … ``path.{keep}``., Append raw JSONL lines with size-based rotation (TICK_JSONL pattern)., rotate_jsonl_if_needed(), int, Path, str (+51 more)
 
 ### Community 52 - "Community 52"
-Cohesion: 0.28
-Nodes (15): Any, bool, datetime, float, str, _closed_adx_1h(), evaluate_followups(), _maybe_armed_to_triggered() (+7 more)
+Cohesion: 0.16
+Nodes (27): Any, bool, datetime, float, str, Any, bool, datetime (+19 more)
 
 ### Community 53 - "Community 53"
 Cohesion: 0.09
-Nodes (57): _abstain(), compute_factors(), factor_book(), factor_compression(), factor_flow(), factor_funding(), _factor_kind(), factor_oi_pressure() (+49 more)
+Nodes (54): _abstain(), compute_factors(), factor_book(), factor_compression(), factor_flow(), factor_funding(), _factor_kind(), factor_oi_pressure() (+46 more)
 
 ### Community 54 - "Community 54"
-Cohesion: 0.22
-Nodes (12): bytes, DeliveryResult, _html_to_plain_text(), _message_preview(), Split HTML message into Telegram-safe chunks (paragraph-aware + hard split)., send_telegram_chunks(), split_telegram(), _split_telegram_text() (+4 more)
+Cohesion: 0.09
+Nodes (32): bytes, _buffered_input_file_class(), build_message_broadcaster(), DeliveryResult, DisabledBroadcaster, _extract_retry_after_seconds(), format_entry_telegram(), format_squeeze_telegram() (+24 more)
 
 ### Community 55 - "Community 55"
-Cohesion: 0.19
-Nodes (31): Any, DataQualityReport, EngineOutput, float, int, str, float, int (+23 more)
+Cohesion: 0.20
+Nodes (32): Any, DataQualityReport, EngineOutput, float, int, str, float, int (+24 more)
 
 ### Community 56 - "Community 56"
-Cohesion: 0.16
-Nodes (33): Any, bool, datetime, float, str, Any, bool, datetime (+25 more)
+Cohesion: 0.22
+Nodes (23): Any, bool, datetime, float, str, _apply_early_breakeven_lock(), Lock SL near breakeven once MFE threshold met — only after TP1 or structural con, apply_tp1_breakeven_trail() (+15 more)
 
 ### Community 57 - "Community 57"
-Cohesion: 0.13
-Nodes (38): ConfluenceVote, evaluate_must_pass(), family_vote_count(), MTF family-voting confluence + must-pass gate (P6)., One vote per family — anti double-count (§3)., Must-pass triggers separate from strength rank (§E.3)., build_mtf_confluence(), mtf_confluence_to_dict() (+30 more)
+Cohesion: 0.17
+Nodes (28): ConfluenceVote, evaluate_must_pass(), family_vote_count(), MTF family-voting confluence + must-pass gate (P6)., One vote per family — anti double-count (§3)., Must-pass triggers separate from strength rank (§E.3)., MTFConfluence, ScenarioScore (+20 more)
 
 ### Community 58 - "Community 58"
-Cohesion: 0.11
-Nodes (30): vol_adjusted_magnitude(), Statistical fusion detection engine (replaces scan/* + regime FSM + gate/*).  Si, clear_magnitude_cache(), clear_phase_sticky(), build_detection(), Run factors → fuse → phase → gate for one bar; MID closes the watch gate., _atr_at(), _forward_outcome() (+22 more)
+Cohesion: 0.18
+Nodes (21): clear_magnitude_cache(), clear_phase_sticky(), _atr_at(), _forward_outcome(), _forward_return_pct(), _lake_symbols(), load_symbol_lake(), main() (+13 more)
 
 ### Community 59 - "Community 59"
-Cohesion: 0.15
-Nodes (23): evaluate_delivery_row(), is_armed_setup(), is_confirmed_setup(), Delivery orchestration extracted from cycle/_impl.py (Phase 8 / X3)., _evaluate_delivery_row(), _load_state(), _overlay_ws_tickers(), _phase_long() (+15 more)
+Cohesion: 0.16
+Nodes (22): evaluate_delivery_row(), is_armed_setup(), is_confirmed_setup(), _evaluate_delivery_row(), _load_state(), _overlay_ws_tickers(), _phase_long(), Hunter per-tick cycle — run_loop / run_tick (H-B rewrite). (+14 more)
 
 ### Community 60 - "Community 60"
-Cohesion: 0.13
-Nodes (36): _alt_scenario_one_liner(), _brief_reason(), _compact_scenario_lines(), _entry_zones_overlap(), format_signal_brief_telegram(), _hunt_scenario_lines(), _pct_str(), Telegram /signal brief + scenario lines (pinned + probe). (+28 more)
+Cohesion: 0.24
+Nodes (21): _alt_scenario_one_liner(), _brief_reason(), _compact_scenario_lines(), _entry_zones_overlap(), format_signal_brief_telegram(), _hunt_scenario_lines(), _pct_str(), Telegram /signal brief + scenario lines (pinned + probe). (+13 more)
 
 ### Community 61 - "Community 61"
-Cohesion: 0.14
-Nodes (17): score(), ExpansionHistory, HistorySample, Per-symbol block-score history — feeds deltas and persistence counters.  Pumps a, Bounded ring buffer of block-score snapshots keyed by symbol., Block scores ``lookback`` samples ago (clamped to the oldest available)., Consecutive most-recent samples (incl. latest) with ``block`` >= threshold., Export recent samples for persistence (scores + ts only). (+9 more)
+Cohesion: 0.18
+Nodes (12): ExpansionHistory, HistorySample, Per-symbol block-score history — feeds deltas and persistence counters.  Pumps a, Bounded ring buffer of block-score snapshots keyed by symbol., Block scores ``lookback`` samples ago (clamped to the oldest available)., Consecutive most-recent samples (incl. latest) with ``block`` >= threshold., Export recent samples for persistence (scores + ts only)., Restore from :meth:`snapshot` output. (+4 more)
 
 ### Community 62 - "Community 62"
-Cohesion: 0.07
-Nodes (50): Outcome ledger recording extracted from _cycle_tick (debloat)., record_outcome_ledger(), evaluate_confirm_authorities(), Single confirm-boundary authority arbiter (A1)., Require fusion confirmed + playbook pass + mission pass before production TG., cross_module_delivery_block(), _deep_direction(), Cross-module delivery conflict — Deep/Expansion vs Scanner direction (P0'). (+42 more)
+Cohesion: 0.08
+Nodes (46): Outcome ledger recording extracted from _cycle_tick (debloat)., record_outcome_ledger(), is_lab_delivery(), lab_chat_id(), ledger_path_for_lane(), Lab vs production delivery lane routing (E1)., Exploratory lane: EV bootstrap, catalog EV-primary, expansion advisory., Route Telegram HTML to lab or production chat. (+38 more)
 
 ### Community 63 - "Community 63"
-Cohesion: 0.15
-Nodes (30): _clean(), _clip_z(), cusum_series(), cusum_value(), log_returns(), ols_slope(), pctile_rank(), quantile_gate() (+22 more)
+Cohesion: 0.17
+Nodes (21): Any, bool, datetime, float, Signal, str, SignalModule, build_scanner_signal() (+13 more)
 
 ### Community 64 - "Community 64"
 Cohesion: 0.19
 Nodes (21): Any, bool, DataFrame, float, int, MapsConfig, str, build_period_profile() (+13 more)
 
 ### Community 65 - "Community 65"
-Cohesion: 0.14
-Nodes (22): BoundLogger, Live TG delivery restricted to imminent pre-dump / pre-pump lifecycle windows., Back-compat alias — short pre-dump phases only., SniperConfig, str, Any, datetime, float (+14 more)
+Cohesion: 0.16
+Nodes (20): Live TG delivery restricted to imminent pre-dump / pre-pump lifecycle windows., Back-compat alias — short pre-dump phases only., SniperConfig, Any, datetime, float, Path, str (+12 more)
 
 ### Community 66 - "Community 66"
 Cohesion: 0.16
 Nodes (22): asset_config_for_symbol(), configured_context_timeframes(), configured_primary_timeframe(), effective_engine_score_floor(), effective_shortlist_unified_routing(), is_deep_analysis_symbol(), Runtime policy helpers shared by live routing, filters, and setups., True when unified shortlist routing is configured and the shortlist is non-empty (+14 more)
 
 ### Community 67 - "Community 67"
-Cohesion: 0.09
-Nodes (29): BaseModel, Official fusion-engine hyperparameters (explicit, not hidden).  Self-calibration, AssetConfig, _convert_toml_dict(), DeliveryConfig, FilterConfig, HuntSettings, load_config_defaults_toml() (+21 more)
+Cohesion: 0.10
+Nodes (28): BaseModel, AssetConfig, _convert_toml_dict(), DeliveryConfig, FilterConfig, HuntSettings, load_config_defaults_toml(), load_settings() (+20 more)
 
 ### Community 68 - "Community 68"
 Cohesion: 0.15
@@ -665,15 +665,15 @@ Nodes (20): main(), Factor panel self-check — §R.2., adaptive_z_last(), build
 
 ### Community 69 - "Community 69"
 Cohesion: 0.20
-Nodes (24): Any, bool, Direction, float, int, str, _apply_transition(), classify_regime() (+16 more)
+Nodes (23): Any, bool, Direction, float, int, str, _apply_transition(), classify_regime() (+15 more)
 
 ### Community 70 - "Community 70"
 Cohesion: 0.22
 Nodes (21): Any, bool, datetime, float, int, str, global_confirm_burst_cap_reached(), TG delivery cooldowns and symbol-level repeat-loser caps. (+13 more)
 
 ### Community 71 - "Community 71"
-Cohesion: 0.15
-Nodes (30): Any, float, str, TradePlan, Any, Any, float, str (+22 more)
+Cohesion: 0.13
+Nodes (35): Any, ExpectedPath, ScenarioCatalyst, str, Any, Any, float, str (+27 more)
 
 ### Community 72 - "Community 72"
 Cohesion: 0.29
@@ -684,20 +684,20 @@ Cohesion: 0.20
 Nodes (20): btc_decoupled_flags(), btc_residual_returns(), cusum_series(), detect_pump_cycle_events(), _discrete_events(), _log_returns(), 1m return CUSUM pump/dump cycle + BTC-residual decoupling (Phase 4C)., Symbol return minus beta × BTC return on aligned 1m bars. (+12 more)
 
 ### Community 74 - "Community 74"
-Cohesion: 0.24
-Nodes (24): Any, CloseReason, datetime, float, int, Path, str, prep_shadow_thresholds() (+16 more)
+Cohesion: 0.15
+Nodes (9): Verify bot token and chat access., Send photo using aiogram Bot with BufferedInputFile., Send message using aiogram Bot., Edit message using aiogram Bot., Convert HTML to plain text when Telegram rejects HTML parsing., Prepare HTML and plain text versions of caption., Close aiogram bot session., TelegramBroadcaster (+1 more)
 
 ### Community 75 - "Community 75"
-Cohesion: 0.22
-Nodes (28): Any, bool, CloseReason, datetime, float, Path, str, _active_key() (+20 more)
+Cohesion: 0.11
+Nodes (55): DeliveryGateTier, _decl_check_accumulation_long(), _decl_check_at_level(), _decl_check_data_complete(), _decl_check_data_stale(), _decl_check_delivery_confluence(), _decl_check_ev_shadow(), _decl_check_exhaustion_fade() (+47 more)
 
 ### Community 76 - "Community 76"
-Cohesion: 0.33
-Nodes (10): _audit_active_geometry(), _audit_prep_shadow(), _audit_telemetry(), main(), _print_outcome_wr_summary(), Cross-layer audit: empty telemetry, geometry drift, stale tracker rows., #49: deduped phase×direction WR from signal_history for calibration., int (+2 more)
+Cohesion: 0.19
+Nodes (16): _audit_active_geometry(), _audit_prep_shadow(), _audit_telemetry(), main(), _print_outcome_wr_summary(), Cross-layer audit: empty telemetry, geometry drift, stale tracker rows., #49: deduped phase×direction WR from signal_history for calibration., main() (+8 more)
 
 ### Community 77 - "Community 77"
-Cohesion: 0.09
-Nodes (24): Delivery authority (canonical — resolves doc conflicts), Delivery invariant, Entrypoints, Forbidden, Hot path (one watch tick), Hot path (watch tick — Module 1 only), Hot path (watch tick — Module 2 Scanner only), Hunt architecture (canonical) (+16 more)
+Cohesion: 0.08
+Nodes (25): Delivery authority (canonical — resolves doc conflicts), Delivery invariant, Entrypoints, Forbidden, Hot path (one watch tick), Hot path (watch tick — Module 1 only), Hot path (watch tick — Module 2 Scanner only), Hunt architecture (canonical) (+17 more)
 
 ### Community 78 - "Community 78"
 Cohesion: 0.21
@@ -708,8 +708,8 @@ Cohesion: 0.15
 Nodes (17): Add monorepo root + hunt/ to sys.path; verify Polars feature stack., Fail fast when core Polars TA dependencies are missing., require_feature_stack(), _cmd_watch(), main(), int, str, Hunt package CLI — ``python -m hunt_core watch``. (+9 more)
 
 ### Community 80 - "Community 80"
-Cohesion: 0.17
-Nodes (24): _apply_va_liquidity_weights(), build_liquidity_scenarios(), _f(), _in_value_area(), _level_within_pct(), _normalize_probs(), _pct_dist(), Return (price, label, tf, poc_direction). (+16 more)
+Cohesion: 0.05
+Nodes (54): defensive_exc_types(), Flatten DEFENSIVE_EXC with extra types for ``except`` clauses (never nest the tu, Any, bool, deque, Exception, float, int (+46 more)
 
 ### Community 81 - "Community 81"
 Cohesion: 0.17
@@ -717,19 +717,19 @@ Nodes (22): cooldown_minutes_for_horizon(), derive_signal_horizon(), Signal hori
 
 ### Community 82 - "Community 82"
 Cohesion: 0.04
-Nodes (120): Block 2 — Accumulation absorption (someone building a position).  Volume present, score(), Block 21 — Breakout failure (failed breakout → dump).  Strong dumps often start, score(), abstain(), Shared constructors for block results., result(), Block 1 — Volatility compression (energy accumulating).  Low BB-width percentile (+112 more)
+Nodes (136): Block 2 — Accumulation absorption (someone building a position).  Volume present, score(), Block 21 — Breakout failure (failed breakout → dump).  Strong dumps often start, score(), abstain(), Shared constructors for block results., result(), Block 1 — Volatility compression (energy accumulating).  Low BB-width percentile (+128 more)
 
 ### Community 83 - "Community 83"
-Cohesion: 0.19
-Nodes (21): Exception, as_float(), as_int(), build_runtime_error_payload(), classify_runtime_error(), finite_float_or_none(), optional_finite_float(), Any (+13 more)
+Cohesion: 0.21
+Nodes (19): Exception, as_float(), as_int(), build_runtime_error_payload(), classify_runtime_error(), optional_finite_float(), Any, BaseException (+11 more)
 
 ### Community 84 - "Community 84"
 Cohesion: 0.05
-Nodes (63): check_activation_event_deduped(), check_as_of_in_render(), check_conflict_caveat_or_wait(), check_live_btc_assemble_e2e(), check_no_continuation_on_neutral(), check_primary_not_alt_pattern(), _conflict_row(), main() (+55 more)
+Nodes (57): check_activation_event_deduped(), check_as_of_in_render(), check_conflict_caveat_or_wait(), check_live_btc_assemble_e2e(), check_no_continuation_on_neutral(), check_primary_not_alt_pattern(), _conflict_row(), _live_btc_assemble_e2e() (+49 more)
 
 ### Community 85 - "Community 85"
-Cohesion: 0.25
-Nodes (18): AbsorptionKind, _cvd_from_row(), _cvd_from_tf(), _f_positive(), _f_signed(), fmt_flow_qty(), _infer_absorption(), _infer_aggressor() (+10 more)
+Cohesion: 0.50
+Nodes (3): _main(), Probe verdict_v2 gate breakdown for pinned symbols., int
 
 ### Community 86 - "Community 86"
 Cohesion: 0.11
@@ -740,68 +740,68 @@ Cohesion: 0.24
 Nodes (18): clean_non_finite(), _debug_scalar_wilder_mean(), ensure_columns(), finite_float(), materialize_series(), Replace NaN/inf/null values with a stable fill value., Wilder running average seeded with a simple mean over the first window., Return TradingView-style SuperTrend v3 line and direction series.      The imple (+10 more)
 
 ### Community 88 - "Community 88"
-Cohesion: 0.19
-Nodes (22): _fmt_price(), format_expansion_card(), _format_expansion_card_dict(), _format_expansion_card_obj(), format_expansion_section(), format_expansion_section_from_dict(), format_outcome_stats(), format_review_summary() (+14 more)
+Cohesion: 0.17
+Nodes (24): _fmt_price(), format_calibration_report(), format_expansion_card(), _format_expansion_card_dict(), _format_expansion_card_obj(), format_expansion_section(), format_expansion_section_from_dict(), format_outcome_stats() (+16 more)
 
 ### Community 89 - "Community 89"
-Cohesion: 0.26
-Nodes (18): _extract_errors(), _log(), _log_stale(), main(), bool, float, int, Path (+10 more)
+Cohesion: 0.15
+Nodes (29): clean_full(), clean_smoke(), main(), bool, int, Path, str, Drop ephemeral session state; optional keep calibration JSON. (+21 more)
 
 ### Community 90 - "Community 90"
-Cohesion: 0.18
-Nodes (20): _deliver_followup(), _duration_str(), Orphan/in-watch signal reconcile + follow-up TG delivery., Human-readable duration from ISO opened_at to now., Send one follow-up; mark + persist immediately on success., Append signal_events / pump_history only for follow-ups that shipped., 5m kline hi/lo since last_checked_at for active signals still in the watchlist., _reconcile_inwatch_active() (+12 more)
+Cohesion: 0.14
+Nodes (28): build_public_feature_snapshot(), compute_rule_based_ev(), compute_setup_ev(), compute_setup_risk_reward(), normalize_funding_fraction(), normalize_public_feature_payload(), normalize_tick_row(), _normalized_bool() (+20 more)
 
 ### Community 91 - "Community 91"
-Cohesion: 0.09
-Nodes (49): Infer probable breakout direction. Returns (emoji, label, evidence_lines)., _squeeze_direction(), main(), Offline logic self-checks — replacement for removed verify CLI (P11/E1)., _sample_signal(), delivery_ev_floors(), ev_primary_delivery_qualified(), filter_ev_primary_legacy_blockers() (+41 more)
+Cohesion: 0.08
+Nodes (55): delivery_ev_floors(), ev_primary_delivery_qualified(), filter_ev_primary_legacy_blockers(), EV-primary delivery resolution — replaces fuel/min_fuel gate (X2)., Return (min_ev, min_p_win) from calibrated delivery params., Fusion-engine strength index 0–100 (not calibrated P(win))., Calibrated P(win) in [0, 1] — primary delivery strength., 0–100 conviction for display — fusion_score first, then calibrated P(win), then (+47 more)
 
 ### Community 92 - "Community 92"
 Cohesion: 0.09
-Nodes (39): _confirm_blocked_bias_wait(), _confirm_delivery_suppressed(), hunt_auto_confirm_blocked(), _maybe_emit_scanner_continuation_wait(), Confirm delivery suppression and blocked-telemetry helpers (cycle split)., Skip confirm re-evaluation after TG shipped (avoids confirmed→blocked flicker)., Block confirm TG on mid-dump shorts (bias=wait in dump_active)., Pinned anchors never receive Module 1 hunt TG confirm (override via env). (+31 more)
+Nodes (51): delivery_ev_floors(), ev_primary_delivery_qualified(), legacy_fuel_delivery_enabled(), pwin_gate_enabled(), Setup-field accessors on the fusion engine output (single source, no EV catalog), Delivery strength is the fusion gate decision., (min_ev, min_p_win) floors from calibration., resolve_delivery_ev() (+43 more)
 
 ### Community 93 - "Community 93"
-Cohesion: 0.42
-Nodes (11): _evaluate_from_row(), main(), _probe_live(), _probe_one(), Canonical delivery gate probe — use instead of ad-hoc inline scripts.  Run from, _run(), Any, bool (+3 more)
+Cohesion: 0.34
+Nodes (13): _evaluate_from_row(), main(), _probe_live(), _probe_one(), Canonical delivery gate probe — use instead of ad-hoc inline scripts.  Run from, _run(), Any, bool (+5 more)
 
 ### Community 94 - "Community 94"
 Cohesion: 0.19
 Nodes (14): add_candle_pattern_columns(), _candle_exprs(), candle_pattern_snapshot(), candle_snapshot_from_row(), Candlestick pattern columns via polars_ta.candles + Polars engulfing/star logic., Extract candle pattern flags for delivery snapshots., Candle pattern flags at ``idx`` (default last bar)., Add shared candle pattern flags used by SMC / liquidity strategies. (+6 more)
 
 ### Community 95 - "Community 95"
-Cohesion: 0.12
-Nodes (33): export_phase_calibration(), _labeled_outcomes(), _outcome_kind(), PhaseStats, Phase×direction outcome buckets for hunt_calibration.json (post-gate migration)., Serialize phase×direction WR buckets for hunt_calibration.json., main(), build_calibration_report() (+25 more)
+Cohesion: 0.15
+Nodes (23): AggTrade, PipelineResult, Result container for signal analysis pipeline.      Replaces legacy PipelineResu, build_trade_plan(), default_ttl_bars(), finite_float(), normalize_direction(), normalize_scale_weights() (+15 more)
 
 ### Community 96 - "Community 96"
-Cohesion: 0.23
-Nodes (17): Any, bool, str, append_outcome_record(), entry_lifecycle_phase(), genuine_closed(), is_polluted(), kpi_bucket() (+9 more)
+Cohesion: 0.16
+Nodes (22): Any, float, str, TradePlan, Any, str, PlanLifecycle, activation_event() (+14 more)
 
 ### Community 97 - "Community 97"
 Cohesion: 0.09
-Nodes (69): BlockScores, Level 1 — Expansion Engine (per-symbol state + probabilities)., ExpansionConfig, compute_deltas(), Delta layer — block-score trajectory over the configured lookback.  A static ``c, ExpansionProbabilityModel, ExpansionProbabilityModel — P(up), P(down), P(none).  Replaces binary PrePump/Pr, expansion_quality() (+61 more)
+Nodes (47): score(), BlockScores, ExpansionConfig, compute_deltas(), Delta layer — block-score trajectory over the configured lookback.  A static ``c, ExpansionProbabilityModel — P(up), P(down), P(none).  Replaces binary PrePump/Pr, expansion_quality(), fake_breakout_risk() (+39 more)
 
 ### Community 98 - "Community 98"
 Cohesion: 0.27
 Nodes (13): _fmt_price(), _format_setup_lines(), _pct_str(), _phase_badge(), _phase_human(), Watch tick Telegram / digest line formatters (cycle split)., Percentage distance from entry to target., Build human-readable reason line from phase + triggers + fuel. (+5 more)
 
 ### Community 99 - "Community 99"
-Cohesion: 0.12
-Nodes (19): BlockBundle, Expansion Engine datatypes.  The engine answers "why might an impulse start *now, Rebuild from ``to_dict()`` / stamped ``row["expansion"]`` (scan fast path)., All block readings for one tick — magnitudes plus direction/evidence., as_dict(), maps_of(), market_of(), Shared helpers for the Expansion Engine — pure row/dict accessors, no side effec (+11 more)
+Cohesion: 0.18
+Nodes (19): BlockBundle, Expansion Engine datatypes.  The engine answers "why might an impulse start *now, All block readings for one tick — magnitudes plus direction/evidence., as_dict(), maps_of(), market_of(), Shared helpers for the Expansion Engine — pure row/dict accessors, no side effec, Closed-bar TF snapshot, preferring the ``*_closed`` variant when present. (+11 more)
 
 ### Community 100 - "Community 100"
 Cohesion: 0.12
-Nodes (16): EnrichmentSnapshot, get_frame_cache(), PreparedSnapshot, In-memory OHLCV + prepared + enrichment — WS-first hot tick plane., Background REST enrichment for hot symbols — never blocks kline trigger., Per-symbol klines (REST bootstrap + WS), prepared HTF cache, enrichment TTL., WS/bootstrap OHLCV fallback when REST fetch fails on hot path., reset_frame_cache() (+8 more)
+Nodes (15): EnrichmentSnapshot, PreparedSnapshot, In-memory OHLCV + prepared + enrichment — WS-first hot tick plane., Background REST enrichment for hot symbols — never blocks kline trigger., Per-symbol klines (REST bootstrap + WS), prepared HTF cache, enrichment TTL., WS/bootstrap OHLCV fallback when REST fetch fails on hot path., reset_frame_cache(), RowCarrySnapshot (+7 more)
 
 ### Community 101 - "Community 101"
-Cohesion: 0.23
-Nodes (13): Any, bool, float, int, object, str, _env_bool(), _env_float() (+5 more)
+Cohesion: 0.16
+Nodes (25): BiasDir, bias_from_ema_row(), di_direction_from_snapshot(), ema_stack_aligned(), _f(), legacy_trend_label(), normalize_stoch_rsi(), Canonical trend / RSI interpretation for Hunter MTF, snapshots, and prepare. (+17 more)
 
 ### Community 102 - "Community 102"
 Cohesion: 0.27
 Nodes (13): Any, float, HuntCcxtStreams, str, apply_live_price_to_row(), price_max_age_s(), PriceQuote, Resolve freshest executable price for hunt snapshots and Telegram. (+5 more)
 
 ### Community 103 - "Community 103"
-Cohesion: 0.16
-Nodes (13): Any, bool, Path, str, DeepQueryStore, HuntScanStore, LastTickStore, Split tick row stores — hunt scan plane vs deep query plane. (+5 more)
+Cohesion: 0.17
+Nodes (12): Any, bool, Path, str, DeepQueryStore, HuntScanStore, LastTickStore, Snapshot of every cached row (used by universe scans). (+4 more)
 
 ### Community 104 - "Community 104"
 Cohesion: 0.14
@@ -824,20 +824,20 @@ Cohesion: 0.17
 Nodes (11): 1. What we trade, 2. Three planes (runtime architecture), 3. Decision stack (order matters — post-fusion 2026-06-20), 4. Defaults, 5. Parameter provenance (§2.9), 6. Anti-patterns (explicitly rejected), 7. Success metrics, Hunt engine — design spec (first principles) (+3 more)
 
 ### Community 109 - "Community 109"
-Cohesion: 0.09
-Nodes (73): DetectorFn, Any, bool, Direction, float, int, str, Any (+65 more)
+Cohesion: 0.08
+Nodes (75): DetectorFn, Any, bool, Direction, float, int, str, Any (+67 more)
 
 ### Community 110 - "Community 110"
-Cohesion: 0.19
-Nodes (19): main(), _persist_report(), Calibrate Expansion Engine block weights from the outcome ledger., invalidate_expansion_config_cache(), format_calibration_report(), Telegram block for block-weight calibration rollup., int, object (+11 more)
+Cohesion: 0.20
+Nodes (20): assess_preparation_readiness(), _fall_pct(), hunt_skip_reason(), is_mid_leg_phase(), is_watch_hunt_phase(), _leg_gain_pct(), mission_delivery_block(), mission_live_phase_ok() (+12 more)
 
 ### Community 111 - "Community 111"
-Cohesion: 0.15
-Nodes (20): _aggregate_calibration(), _load_ticks(), main(), Calibration probe — forward liquidation zones vs realized WS cascades + sticky w, Heuristic: sticky wall near price + subsequent cascade or footprint stack., score_tick(), _sticky_reaction_score(), float (+12 more)
+Cohesion: 0.29
+Nodes (18): normalize_rsi14(), RSI14 contract: always 0..100 (Wilder). Never scale valid oversold values like 1, _adx_regime(), check_mtf_structure_break(), _closed_bar_close(), closed_rsi(), mtf_confirm_veto(), MtfFacts (+10 more)
 
 ### Community 112 - "Community 112"
-Cohesion: 0.19
-Nodes (18): disabled_phase_pairs(), export_phase_calibration(), _labeled_outcomes(), phase_matrix_gate(), PhaseStats, Phase×direction outcome matrix — auto-disable weak phase pairs (C2)., Serialize phase×direction WR buckets for hunt_calibration.json., # NOTE: hunt_core.track.tracker is imported lazily inside the functions below. (+10 more)
+Cohesion: 0.21
+Nodes (19): Any, float, int, str, Scanner forecast bands — re-export from maps (Phase 2 consolidation)., build_all_forecasts(), build_dump_forecast(), build_ignition_forecast() (+11 more)
 
 ### Community 113 - "Community 113"
 Cohesion: 0.35
@@ -849,7 +849,7 @@ Nodes (10): _check_market(), _check_row(), _check_tf_indicators(), main(), _prob
 
 ### Community 115 - "Community 115"
 Cohesion: 0.10
-Nodes (49): main(), Universe scan smoke — rank + alert selection on synthetic or cached rows., Minimal rows for offline rank/alert path (no network)., _run(), _synthetic_rows(), Any, bool, int (+41 more)
+Nodes (46): main(), Universe scan smoke — rank + alert selection on synthetic or cached rows., Minimal rows for offline rank/alert path (no network)., _run(), _synthetic_rows(), Any, bool, int (+38 more)
 
 ### Community 116 - "Community 116"
 Cohesion: 0.27
@@ -860,60 +860,60 @@ Cohesion: 0.31
 Nodes (9): _entry_reachable(), _forbidden_imports_in_core(), _loc_tree(), main(), CI: hunt_core LOC budget + import hygiene., bool, int, Path (+1 more)
 
 ### Community 118 - "Community 118"
-Cohesion: 0.33
-Nodes (9): _compact_row(), main(), _probe_symbols(), Live /signals smoke — baseline snapshot for phase regression (§R.3)., bootstrap(), Path, Any, int (+1 more)
+Cohesion: 0.43
+Nodes (7): _compact_row(), main(), _probe_symbols(), Live /signals smoke — baseline snapshot for phase regression (§R.3)., Any, int, str
 
 ### Community 119 - "Community 119"
 Cohesion: 0.20
 Nodes (9): Architecture, Data paths (canonical: `hunt_core.paths`), Hunt Watch — Deploy & Operations, Install, Multi-exchange intel (default on), Prerequisites, Rate-limit / capacity ops, Run modes (+1 more)
 
 ### Community 120 - "Community 120"
-Cohesion: 0.17
-Nodes (32): closed_bar_candle(), cluster_fuel(), count_fuel_evidence(), evidence_adjusted_min_fuel(), evidence_coverage_ratio(), _fuel(), _fuel_evidence_slot_present(), inject_kline_flow_into_market() (+24 more)
+Cohesion: 0.10
+Nodes (52): main(), Offline logic self-checks — replacement for removed verify CLI (P11/E1)., _sample_signal(), kline_bar_flow(), Closed-bar kline CVD flow — strategy-neutral market facts., Closed-bar CVD delta + price change % from prepared klines., Prefer closed-bar kline CVD delta; WS rolling CVD is enhancement only., resolve_flow_cvd_px() (+44 more)
 
 ### Community 121 - "Community 121"
-Cohesion: 0.09
-Nodes (39): _live_samples(), main(), Live smoke: HuntMarketPlane CCXT REST + Pro WS (no funding error spam)., _run(), _live_btc_assemble_e2e(), Plan E2E: assemble_deep_tick(BTCUSDT) → format_deep_from_row., _deep_pinned_expansion(), main() (+31 more)
+Cohesion: 0.19
+Nodes (18): _deep_pinned_expansion(), main(), Live soak gate — watch --once + runtime persistence + deep expansion stamp.  Ope, _run(), _runtime_snapshot(), _kill_legacy_watchers(), main(), Smoke gate for ``python -m hunt_core watch --once`` (Phase 0). (+10 more)
 
 ### Community 122 - "Community 122"
-Cohesion: 0.22
-Nodes (8): Aggregation (not configurable yet), Detection parameters, Factor-specific, Fusion engine — official parameters, Output semantics, Phase (CUSUM) parameters, Preserved domain rules, Replay harness (offline)
+Cohesion: 0.20
+Nodes (9): Aggregation (not configurable yet), Detection parameters, Factor-specific, Fusion engine — official parameters, Output semantics, Phase (CUSUM) parameters, Preserved domain rules, Replay harness (offline) (+1 more)
 
 ### Community 123 - "Community 123"
 Cohesion: 0.22
 Nodes (9): 2026-06-11 — autonomous loop waves 2–14 (delivery gates + replay honesty + ops), Consciously NOT changed, Delivery / alert_explain (W2–W5), Long path (W8–W10), Metrics trajectory (replay + live), Ops / data plane (W13–W14), Post-mortem: VELVETUSDT short @16:31 (thesis fail, paper win), Replay alignment (W6, W12) (+1 more)
 
 ### Community 124 - "Community 124"
-Cohesion: 0.09
-Nodes (21): Architecture (current), Fusion engine (complete), Guardrails (active), Honest scope, Hunt fusion migration — implementation status, Hunt Two-Module Rebuild — implementation status, Known tensions (tracked, not blocking), Legacy marker audit (Phase 4) (+13 more)
+Cohesion: 0.07
+Nodes (28): §5 critical items, Architecture (current), Fusion engine (complete), Guardrails (active), Honest scope, Hunt fusion migration — implementation status, Hunt Two-Module Rebuild — implementation status, Known tensions (tracked, not blocking) (+20 more)
 
 ### Community 125 - "Community 125"
 Cohesion: 0.31
 Nodes (7): Structure-first market state — bias from BOS/CHoCH + levels (H8)., Typed structure spine snapshot for decision + query planes., Build StructureState from tick row structure + prepared regime fields., structure_state_from_row(), StructureState, Any, str
 
 ### Community 126 - "Community 126"
-Cohesion: 0.21
-Nodes (7): Send photo using aiogram Bot with BufferedInputFile., Send message using aiogram Bot., Edit message using aiogram Bot., Convert HTML to plain text when Telegram rejects HTML parsing., Prepare HTML and plain text versions of caption., TelegramBroadcaster, Exception
+Cohesion: 0.25
+Nodes (18): AbsorptionKind, _cvd_from_row(), _cvd_from_tf(), _f_positive(), _f_signed(), fmt_flow_qty(), _infer_absorption(), _infer_aggressor() (+10 more)
 
 ### Community 127 - "Community 127"
 Cohesion: 0.36
 Nodes (7): audit(), _load_rows(), main(), Audit delivery authority invariants from hunt_outcome_ledger.jsonl.  Flags rows, int, Path, str
 
 ### Community 128 - "Community 128"
-Cohesion: 0.26
-Nodes (15): Any, str, ensure_fusion_lifecycle_fields(), hydrate_tick_row_from_jsonl(), mtf_to_json_dict(), prepare_tick_row_for_jsonl(), JSONL tick row prepare / hydrate — fusion lifecycle + MTF must survive replay., Strip non-JSON fields and normalize lifecycle / MTF before append. (+7 more)
+Cohesion: 0.18
+Nodes (19): _deliver_followup(), _duration_str(), Orphan/in-watch signal reconcile + follow-up TG delivery., Human-readable duration from ISO opened_at to now., Send one follow-up; mark + persist immediately on success., Append signal_events / pump_history only for follow-ups that shipped., 5m kline hi/lo since last_checked_at for active signals still in the watchlist., _reconcile_inwatch_active() (+11 more)
 
 ### Community 129 - "Community 129"
-Cohesion: 0.36
-Nodes (7): load_outcome_rows(), Offline give-back analysis from closed signal outcomes (Phase 7 / #34)., MFE vs exit PnL — how much profit was given back before close., summarize_give_back(), Any, Path, str
+Cohesion: 0.30
+Nodes (17): build_calibration_report(), _build_outcome_calibration(), dedupe_outcome_rows(), load_closed_rows(), Rebuild hunt_calibration.json from tracker outcomes + signal history (#49)., Per-setup lake report — WR, avg PnL, flip eligibility (T4)., Write JSON report to hunt/data/calibration_report.json., Dedupe by entry_message_id, then outcome_archive_key (watch double-writes). (+9 more)
 
 ### Community 130 - "Community 130"
-Cohesion: 0.16
-Nodes (17): bar_vol_adjusted_magnitude(), _fp(), fuse(), FusionScore, gate(), GateDecision, magnitude_to_fusion_score(), Fuse factor scores into one directional pre-move magnitude + self-calibrated gat (+9 more)
+Cohesion: 0.29
+Nodes (11): mtf_confluence_to_dict(), MTF family-voting confluence (P6 — extracted from deep_signal)., JSONL-safe MTF payload with HTF counts for ``family_vote_count`` replay., 0..1 momentum edge for the given direction from RSI., _rsi_edge(), _scenario_to_dict(), _tf_label(), _trend_from_snap() (+3 more)
 
 ### Community 131 - "Community 131"
-Cohesion: 0.10
-Nodes (42): COLD/WARM/HOT from trailing sample count for per-factor confidence., symbol_state_tier(), Fusion-engine strength index 0–100 (not calibrated P(win))., Calibrated P(win) in [0, 1] — primary delivery strength., 0–100 conviction for display — fusion_score first, then calibrated P(win), then, Operator-facing strength for early TG / logs., setup_conviction_pct(), setup_fusion_score() (+34 more)
+Cohesion: 0.21
+Nodes (15): disabled_phase_pairs(), export_phase_calibration(), _labeled_outcomes(), phase_matrix_gate(), PhaseStats, Phase×direction outcome matrix — auto-disable weak phase pairs (C2)., Serialize phase×direction WR buckets for hunt_calibration.json., # NOTE: hunt_core.track.tracker is imported lazily inside the functions below. (+7 more)
 
 ### Community 132 - "Community 132"
 Cohesion: 0.18
@@ -940,8 +940,8 @@ Cohesion: 0.33
 Nodes (5): predict_p_win(), P(win) accessor — reads the fusion engine's calibrated confidence., Fusion p_win is the calibrated win probability; no separate shadow model., Any, str
 
 ### Community 138 - "Community 138"
-Cohesion: 0.18
-Nodes (15): _buffered_input_file_class(), format_entry_telegram(), format_setup_lines(), format_squeeze_telegram(), _format_structured_thesis(), short | long for unified advisory cooldown on squeeze alerts., Simple retry decorator as fallback when tenacity is not available., Legacy alias — canonical body is format_delivery_telegram in dispatch. (+7 more)
+Cohesion: 0.14
+Nodes (16): _activation_level(), _atr(), build_execution(), Level 3 — Execution Engine.  Builds the actionable geometry for a qualifying exp, _targets(), Level 3 — Execution Engine (entry / activation / SL / TP1–TP3)., ExpansionExecution, Rebuild from ``to_dict()`` / stamped ``row["expansion"]`` (scan fast path). (+8 more)
 
 ### Community 139 - "Community 139"
 Cohesion: 0.40
@@ -952,8 +952,8 @@ Cohesion: 0.33
 Nodes (5): Fusion cutover status, God modules — keep whole until split, hunt_core architecture debt (2026-06-20), Open (wave 4 candidates), Verification
 
 ### Community 141 - "Community 141"
-Cohesion: 0.29
-Nodes (7): Fix shipped: `hunt/scripts/outcomes_report.py`, Metrics before → after (n=8 closed), Root cause found, Signal sweep (8 closed), Verify, Verify, WAVE 15 — 2026-06-11 — thesis_outcome classification
+Cohesion: 0.25
+Nodes (8): Fix shipped: `hunt/scripts/outcomes_report.py`, Metrics before → after (n=8 closed), Root cause found, Signal sweep (8 closed), Verify, Verify, Verify, WAVE 15 — 2026-06-11 — thesis_outcome classification
 
 ### Community 142 - "Community 142"
 Cohesion: 0.33
@@ -1080,8 +1080,8 @@ Cohesion: 0.33
 Nodes (6): volume_ratio20, required, source, type, unit, warmup
 
 ### Community 173 - "Community 173"
-Cohesion: 0.14
-Nodes (33): asset_equivalence_key(), collapse_equivalent_opportunities(), Collapse correlated instruments for queue/concentration (R8)., Keep highest opportunity_score per equivalence group., check_queue_gold_and_labels(), check_queue_gold_collapse(), check_signal_queue_score(), _main() (+25 more)
+Cohesion: 0.18
+Nodes (27): check_queue_gold_and_labels(), _main(), Probe pinned SignalQueue TOP3 after live deep ticks., Any, bool, datetime, float, int (+19 more)
 
 ### Community 174 - "Community 174"
 Cohesion: 0.40
@@ -1096,20 +1096,20 @@ Cohesion: 0.40
 Nodes (5): 7. Стратегия: LONG (bounce / recovery), Confirm `_confirm_long`, Invalidate long (follow-up), Levels `structural_long_levels`, Score `_long_analysis`
 
 ### Community 177 - "Community 177"
-Cohesion: 0.26
-Nodes (16): btc_market_context(), forming_confirm_gaps(), hunt_confirmed_direction(), probe_header(), Probe/display accessors over the fusion engine output (single source).  These re, (direction, setup, strength, notes) from the fusion setups on the row., The fusion gate is binary (confirmed or not) — no forming sub-gaps., resolve_trade_direction() (+8 more)
+Cohesion: 0.23
+Nodes (17): Any, bool, str, append_outcome_record(), entry_lifecycle_phase(), genuine_closed(), is_polluted(), kpi_bucket() (+9 more)
 
 ### Community 178 - "Community 178"
-Cohesion: 0.29
-Nodes (7): Distribution phase audit, Fix shipped: `hunt/hunt_watch/signal_tracker.py`, Root cause found, Root cause found, Verify, Verify, WAVE 17 — 2026-06-11 — signal close events + distribution phase audit
+Cohesion: 0.22
+Nodes (9): Distribution phase audit, Fix shipped: `hunt/hunt_watch/signal_tracker.py`, Root cause found, Root cause found, Root cause found, Verify, Verify, Verify (+1 more)
 
 ### Community 179 - "Community 179"
-Cohesion: 0.33
-Nodes (6): Fix shipped: `hunt/hunt_watch/signal_tracker.py`, Fix shipped: `hunt/hunt_watch/signal_tracker.py`, Logic verify: `hunt/hunt_watch/logic_verify.py` + `hunt/scripts/verify_logic.py`, Root cause, Watch restarted PID 66902, WAVE 20 — 2026-06-11 — near-TP1 stale grace
+Cohesion: 0.29
+Nodes (7): Fix shipped: `hunt/hunt_watch/signal_tracker.py`, Fix shipped: `hunt/hunt_watch/signal_tracker.py`, Fix shipped: `hunt/hunt_watch/signal_tracker.py`, Logic verify: `hunt/hunt_watch/logic_verify.py` + `hunt/scripts/verify_logic.py`, Root cause, Watch restarted PID 66902, WAVE 20 — 2026-06-11 — near-TP1 stale grace
 
 ### Community 180 - "Community 180"
-Cohesion: 0.33
-Nodes (6): Fixes shipped, New signal: LABUSDT:short, Root cause found, Root cause found, Watch restarted PID 66421, WAVE 19 — 2026-06-11 — fuel stored in tracker + outcomes fuel bucket
+Cohesion: 0.29
+Nodes (7): Fixes shipped, New signal: LABUSDT:short, Root cause found, Root cause found, Root cause found, Watch restarted PID 66421, WAVE 19 — 2026-06-11 — fuel stored in tracker + outcomes fuel bucket
 
 ### Community 181 - "Community 181"
 Cohesion: 0.50
@@ -1120,12 +1120,12 @@ Cohesion: 0.50
 Nodes (4): 5. Lifecycle FSM (фазы), apply_short_invalidation, Support break level, Поля HuntLifecycle
 
 ### Community 183 - "Community 183"
-Cohesion: 0.40
-Nodes (5): Calibration insight (n=160), Fix shipped: `hunt/hunt_watch/prep_shadow_tracker.py`, Verify, Verify, WAVE 18 — 2026-06-11 — prep_shadow by_fuel breakdown
+Cohesion: 0.33
+Nodes (6): Calibration insight (n=160), Fix shipped: `hunt/hunt_watch/prep_shadow_tracker.py`, Verify, Verify, Verify, WAVE 18 — 2026-06-11 — prep_shadow by_fuel breakdown
 
 ### Community 184 - "Community 184"
-Cohesion: 0.29
-Nodes (7): Fix shipped: `hunt/scripts/outcomes_report.py`, Fix shipped: `hunt/scripts/outcomes_report.py`, Metrics before → after (n=8 closed), Metrics before → after (n=8 closed), Root cause found, Root cause found, WAVE 16 — 2026-06-11 — tp1_managed stop_hit reclassification
+Cohesion: 0.20
+Nodes (10): Fix shipped: `hunt/scripts/outcomes_report.py`, Fix shipped: `hunt/scripts/outcomes_report.py`, Fix shipped: `hunt/scripts/outcomes_report.py`, Metrics before → after (n=8 closed), Metrics before → after (n=8 closed), Metrics before → after (n=8 closed), Root cause found, Root cause found (+2 more)
 
 ### Community 185 - "Community 185"
 Cohesion: 0.50
@@ -1137,7 +1137,7 @@ Nodes (3): description, features, schema_version
 
 ### Community 187 - "Community 187"
 Cohesion: 0.13
-Nodes (38): _best_wall_within_pct(), catalyst_label(), delivery_context_lines(), entry_mid(), format_liq_magnet_line(), format_poc_context_line(), format_walls_context_line(), market_from_row() (+30 more)
+Nodes (35): build_forecast_panel(), build_structural_forecast_panel(), Forecast bands panel for deep analysis., Maps-derived target bands — no pump/dump archetype labels., _best_wall_within_pct(), catalyst_label(), delivery_context_lines(), entry_mid() (+27 more)
 
 ### Community 188 - "Community 188"
 Cohesion: 0.67
@@ -1152,76 +1152,76 @@ Cohesion: 0.67
 Nodes (3): 9. Signal tracker (latch), Follow-up events, Register
 
 ### Community 191 - "Community 191"
-Cohesion: 0.27
-Nodes (9): DeliveryMode, Thin tick router for the fusion engine (replaces scan/routing.py).  The fusion `, Confirmed fusion setups become delivery candidates (one direction per symbol)., Confirmed setups go to the confirm lane; everything else is monitor-only., resolve_delivery_mode(), route_tick(), SetupCandidate, Any (+1 more)
+Cohesion: 0.26
+Nodes (11): direction_block_reason(), EdgePolicyConfig, _load_gate_edge_long_stats(), long_tg_allowed(), Long/short edge policy and long TG ramp (Phase 9 split)., Return (allowed, reason) for long Telegram delivery., Machine block code if direction vetoed by H-B edge policy., Any (+3 more)
 
 ### Community 192 - "Community 192"
-Cohesion: 0.19
-Nodes (16): Any, ExpectedPath, float, HorizonTopology, PatternConfidence, str, TradePlan, PathType (+8 more)
+Cohesion: 0.27
+Nodes (11): classify(), frame(), funding_short_risk_tier(), Ensemble regime classification and funding tiers (Phase 9 split)., ok | caution | block — tiered crowded-short gate., Classify structure from closed 1h frame (fallback: live 1h)., Normalize funding to decimal rate per interval (Binance funding_rate scale)., resolve_market_funding_rate() (+3 more)
 
 ### Community 194 - "Community 194"
-Cohesion: 0.18
-Nodes (30): _gate_data_completeness(), _gate_edge_policy(), _gate_kinematic(), _gate_mission(), _gate_move(), _gate_squeeze_predump(), _gate_stale(), _gate_tradability() (+22 more)
+Cohesion: 0.08
+Nodes (56): evaluate_confirm_authorities(), Single confirm-boundary authority arbiter (A1)., Require fusion confirmed + playbook pass + mission pass before production TG., bias_conflict(), core_lifecycle_blockers(), collect_lifecycle_blockers(), Lifecycle-oriented delivery gates — extracted from delivery.py (Phase 8)., Lifecycle + phase-matrix blockers shared by report and live paths. (+48 more)
 
 ### Community 195 - "Community 195"
-Cohesion: 0.12
-Nodes (31): BanKind, Any, BaseException, bool, float, int, str, BaseException (+23 more)
+Cohesion: 0.14
+Nodes (28): BanKind, Any, BaseException, bool, float, int, str, BaseException (+20 more)
 
 ### Community 205 - "Community 205"
 Cohesion: 0.25
 Nodes (7): Non-negotiable rules (R1–R15), Shipped (P1–P5), V2.5 (NOT ship), V2.5 preview (shipped foundation), V2.5 (remaining — NOT ship), V3 (NOT ship), Verdict V2 Roadmap
 
 ### Community 209 - "Community 209"
-Cohesion: 0.05
-Nodes (103): BiasDir, DeliveryGateTier, bias_from_ema_row(), di_direction_from_snapshot(), ema_stack_aligned(), _f(), normalize_rsi14(), normalize_stoch_rsi() (+95 more)
+Cohesion: 0.21
+Nodes (15): Any, DataFrame, float, int, str, classify_oi_regime(), oi_bars_from_frames(), oi_bars_from_scalar_series() (+7 more)
 
 ### Community 210 - "Community 210"
 Cohesion: 0.07
-Nodes (53): _persist_symbols(), Persist expansion FSM + block-score history across hunt restarts., Symbols worth keeping history for — pinned + FSM + scan cache., Any, bool, int, str, str (+45 more)
+Nodes (58): _cooldown_hours(), deep_cooldown_ok(), evaluate_deep_delivery(), mark_deep_sent(), Module 1 Deep arbiter — pinned change + verdict queue cooldowns., btc_market_context(), 1h/4h BTC change and trend label from prepared 1h frame., Any (+50 more)
 
 ### Community 211 - "Community 211"
 Cohesion: 0.20
 Nodes (32): apply_structure_ev_fuel_cap(), close_below_support_in_hard(), confirmed_structural_dump_min_rr(), continuation_pct_min_rr(), dump_continuation_short_ok(), effective_min_rr(), effective_min_rr_for_delivery(), in_pre_dump_window() (+24 more)
 
 ### Community 212 - "Community 212"
-Cohesion: 0.15
-Nodes (26): DeliveryTier, liquidity_skip_reason(), Delivery gates — thin facade over gate submodules., Return error tag when symbol is too illiquid for reliable signals., classify_delivery_tier(), delivery_freshness_block(), delivery_hard_block(), entry_chase_tol() (+18 more)
+Cohesion: 0.10
+Nodes (44): DeliveryTier, liquidity_skip_reason(), Delivery gates — thin facade over gate submodules., Return error tag when symbol is too illiquid for reliable signals., classify_delivery_tier(), delivery_freshness_block(), delivery_hard_block(), entry_chase_tol() (+36 more)
 
 ### Community 213 - "Community 213"
-Cohesion: 0.17
-Nodes (29): _append(), _baseline_path(), baseline_zscores(), batch_update_baselines(), load_baseline(), multi_tf_z(), Persistent per-symbol baseline history (P0-A).  Rolling samples for volume / quo, _safe_float() (+21 more)
+Cohesion: 0.05
+Nodes (79): _clean(), _clip_z(), cusum_series(), cusum_value(), log_returns(), ols_slope(), pctile_rank(), quantile_gate() (+71 more)
 
 ### Community 214 - "Community 214"
-Cohesion: 0.23
-Nodes (15): Any, bool, float, GateResult, str, build_query_result(), _dedupe_blockers(), DirectionQuery (+7 more)
+Cohesion: 0.28
+Nodes (12): Any, bool, Signal, str, LifecycleTransition, SignalLifecycleStore, emit_lifecycle_message(), Single emit path — lifecycle transitions → Telegram. (+4 more)
 
 ### Community 215 - "Community 215"
 Cohesion: 0.17
-Nodes (22): main(), _print_report(), Calibrate Verdict V2 gates from deep_ticks.jsonl or live probe., check_suggest_gates(), Any, float, int, Path (+14 more)
+Nodes (23): _live_samples(), main(), _print_report(), Calibrate Verdict V2 gates from deep_ticks.jsonl or live probe., check_suggest_gates(), Any, float, int (+15 more)
 
 ### Community 216 - "Community 216"
-Cohesion: 0.06
-Nodes (66): canonical_archetype(), playbook_archetype_key(), Canonical manipulation archetypes (VOC-1 — no alias bridge map)., Map fusion archetype to playbook dict key., _apply_check(), assessment_to_dict(), _bool_market(), _coil_breakout_checks() (+58 more)
+Cohesion: 0.23
+Nodes (24): _apply_check(), assessment_to_dict(), _bool_market(), _coil_breakout_checks(), evaluate_manipulation_fusion(), _f(), FactorHit, ManipulationAssessment (+16 more)
 
 ### Community 217 - "Community 217"
-Cohesion: 0.25
-Nodes (13): _ctx_bits(), Block 22 — Wyckoff feature signals (not a full Wyckoff engine).  Four lightweigh, score_sos(), score_sow(), score_spring(), score_upthrust(), Thin bridges to existing hunt feature helpers (no recomputation)., Best-effort structural setup taxonomy (sweep_reclaim / bos_retest / …).      Reu (+5 more)
+Cohesion: 0.35
+Nodes (11): Any, float, str, geometry_block_evidence(), geometry_block_reason(), Strategy-free trade geometry vetoes (RR floor, levels, POC headwind)., Fixed R:R floor; structural levels already enforce a minimum., Structured geometry veto — code, reason, evidence list. (+3 more)
 
 ### Community 218 - "Community 218"
-Cohesion: 0.30
-Nodes (13): bool, float, int, ndarray, Series, Robust statistics primitives — strategy-neutral shared layer., _clean(), _clip_z() (+5 more)
+Cohesion: 0.26
+Nodes (12): Any, bool, float, int, object, str, _env_bool(), _env_float() (+4 more)
 
 ### Community 219 - "Community 219"
 Cohesion: 0.08
-Nodes (41): build_deep_analysis(), build_deep_report(), DeepAnalysis, _enrich_deep_row(), Deep analysis orchestrator., Deep product path — pinned/MTF/maps; watch delivery is optional appendix., Build deep analysis report (alias for ``build_deep_report``)., build_deep_report() (+33 more)
+Nodes (41): build_mtf_confluence(), Build MTF confluence from row['timeframes'] (already contains per-TF snapshots)., build_deep_analysis(), build_deep_report(), DeepAnalysis, _enrich_deep_row(), Deep analysis orchestrator., Deep product path — pinned/MTF/maps; watch delivery is optional appendix. (+33 more)
 
 ### Community 220 - "Community 220"
-Cohesion: 0.36
-Nodes (12): build_delivery_setup(), _f(), _geometry(), _local_levels(), Bridge a Detection into the full delivery setup contract.  The fusion engine dec, Full setup contract for the delivery path from a fusion Detection + snapshot row, Local support/resistance from the snapshot structure, 0 when absent (the geometr, _tf_atr() (+4 more)
+Cohesion: 0.29
+Nodes (12): best_archetype_by_ratio(), playbook_pass_count(), playbook_pass_ratio(), playbook_passes(), Shared playbook checklist — single source for fusion rank and delivery gates., Return (pass_count, required_n) for archetype checklist., 0–100 rank score from pass ratio (canonical primary_score)., Pick archetype with highest pass ratio. (+4 more)
 
 ### Community 222 - "Community 222"
-Cohesion: 0.13
-Nodes (21): build_live_detection(), _neutral_detection(), Live detection entry — feed the fusion engine from the feature lake + current ba, Fail-closed detection when the current bar is not closed., Run the fusion engine for the current **closed** bar (lake history + closed snap, Detection, Fusion-engine verdict for one symbol at the current bar., Any (+13 more)
+Cohesion: 0.15
+Nodes (25): build_delivery_setup(), _f(), _geometry(), _local_levels(), Bridge a Detection into the full delivery setup contract.  The fusion engine dec, Full setup contract for the delivery path from a fusion Detection + snapshot row, Local support/resistance from the snapshot structure, 0 when absent (the geometr, _tf_atr() (+17 more)
 
 ### Community 223 - "Community 223"
 Cohesion: 0.29
@@ -1232,48 +1232,48 @@ Cohesion: 0.17
 Nodes (11): MIGRATION_PLAN — Hunt audit remediation (executable checklist), Operator config migration, Phase 0 — Data integrity ✅, Phase 1 — Quick fixes ✅, Phase 2 — Lab vs production ✅, Phase 2b — Unified cooldown ✅, Phase 3 — Single arbiter (A1) ✅, Phase 4 — Prescan (D1) ✅ (+3 more)
 
 ### Community 225 - "Community 225"
-Cohesion: 0.24
-Nodes (14): format_advisory_early(), format_confirm_strong(), format_pinned_summary(), format_setup_lines_for_probe(), format_squeeze_telegram(), format_telegram_confirm(), Table-driven Telegram templates (§K / §8D)., Confirm TG body — delegates to unified delivery card formatter. (+6 more)
+Cohesion: 0.14
+Nodes (26): invalidate_detail_human(), _duration_str(), format_followup_telegram(), _format_pnl_pct(), _pnl_pct_from_prices(), Telegram follow-up / invalidate / TP messages., _trade_duration_line(), phase_human() (+18 more)
 
 ### Community 226 - "Community 226"
-Cohesion: 0.20
-Nodes (10): main(), Level geometry self-check — §R.2 / B1 vol-floor., leg_fib_levels(), Fibonacci anchors and retracement levels (§H)., Retracement/extension levels for a price leg., int, float, str (+2 more)
+Cohesion: 0.33
+Nodes (5): leg_fib_levels(), Fibonacci anchors and retracement levels (§H)., Retracement/extension levels for a price leg., float, str
 
 ### Community 227 - "Community 227"
 Cohesion: 0.14
 Nodes (13): A. (§5) Canonical detection core for Module 2 — THE key choice, B. (§3.1) Canonical pinned set, C. (§4.1) "Pre" vs closed-bar lag — **design jointly with G**, D. (§4.2) Capacity vs market coverage, E. (§4.3 + §4.5 + §2.10) Exploratory vs production delivery & wash on thin alts, F. (§4.4) Longs, G. (§2.1) Forming-bar provenance — **foundational, not independent**, H. (§2.8) Single source of truth for constants (+5 more)
 
 ### Community 228 - "Community 228"
-Cohesion: 0.09
-Nodes (35): Deep conviction scoring via shared primitives., scenario_conviction(), build_trade_plan(), finalize_plan_geometry(), Deep trade plan — single geometry authority (R3)., Alias — prefer ``finalize_plan_geometry``., Final normalization — nearest→farthest TPs, monotonic R, SL outside zone., _rr() (+27 more)
+Cohesion: 0.14
+Nodes (23): Deep conviction scoring via shared primitives., scenario_conviction(), build_trade_plan(), finalize_plan_geometry(), Deep trade plan — single geometry authority (R3)., Alias — prefer ``finalize_plan_geometry``., Final normalization — nearest→farthest TPs, monotonic R, SL outside zone., _rr() (+15 more)
 
 ### Community 229 - "Community 229"
-Cohesion: 0.20
-Nodes (5): build_message_broadcaster(), DisabledBroadcaster, No-op broadcaster for runtime modes with external delivery disabled., Verify bot token and chat access., RuntimeError
+Cohesion: 0.22
+Nodes (12): _apply_va_liquidity_weights(), build_liquidity_scenarios(), _in_value_area(), LiquidityScenario, _normalize_probs(), 0 = at VAL, 1 = at VAH., Spread scenario mass by where price sits inside the 1h value area., Last-resort weights when no path fired — still differentiated by VA slot. (+4 more)
 
 ### Community 230 - "Community 230"
 Cohesion: 0.12
 Nodes (40): check_ambiguous_pivot(), check_calibration_apply(), check_config_toml(), check_delta_momentum(), check_expansion_alerts(), check_format_helpers(), check_from_dict_roundtrip(), check_fsm_persist() (+32 more)
 
 ### Community 231 - "Community 231"
-Cohesion: 0.13
-Nodes (24): score(), score(), ExpansionForecast, pct_distance(), Linear ramp 0→1 between ``lo`` and ``hi`` (clamped)., Linear ramp 1→0 between ``lo`` and ``hi`` (clamped)., smooth_down(), smooth_up() (+16 more)
+Cohesion: 0.31
+Nodes (12): ExpansionForecast, ExpansionForecast, build_forecast(), _liquidity_targets(), _main_drivers(), Level 2 — Forecast Engine.  Turns a qualifying expansion state into a scenario:, BlockContext, BlockResult (+4 more)
 
 ### Community 232 - "Community 232"
 Cohesion: 0.27
-Nodes (9): _cooldown_ok(), _entry_past_tp1(), Advisory TG helpers — squeeze cooldown only (legacy early/dump_hunt/liq removed), Any, bool, datetime, float, int (+1 more)
+Nodes (11): Prokol — re-export from shared primitives., Any, float, int, str, _candle_fields(), detect_prokol(), Prokol (false break + reclaim) — strategy-neutral structural detection. (+3 more)
 
 ### Community 233 - "Community 233"
-Cohesion: 0.14
-Nodes (31): Any, ExpansionOpportunity, float, str, Any, datetime, float, int (+23 more)
+Cohesion: 0.05
+Nodes (75): main(), _persist_report(), Calibrate Expansion Engine block weights from the outcome ledger., check_outcome_review(), Pending horizons are graded once; duplicates are skipped., _cache_summary(), _config_summary(), _ledger_summary() (+67 more)
 
 ### Community 234 - "Community 234"
-Cohesion: 0.16
-Nodes (25): factor_status(), load_factor_registry(), production_factors(), quarantine_factors(), Factor lifecycle registry — production vs quarantine (no _dev import on hot path, main(), min_outcomes_for_power(), promotion_allowed() (+17 more)
+Cohesion: 0.23
+Nodes (9): playbook_passes_row(), N-of-M playbook gates — boolean checklist per archetype (anti-heuristic delivery, Direction-aware playbook gate for delivery/advisory., setup_meets_playbook(), Canonical ADX thresholds — single source for Hunter interpretation., Any, bool, str (+1 more)
 
 ### Community 235 - "Community 235"
-Cohesion: 0.14
-Nodes (24): bias_conflict(), core_lifecycle_blockers(), fusion_lifecycle_dict(), fusion_lifecycle_flags(), collect_lifecycle_blockers(), Lifecycle-oriented delivery gates — extracted from delivery.py (Phase 8)., Lifecycle + phase-matrix blockers shared by report and live paths., is_fusion_phase() (+16 more)
+Cohesion: 0.29
+Nodes (11): _aggregate_calibration(), _load_ticks(), main(), Calibration probe — forward liquidation zones vs realized WS cascades + sticky w, Heuristic: sticky wall near price + subsequent cascade or footprint stack., score_tick(), _sticky_reaction_score(), float (+3 more)
 
 ### Community 236 - "Community 236"
 Cohesion: 0.40
@@ -1284,24 +1284,24 @@ Cohesion: 0.50
 Nodes (3): GateRule, Declarative delivery gate rule table (Phase 6)., Ordered declarative delivery gate — ``check_fn`` names a policy check handler.
 
 ### Community 238 - "Community 238"
-Cohesion: 0.14
-Nodes (27): _dedup_narrative(), format_pinned_signal(), _gate_label(), _px(), Pinned Telegram signal formatter — L5 product., Translate engine narrative '<path> via <pattern>' to Russian., Remove path-type prefix from narrative if it's a near-duplicate., _ru_catalyst() (+19 more)
+Cohesion: 0.26
+Nodes (16): Any, bool, float, Path, str, _apply_runtime_gate_tune(), _defaults_path(), _env_bool() (+8 more)
 
 ### Community 241 - "Community 241"
-Cohesion: 0.33
-Nodes (9): deep_cooldown_ok(), evaluate_deep_delivery(), mark_deep_sent(), Module 1 Deep arbiter — pinned change + verdict queue cooldowns., Any, bool, datetime, float (+1 more)
+Cohesion: 0.31
+Nodes (9): export_phase_calibration(), _labeled_outcomes(), _outcome_kind(), PhaseStats, Phase×direction outcome buckets for hunt_calibration.json (post-gate migration)., Serialize phase×direction WR buckets for hunt_calibration.json., Any, int (+1 more)
 
 ### Community 242 - "Community 242"
-Cohesion: 0.29
-Nodes (10): _fill_rate(), _lake_symbols(), main(), Lake soak progress — bar counts, column fill, quarantine readiness., symbol_report(), DataFrame, float, int (+2 more)
+Cohesion: 0.33
+Nodes (8): main(), Live smoke: HuntMarketPlane CCXT REST + Pro WS (no funding error spam)., _run(), bootstrap(), Path, float, int, str
 
 ### Community 243 - "Community 243"
 Cohesion: 0.21
 Nodes (23): _backfill_symbol(), _bar_ts(), _bar_ts_ms(), _build_oi_series(), _closed_snap(), _fetch_batch_context(), _historical_map_features(), main() (+15 more)
 
 ### Community 244 - "Community 244"
-Cohesion: 0.36
-Nodes (9): kline_bar_flow(), Closed-bar kline CVD flow — strategy-neutral market facts., Closed-bar CVD delta + price change % from prepared klines., Prefer closed-bar kline CVD delta; WS rolling CVD is enhancement only., resolve_flow_cvd_px(), tf_closed_block(), Any, float (+1 more)
+Cohesion: 0.24
+Nodes (11): _f(), _pct_dist(), Return (price, label, tf, poc_direction)., Positive-only scalar (price, notional, POC levels)., Return (ask_notional_above, bid_notional_below, factor strings)., POC/VAH/VAL — maps VP first, then market scalars, cross, regime., Support/resistance for liquidity paths — avoid collapsed same-level bug., _resolve_level() (+3 more)
 
 ### Community 245 - "Community 245"
 Cohesion: 0.17
@@ -1320,12 +1320,12 @@ Cohesion: 0.20
 Nodes (10): Any, DisagreementState, ExpectedPath, HorizonTopology, PatternConfidence, ScenarioFragility, str, TradePlan (+2 more)
 
 ### Community 249 - "Community 249"
-Cohesion: 0.20
-Nodes (20): _cache_summary(), _config_summary(), _ledger_summary(), _live_probe(), main(), _main_async(), Expansion Engine operator health check — synthetic + optional live., _run_unit_checks() (+12 more)
+Cohesion: 0.29
+Nodes (9): ExpansionOpportunity, float, str, compute_rotation_scores(), _energy(), Rotation Engine — where capital is flowing across the universe.  Standalone subp, Map symbol → rotation score (0..1) = within-universe energy percentile.      Whe, sector_rotation_score() (+1 more)
 
 ### Community 250 - "Community 250"
-Cohesion: 0.30
-Nodes (18): fusion_window_wash_abstain(), _has_real_quote_vol_baseline(), kinematic_block_reason(), kinematic_z(), _optional_float(), pump_dump_stage(), _quote_volume_fields_present(), Wash-trading and kinematic chase gates (A8–A10). (+10 more)
+Cohesion: 0.27
+Nodes (9): DeliveryMode, Thin tick router for the fusion engine (replaces scan/routing.py).  The fusion `, Confirmed fusion setups become delivery candidates (one direction per symbol)., Confirmed setups go to the confirm lane; everything else is monitor-only., resolve_delivery_mode(), route_tick(), SetupCandidate, Any (+1 more)
 
 ### Community 251 - "Community 251"
 Cohesion: 0.17
@@ -1333,7 +1333,7 @@ Nodes (11): MIGRATION_PLAN — Hunt audit remediation (executable checklist), Op
 
 ### Community 252 - "Community 252"
 Cohesion: 0.12
-Nodes (33): Any, MarketDriver, PatternCandidate, PatternConfidence, str, MarketDriver, PatternCandidate, str (+25 more)
+Nodes (32): Any, MarketDriver, PatternCandidate, PatternConfidence, str, MarketDriver, PatternCandidate, str (+24 more)
 
 ### Community 253 - "Community 253"
 Cohesion: 0.27
@@ -1344,8 +1344,8 @@ Cohesion: 0.20
 Nodes (9): Facts × timeframe (MTF) matrix (target), Independence rules (from brief §1), Invariants carried forward (unchanged), Layering — shared raw facts, independent interpreters, Lite vs Full data tiers, Module 1 — Deep Analysis, Module 2 — Pre-move Scanner, One arbiter per module (+1 more)
 
 ### Community 255 - "Community 255"
-Cohesion: 0.11
-Nodes (27): _attach_structure_signals(), btc_market_context(), correlated_direction(), _fmt_confirm_price(), format_order_flow_block(), forming_confirm_gaps(), hunt_confirmed_direction(), LiquidityScenario (+19 more)
+Cohesion: 0.14
+Nodes (23): apply_liquidity_to_mtf_scores(), _attach_structure_signals(), build_poc_level_scenarios(), _chart_boost(), _fmt(), fmt_flow_qty(), format_liquidity_scenarios_telegram(), format_order_flow_block() (+15 more)
 
 ### Community 256 - "Community 256"
 Cohesion: 0.28
@@ -1360,16 +1360,12 @@ Cohesion: 0.20
 Nodes (9): Facts × timeframe (MTF) matrix (target), Independence rules (from brief §1), Invariants carried forward (unchanged), Layering — shared raw facts, independent interpreters, Lite vs Full data tiers, Module 1 — Deep Analysis, Module 2 — Pre-move Scanner, One arbiter per module (+1 more)
 
 ### Community 259 - "Community 259"
-Cohesion: 0.24
-Nodes (8): FactorScore, FeatureWindow, str, build_panel(), FactorReading, _interpret(), Deep factor panel — the full calibrated read for one symbol, ungated.  Same fact, Compute the ungated deep factor panel for the current bar.
+Cohesion: 0.33
+Nodes (7): cross_module_delivery_block(), _deep_direction(), Cross-module delivery conflict — Deep/Expansion vs Scanner direction (P0')., Block code when another module's active direction opposes scanner delivery., Any, str, Strategy-free delivery helpers shared by modules.
 
 ### Community 260 - "Community 260"
-Cohesion: 0.29
-Nodes (7): _block_names(), Block registry — runs every scorer over a :class:`BlockContext`.  Base blocks (T, Run all base block scorers; one failing scorer never sinks the tick., score_base_blocks(), BlockContext, BlockResult, str
-
-### Community 261 - "Community 261"
-Cohesion: 0.36
-Nodes (4): Typed market snapshot fields — Phase 2 / X4., SnapshotField, Any, str
+Cohesion: 0.28
+Nodes (8): bool, int, Path, str, Rotate hunt tick JSONL — daily files, gzip archive, 14-day retention., Rotate oversized append-only telemetry JSONL (signal_events, prep_shadow, candid, rotate_hunt_ticks(), rotate_telemetry_jsonl()
 
 ### Community 262 - "Community 262"
 Cohesion: 0.29
@@ -1380,12 +1376,12 @@ Cohesion: 0.31
 Nodes (8): Any, float, int, str, fetch_fapi_ratio_metric(), FAPI ratio fetch helpers extracted from market/client.py (debloat)., Shared cache+fetch for fapiData ratio endpoints (taker, top trader, etc.)., safe_float()
 
 ### Community 264 - "Community 264"
-Cohesion: 0.39
-Nodes (8): bool, Direction, int, _pick_best(), Short TP must not sit on POC/VAL support (shallow target → bad RR)., _score_candidate(), _skip_short_poc_support_candidate(), TpCandidate
+Cohesion: 0.31
+Nodes (5): Any, str, Shared signal lifecycle spine — Module 1 + Module 2 emit through here., Signal object — unified lifecycle for Deep + Scanner., Signal
 
 ### Community 265 - "Community 265"
-Cohesion: 0.14
-Nodes (14): AnalysisMode, build_poc_level_scenarios(), _chart_boost(), _empty_pack(), format_poc_level_scenarios_telegram(), is_deep_analysis_context(), PocLevelScenario, PocLevelScenarioPack (+6 more)
+Cohesion: 0.40
+Nodes (4): BoundLogger, str, configure_script_logging(), Script helpers for hunt entrypoints — keeps hunt independent of repo-level scrip
 
 ### Community 266 - "Community 266"
 Cohesion: 0.18
@@ -1409,7 +1405,7 @@ Nodes (7): load_pinned_symbols(), Operator pinned set (config.defaults.toml [pin
 
 ### Community 271 - "Community 271"
 Cohesion: 0.36
-Nodes (11): clean_full(), clean_smoke(), main(), bool, int, Path, str, Drop ephemeral session state; optional keep calibration JSON. (+3 more)
+Nodes (7): load_outcome_rows(), Offline give-back analysis from closed signal outcomes (Phase 7 / #34)., MFE vs exit PnL — how much profit was given back before close., summarize_give_back(), Any, Path, str
 
 ### Community 272 - "Community 272"
 Cohesion: 0.29
@@ -1428,8 +1424,12 @@ Cohesion: 0.36
 Nodes (9): Any, bool, float, str, format_scanner_coil_bracket(), format_scanner_from_setup(), format_scanner_signal(), Module 2 Scanner RU Telegram formatter (canonical macquette). (+1 more)
 
 ### Community 276 - "Community 276"
-Cohesion: 0.29
-Nodes (3): MessageBroadcaster, DeliveryResult, Protocol
+Cohesion: 0.50
+Nodes (4): is_signal_contract_violation(), True when Signal.__post_init__ rejected an invalid trade plan., BaseException, bool
+
+### Community 277 - "Community 277"
+Cohesion: 0.36
+Nodes (4): Typed market snapshot fields — Phase 2 / X4., SnapshotField, Any, str
 
 ### Community 278 - "Community 278"
 Cohesion: 0.22
@@ -1460,8 +1460,8 @@ Cohesion: 0.43
 Nodes (7): _check_row(), main(), Live smoke — maps integration on BTC/ETH probe (plan verification)., _run(), Any, int, str
 
 ### Community 285 - "Community 285"
-Cohesion: 0.17
-Nodes (15): apply_liquidity_to_mtf_scores(), _candle_close(), _closes_beyond(), _f_signed(), _fmt(), fmt_flow_qty(), format_liquidity_scenarios_telegram(), LiquidityScenarioPack (+7 more)
+Cohesion: 0.25
+Nodes (7): Any, bool, float, str, price_sanity_check(), Independent price sanity — withhold signals on implausible quotes (plan §5.13)., Return (ok, reason). Compares live price to structural / session reference.
 
 ### Community 286 - "Community 286"
 Cohesion: 0.33
@@ -1504,8 +1504,8 @@ Cohesion: 0.29
 Nodes (5): Runtime cycle package — tick loop., Any, str, __getattr__(), Hunter async runtime — lazy exports to avoid import cycles.
 
 ### Community 296 - "Community 296"
-Cohesion: 0.24
-Nodes (12): directional_filters(), hard_filter_blocks(), Directional trend/VWAP filters for scoring and delivery report., Phase-aware filter severity for VWAP/ADX blocks., Returns (score_delta, soft_triggers, hard_blocks)., _vwap_extreme_atr(), HuntCalibratedParams, Any (+4 more)
+Cohesion: 0.33
+Nodes (9): directional_filters(), hard_filter_blocks(), Directional trend/VWAP filters for scoring and delivery report., Phase-aware filter severity for VWAP/ADX blocks., Returns (score_delta, soft_triggers, hard_blocks)., _vwap_extreme_atr(), Any, float (+1 more)
 
 ### Community 297 - "Community 297"
 Cohesion: 0.40
@@ -1520,36 +1520,36 @@ Cohesion: 0.29
 Nodes (6): main(), _missing(), Final gate for abstract-chasing-cerf plan — structural invariants only., bool, int, str
 
 ### Community 302 - "Community 302"
-Cohesion: 0.29
-Nodes (6): map_opposing_bias_veto(), Map-derived gate checks — opposing liquidity bias veto., Veto when professional maps strongly oppose the intended direction., Any, bool, str
+Cohesion: 0.38
+Nodes (6): canonical_archetype(), playbook_archetype_key(), Canonical manipulation archetypes (VOC-1 — no alias bridge map)., Map fusion archetype to playbook dict key., CanonicalArchetype, str
 
 ### Community 306 - "Community 306"
-Cohesion: 0.40
-Nodes (4): Adapt to the delivery-path row shape: {dump, long, lifecycle}.          The matc, Compact one-line dict for logging / replay output., object, str
+Cohesion: 0.33
+Nodes (6): AnalysisMode, _empty_pack(), format_poc_level_scenarios_telegram(), PocLevelScenarioPack, Ranked POC interaction scenarios for Telegram deep block., Telegram block for deep ``/signal`` only.
 
 ### Community 307 - "Community 307"
 Cohesion: 0.17
 Nodes (3): Unit tests for detect/calibrate.py — degenerate inputs and cold-start., TestFusion, TestRobustZ
 
 ### Community 308 - "Community 308"
-Cohesion: 0.47
-Nodes (5): _line_count(), main(), Phase 9 completion gate — prescan, liq docs, god-object LOC budget., int, str
+Cohesion: 0.50
+Nodes (3): main(), Phase 9 completion gate — prescan, liq docs (no LOC/file-count splits)., int
 
 ### Community 309 - "Community 309"
-Cohesion: 0.10
-Nodes (31): build_expansion_dict(), Expansion Engine — standalone PRE-PUMP / PRE-DUMP discovery stack.  A separate m, Convenience: build and serialize the opportunity for stamping on a row., ExpansionOpportunity, float, Any, ExpansionConfig, ExpansionOpportunity (+23 more)
+Cohesion: 0.11
+Nodes (49): Level 1 — Expansion Engine (per-symbol state + probabilities)., build_expansion_dict(), Expansion Engine — standalone PRE-PUMP / PRE-DUMP discovery stack.  A separate m, Convenience: build and serialize the opportunity for stamping on a row., ExpansionProbabilityModel, ExpansionStateMachine, BlockScores, ExpansionOpportunity (+41 more)
 
 ### Community 310 - "Community 310"
-Cohesion: 0.50
-Nodes (5): _extract_retry_after_seconds(), Seconds to wait when Telegram returns flood-control (RetryAfter / 429)., _telegram_rate_limit_wait(), _telegram_retryable(), BaseException
+Cohesion: 0.60
+Nodes (5): Simple retry decorator as fallback when tenacity is not available., _simple_retry(), _telegram_retry(), P, R
 
 ### Community 311 - "Community 311"
-Cohesion: 0.40
-Nodes (5): FusionParams, _merge_fusion(), Explicit fusion tunables — documented in docs/FUSION_PARAMS.md., Any, str
+Cohesion: 0.50
+Nodes (3): _main(), Smoke: deep assembly for all pinned anchors (Module 1 Deep, no Telegram)., int
 
 ### Community 312 - "Community 312"
 Cohesion: 0.67
-Nodes (3): AdaptiveLevelParams, _apply_phase_sl_atr(), Q14: distribution fade 2.25×ATR cap; bounce long floor 2.0×ATR on 15m Wilder.
+Nodes (3): object, signal_contract_row(), SignalContractIssue
 
 ### Community 315 - "Community 315"
 Cohesion: 0.50
@@ -1612,19 +1612,19 @@ Cohesion: 0.67
 Nodes (3): va_contraction, kind, status
 
 ## Knowledge Gaps
-- **889 isolated node(s):** `Path`, `str`, `str`, `bool`, `object` (+884 more)
+- **914 isolated node(s):** `Path`, `str`, `str`, `bool`, `object` (+909 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **17 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `snapshot_symbol()` connect `Community 38` to `Community 128`, `Community 3`, `Community 133`, `Community 6`, `Community 7`, `Community 10`, `Community 15`, `Community 17`, `Community 18`, `Community 19`, `Community 20`, `Community 23`, `Community 24`, `Community 28`, `Community 31`, `Community 40`, `Community 44`, `Community 47`, `Community 50`, `Community 57`, `Community 62`, `Community 65`, `Community 68`, `Community 210`, `Community 220`, `Community 92`, `Community 222`, `Community 226`, `Community 100`, `Community 102`, `Community 243`, `Community 121`, `Community 125`?**
-  _High betweenness centrality (0.067) - this node is a cross-community bridge._
-- **Why does `main()` connect `Community 91` to `Community 128`, `Community 2`, `Community 4`, `Community 5`, `Community 7`, `Community 9`, `Community 16`, `Community 18`, `Community 20`, `Community 26`, `Community 28`, `Community 31`, `Community 32`, `Community 33`, `Community 40`, `Community 44`, `Community 177`, `Community 57`, `Community 60`, `Community 194`, `Community 67`, `Community 73`, `Community 209`, `Community 211`, `Community 85`, `Community 214`, `Community 87`, `Community 216`, `Community 219`, `Community 92`, `Community 102`, `Community 235`, `Community 109`, `Community 120`, `Community 255`?**
+- **Why does `snapshot_symbol()` connect `Community 38` to `Community 133`, `Community 6`, `Community 7`, `Community 10`, `Community 15`, `Community 17`, `Community 18`, `Community 19`, `Community 23`, `Community 24`, `Community 28`, `Community 31`, `Community 35`, `Community 44`, `Community 47`, `Community 50`, `Community 62`, `Community 65`, `Community 68`, `Community 210`, `Community 90`, `Community 219`, `Community 222`, `Community 226`, `Community 102`, `Community 112`, `Community 243`, `Community 125`?**
+  _High betweenness centrality (0.066) - this node is a cross-community bridge._
+- **Why does `HuntCcxtClient` connect `Community 0` to `Community 128`, `Community 3`, `Community 38`, `Community 45`, `Community 14`, `Community 46`, `Community 16`, `Community 80`, `Community 210`, `Community 19`, `Community 13`, `Community 17`, `Community 23`?**
   _High betweenness centrality (0.055) - this node is a cross-community bridge._
-- **Why does `HuntCcxtClient` connect `Community 0` to `Community 3`, `Community 195`, `Community 249`, `Community 38`, `Community 13`, `Community 14`, `Community 46`, `Community 16`, `Community 17`, `Community 210`, `Community 19`, `Community 214`, `Community 23`, `Community 24`, `Community 121`, `Community 90`, `Community 92`?**
-  _High betweenness centrality (0.055) - this node is a cross-community bridge._
+- **Why does `main()` connect `Community 120` to `Community 2`, `Community 4`, `Community 7`, `Community 9`, `Community 16`, `Community 17`, `Community 18`, `Community 19`, `Community 26`, `Community 28`, `Community 31`, `Community 35`, `Community 38`, `Community 44`, `Community 46`, `Community 48`, `Community 57`, `Community 187`, `Community 60`, `Community 191`, `Community 192`, `Community 194`, `Community 67`, `Community 73`, `Community 209`, `Community 211`, `Community 87`, `Community 216`, `Community 90`, `Community 219`, `Community 92`, `Community 220`, `Community 91`, `Community 95`, `Community 225`, `Community 102`, `Community 109`, `Community 110`, `Community 112`, `Community 126`?**
+  _High betweenness centrality (0.052) - this node is a cross-community bridge._
 - **Are the 60 inferred relationships involving `HuntCcxtClient` (e.g. with `TickBatchCache` and `Any`) actually correct?**
   _`HuntCcxtClient` has 60 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 98 inferred relationships involving `BlockResult` (e.g. with `ExpansionProbabilityModel` and `ExpansionForecast`) actually correct?**

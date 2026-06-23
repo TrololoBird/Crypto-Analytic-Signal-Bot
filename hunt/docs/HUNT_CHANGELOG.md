@@ -1,5 +1,17 @@
 # Hunt Changelog (session notes)
 
+## 2026-06-22 — Logic redesign (abstract-chasing-cerf P0–P9)
+
+- **P0:** `hunt_core/signals/` — unified lifecycle (`forming→signal→activated→tracking`), `setup_id` dedup replaces `deep_change_fingerprint`.
+- **P1:** Structural entry zone, catalyst≠stop, canonical level set, TP-ladder move envelope, `min_rr_tp1=1.0`.
+- **P2:** Microstructure wired into engines; CVD divergence by sign (bull→long, bear→short).
+- **P3:** Deleted `_prospective_levels` synthetic liquidation band; realized events only in heatmap.
+- **P4–P6:** Reconcile on honest data; pinned TG via lifecycle spine; startup announce cold-start only.
+- **P5:** Scanner `assess_preparation_readiness` — energy+direction bypass for pre-move delivery.
+- **P7–P8:** Cross-venue DOM merge by price bucket; queue gold collapse retained.
+- **MAJOR-1 fix:** Removed `target_signal_rate` / `auto_tune_*` emission quota from config + calibration.
+- **Suite:** compileall, check_imports, check_verdict_v2, check_deep, check_logic, replay_fusion, budget — all green.
+
 ## 2026-06-22 — abstract-chasing-cerf plan complete
 
 - **Module 1 Deep R1–R11:** reconcile gate, plan geometry, activation lifecycle, cross-venue DOM, gold equivalence, liq honesty, queue TOP-N, live E2E `BTCUSDT`.

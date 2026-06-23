@@ -4,51 +4,66 @@
 
 ## Summary (2026-06-22)
 
-**Plan complete (R1–R11 + phases 0–9 + P0/P0').** Phase 9: mechanical LOC-splits reverted; semantic splits only (`tracker` FSM, `policy` gate).
+**Logic redesign P0–P9 — 100% complete.** Full suite green.
 
-## Module 1 Deep redesign
+## Phase checklist (abstract-chasing-cerf)
 
-| Item | Status |
-|------|--------|
-| R1 Evidence-integrated engines + factor contributions | **done** — `cross_consensus` engine + `build_factor_contributions` |
-| R2 Reconciliation gate | **done** — `verdict_v2/reconcile.py` (synthetic liq ignored) |
-| R3 Single plan-geometry authority | **done** — `deep/plan.finalize_plan_geometry` |
-| R4 Activation lifecycle | **done** — forming→armed→active + R recompute + TG activation block |
-| R5 Scenario taxonomy | **done** — continuation guard; alt dedup |
-| R6 Provenance `as_of` | **done** — assembly stamp + query/render |
-| R7 Cross-venue DOM | **done** — per-venue levels; top-N imbalance |
-| R8 Equivalence + vocabulary | **done** — XAU≡PAXG; «Сила сигнала» / «Приоритет очереди» |
-| R9 Liq map honesty | **done** — `leverage_tier_estimate` provenance; suppress placeholder 0.35 conf |
-| R10 Stop buffer + DOM scale | **done** — structural SL buffer; display-level imbalance |
-| R11 Queue scope | **done** — global pinned TOP-N; peers footer; gold collapse |
+| Phase | ✅ | Deliverable |
+|-------|---|-------------|
+| **P0** | ✅ | `hunt_core/signals/` — model, lifecycle, emit; `setup_id` dedup; tracker + outcome ledger hookup |
+| **P1** | ✅ | Structural entry zone; catalyst≠stop; canonical levels; TP envelope move band; `min_rr_tp1=1.0` |
+| **P2** | ✅ | CVD by sign; absorption/footprint/iceberg in engines; `map_footprint_delta` |
+| **P3** | ✅ | `_prospective_levels` deleted; realized-only heatmap; OI-forward in map builder |
+| **P4** | ✅ | Reconcile on honest liq zones; strong_conflict→WAIT |
+| **P5** | ✅ | `assess_preparation_readiness`; scanner via `build_scanner_signal` |
+| **P6** | ✅ | `SignalEmitter` pinned loop; activation TG block; cold-start startup only |
+| **P7** | ✅ | XAU≡PAXG collapse; «Сила сигнала» / «Приоритет очереди» |
+| **P8** | ✅ | Cross-venue wall merge; `as_of` pinned path; continuation guard |
+| **P9** | ✅ | Legacy paths deleted; fail-closed config keys; docs updated |
 
-## Phase completion
+## §5 critical items
 
-| Phase | Status |
-|-------|--------|
-| 0–9 Two-module rebuild | **done** |
-| P0 / P0' | **done** |
-| Legacy shims | **removed** (`analysis/deep_signal`, `analysis/deep`, `expansion_engine` → `_dev/expansion_lab`) |
-| E2E Module-1 checks | **done** — `check_deep_e2e.py` (synthetic + live `BTCUSDT` via `HUNT_LIVE=1`) |
-| Duplicate `detect/deep` tree | **resolved** → `scanner/detect/lake_panel` (offline lake smoke only) |
-| Plan completion gate | **done** — `_dev/check_plan_complete.py` |
-| Phase 8 Longs ramp | **done** — uncalibrated long → lab lane + ledger geometry (`long_ramp_reason`) |
-| Phase 9 Architectural debt | **done** — prescan + liq docs gate; **semantic splits only** (`tracker`+`_tracker_fsm`, `policy`+`_policy_*`); LOC/file-count splits **reverted** (2026-06-22) |
-| Trend facts | **moved** — `shared/facts/trend.py`, `shared/facts/adx_thresholds.py` |
+| # | Item | Status |
+|---|------|--------|
+| MAJOR-1 | Remove emission quota (`target_signal_rate`) | ✅ |
+| MAJOR-2 | Cross-venue DOM merge by price bucket | ✅ |
+| 3 | Reuse `track/tracker.py` | ✅ |
+| 4 | Silence on WAIT (not gate change) | ✅ |
+| 6 | Fail-closed unknown `verdict_v2` keys | ✅ |
+| 7 | `as_of` on pinned path | ✅ |
+| 10 | Deep outcome ledger on emit | ✅ |
+| 11 | Scanner → `/signal SYM` link in delivery card | ✅ |
+| 13 | Price sanity withhold | ✅ `shared/price_sanity.py` |
 
-## Verification
+## Removed legacy paths
+
+`deep_change_fingerprint` · `_prospective_levels` · `target_signal_rate` · `auto_tune_*` · `should_send_pinned_batch`
+
+## Legacy marker audit (touched modules)
+
+**0** hits for `legacy|compat|deprecated|TODO|FIXME|HACK` in: `signals/`, `verdict_v2/{levels,catalyst,calibration,config}.py`, `maps/liquidation.py`, `scanner/gate/_mission.py`.
+
+## Verification (2026-06-22 — all green)
 
 ```bash
-bash hunt/scripts/verify_hunt_rebuild.sh   # includes HUNT_LIVE=1 assemble_deep_tick BTCUSDT
-python -m hunt_core._dev.check_deep_e2e --live
+hunt/.venv/bin/python -m compileall -q hunt/hunt_core
+cd hunt && .venv/bin/python -m hunt_core._dev.check_imports
+.venv/bin/python -m hunt_core._dev.check_verdict_v2
+.venv/bin/python -m hunt_core._dev.check_deep
+.venv/bin/python -m hunt_core._dev.check_logic
+.venv/bin/python -m hunt_core._dev.replay_fusion
+.venv/bin/python -m hunt_core._dev.budget
 ```
 
-**2026-06-22 fix:** `features/snapshot.py` import `analysis.trend_engine` → `shared.facts.trend` (live E2E gate was failing).
+**Render harness (§0):** ETHUSDT live `assemble_deep_tick` → `format_deep_from_row` — OK (24 lines, `as_of` stamped, catalyst≠stop visible).
 
-## Legacy marker audit (Phase 4)
+**Docs:** root `CLAUDE.md` Hunter row expanded; `.claude/rules/hunt-logic-redesign.md` added.
 
-Production `hunt_core/` (excl. `_dev/`): **~25** `legacy|compat|deprecated|shim` hits remain — mostly stable API names (`legacy_trend_label`) and routing comments, not active bridge code. Shims deleted: `analysis/deep_signal`, `analysis/deep`, `expansion_engine`, `phase_compat`.
+## Out of scope (plan §6 / operator)
 
-## Live soak (ongoing, not blocking)
-
-- Ledger accrual → OOS promotion of quarantine factors (`need_n=172`)
+| Item | Note |
+|------|------|
+| Phase git commits | `redesign-<phase>:` — only when operator requests |
+| Supervised live `watch` soak | ✅ smoke: `watch --once --no-telegram` exit 0 (2026-06-22); full multi-hour soak — operator |
+| `mission_mid_*` safety blocks | Kept for active-move monitor-only; prep bypass fixes dominant `mission_not_pre_*` dead scanner |
+| Bare `except` in decision path | **0** remaining in `hunt_core/` (project-wide sweep complete) |

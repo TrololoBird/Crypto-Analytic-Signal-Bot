@@ -1,5 +1,8 @@
 # Verdict V2 Roadmap
 
+> **Historical (superseded 2026-06-22):** `auto_tune` / `target_signal_rate` removed in logic redesign.
+> Canon: `docs/HUNT_ARCHITECTURE.md`, `docs/IMPLEMENTATION_STATUS.md`.
+
 Ship scope: **L0–L5 full stack** replacing `build_pinned_verdict` (Phases P1–P5).
 
 ## Shipped (P1–P5)

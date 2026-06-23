@@ -1,6 +1,7 @@
 """Offline logic self-checks — replacement for removed verify CLI (P11/E1)."""
 from __future__ import annotations
 
+import os
 import sys
 from types import SimpleNamespace
 from datetime import UTC, datetime, timedelta
@@ -183,7 +184,7 @@ def main() -> int:
         issues.append("config.defaults.toml empty or missing")
 
     from hunt_core.scanner.gate._ev import delivery_ev_floors, resolve_delivery_ev
-    from hunt_core.scanner.gate.policy import _decl_check_ev_delivery
+    from hunt_core.scanner.gate._policy_decl import _decl_check_ev_delivery
 
     good_setup = {
         "confirmed": True,
@@ -671,12 +672,15 @@ def main() -> int:
 
     import inspect
     from hunt_core.scanner.gate import policy as gate_policy
+    from hunt_core.scanner.gate._policy_decl import _decl_check_ev_delivery as _ev_decl
     from hunt_core.scanner.setups import catalog as setup_catalog
 
-    src = inspect.getsource(gate_policy._decl_check_ev_delivery)
+    src = inspect.getsource(_ev_decl)
     if "legacy_fuel_delivery_enabled" not in src:
         issues.append("_decl_check_ev_delivery must retain legacy fuel escape hatch")
-    if not hasattr(gate_policy, "_decl_check_playbook"):
+    from hunt_core.scanner.gate._policy_decl import _decl_check_playbook
+
+    if not callable(_decl_check_playbook):
         issues.append("_decl_check_playbook must exist for declarative delivery")
     cat_src = inspect.getsource(setup_catalog)
     if "def merge_dump_initiation_into_setup" in cat_src:
@@ -980,7 +984,9 @@ def main() -> int:
     ):
         if not callable(getattr(gate_facade, name, None)):
             issues.append(f"gate.delivery facade missing {name}")
-    if not callable(getattr(gate_policy, "_decl_check_playbook", None)):
+    from hunt_core.scanner.gate._policy_decl import _decl_check_playbook as _playbook_fn
+
+    if not callable(_playbook_fn):
         issues.append("gate.policy missing _decl_check_playbook")
     for name in ("evaluate_followups", "global_confirm_burst_cap_reached"):
         if not callable(getattr(tracker_facade, name, None)):
@@ -1103,14 +1109,14 @@ def main() -> int:
     if low_blocked is not None:
         issues.append("low p_win must not block EV delivery when pwin_gate off")
 
-    from hunt_core.scanner.gate.policy import _decl_check_playbook
+    from hunt_core.scanner.gate._policy_decl import _decl_check_playbook as _playbook_check
 
     weak_row = dict(dist_row)
     weak_row["manipulation_fusion"] = assessment_to_dict(fusion)
     weak_checks = dict((weak_row["manipulation_fusion"] or {}).get("checks") or {})
     weak_checks["distribution_phase"] = False
     weak_row["manipulation_fusion"]["checks"] = weak_checks
-    pb_blocked = _decl_check_playbook(
+    pb_blocked = _playbook_check(
         row=weak_row,
         setup={"confirmed": True},
         direction="short",
@@ -1266,8 +1272,11 @@ def main() -> int:
 
     from hunt_core.scanner.gate._registry import _gate_edge_policy
 
+    _prev_long_tg = os.environ.pop("HUNT_LONG_TG", None)
     ramp_setup: dict[str, Any] = {}
     _gate_edge_policy(direction="long", setup=ramp_setup, row={}, lifecycle=None)
+    if _prev_long_tg is not None:
+        os.environ["HUNT_LONG_TG"] = _prev_long_tg
     if ramp_setup.get("delivery_lane") != "lab" or not ramp_setup.get("long_ramp_reason"):
         issues.append("uncalibrated long must route to lab lane via edge_policy")
 

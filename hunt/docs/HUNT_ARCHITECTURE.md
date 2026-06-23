@@ -32,7 +32,8 @@ hunt/
 │   ├── market/             # factory, client, streams, cross, symbols, … (CCXT.md)
 │   ├── data/               # collect, universe, lake, completeness
 │   ├── features/           # prepare, snapshot, lake append
-│   ├── shared/             # mathlib, facts, primitives, shadow ledger
+│   ├── shared/             # mathlib, facts, primitives, price_sanity, shadow ledger
+│   ├── signals/            # lifecycle spine (Module 1 + 2 emit)
 │   ├── scanner/            # Module 2: detect, gate, setups, delivery, telegram
 │   ├── deep/               # Module 1: verdict_v2, plan, engine façade, telegram
 │   ├── deliver/            # dispatch, telegram, digest
@@ -57,7 +58,24 @@ run_loop → resolve_hunt_scan_universe (no pinned fusion)
   → [confirmed alt] deliver.telegram (pinned blocked via hunt_auto_confirm_blocked)
 
 deep_pinned_loop (background, Module 1 Deep):
-  assemble_deep_tick (hunt_fusion=False, plane=deep) → deep/verdict_v2 → change-only TG
+  assemble_deep_tick (hunt_fusion=False, plane=deep) → verdict_v2 → SignalEmitter lifecycle → TG
+```
+
+### Signal lifecycle spine (`hunt_core/signals/`)
+
+Both modules emit through one strategy-free spine (no `deep⊥scanner` import):
+
+| State | Telegram | Rule |
+|-------|----------|------|
+| `forming` | silence | internal |
+| `signal` | once per `setup_id` | reconciled LONG/SHORT only |
+| `activated` | once | R recomputed from fill |
+| `tracking` | TP/SL via `track/tracker.py` | existing follow-ups |
+| `closed` | outcome | `hunt_outcome_ledger.jsonl` |
+
+Dedup key = hash(thesis kind, structural anchor, direction) — **not** price-derived entry/SL.
+No emission quota (`target_signal_rate` removed). WAIT → silence.
+
 ```
 
 ### Delivery invariant

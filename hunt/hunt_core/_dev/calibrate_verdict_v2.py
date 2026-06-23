@@ -67,7 +67,6 @@ def main() -> int:
         action="store_true",
         help="Write data/verdict_v2_gate_overrides.json from suggested gates",
     )
-    parser.add_argument("--target-rate", type=float, default=0.20, help="Target signal rate for tune")
     args = parser.parse_args()
 
     if args.live:
@@ -79,7 +78,7 @@ def main() -> int:
             summaries = asyncio.run(_live_samples())
 
     report = aggregate_calibration(summaries)
-    sg = suggest_gates(summaries, target_signal_rate=args.target_rate, min_samples=4 if args.live else 12)
+    sg = suggest_gates(summaries, min_samples=4 if args.live else 12)
     report["suggested_gates"] = sg
 
     CALIBRATION_JSON.parent.mkdir(parents=True, exist_ok=True)

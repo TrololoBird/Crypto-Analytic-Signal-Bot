@@ -142,7 +142,7 @@ def check_suggest_gates() -> None:
     ]
     from hunt_core.deep.verdict_v2.calibration import suggest_gates
 
-    sg = suggest_gates(summaries, min_samples=4, target_signal_rate=0.25)
+    sg = suggest_gates(summaries, min_samples=4)
     assert sg.get("applied")
     assert float(sg["strength_min"]) <= 0.50
 

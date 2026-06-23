@@ -45,6 +45,17 @@
 | `mad_epsilon` | 1e-6 | MAD scale floor (prevents z explosion) |
 | `robust_z_clip` | 12 | Winsorize factor z-scores |
 
+## Verdict V2 (Module 1 Deep)
+
+| Parameter | Default | Role |
+|-----------|---------|------|
+| `strength_min` | 0.50 | Gate — **not** auto-tuned to an emission quota |
+| `min_rr_tp1` | 1.0 | Minimum R at TP1 (plan geometry) |
+| `signal_queue_ttl_hours` | 2.5 | Queue registry prune |
+
+Removed (2026-06-22 redesign): `target_signal_rate`, `auto_tune_gates`, `auto_tune_min_samples`.
+Calibration reports observed rates but never tunes gates toward a quota.
+
 ## Aggregation (not configurable yet)
 
 Directional factors fuse by **signed median** + rank-vote agreement (not Stouffer Σz/√n).
