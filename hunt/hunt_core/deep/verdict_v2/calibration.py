@@ -1,4 +1,4 @@
-"""Verdict V2 calibration rollup — gate stats from deep ticks."""
+"""Verdict V2 calibration rollup — gate stats from deep ticks (no emission quota)."""
 from __future__ import annotations
 
 import json
@@ -115,12 +115,12 @@ def suggest_gates(
     summaries: list[dict[str, Any]],
     *,
     base_strength_min: float = 0.50,
-    target_signal_rate: float = 0.20,
     min_samples: int = 12,
     floor: float = 0.40,
     ceiling: float = 0.54,
+    **_ignored: Any,
 ) -> dict[str, Any]:
-    """Derive strength_min from observed gate failures (simulation, not ML)."""
+    """Suggest strength_min from observed passing signals — never tune toward an emission quota."""
     n = len(summaries)
     if n < min_samples:
         return {
@@ -137,51 +137,33 @@ def suggest_gates(
         and str(s.get("path_direction") or "") in {"long", "short"}
     ]
     pool = directional if len(directional) >= max(4, min_samples // 2) else summaries
-    strengths = sorted(float(s.get("strength") or 0) for s in pool)
-    if not strengths:
-        return {"applied": False, "reason": "no_strength_data", "samples": n}
-
-    def simulate(threshold: float) -> float:
-        passed = 0
-        for s in pool:
-            gates = {str(g) for g in (s.get("gates_failed") or [])}
-            action = str(s.get("action") or "wait")
-            strength = float(s.get("strength") or 0)
-            if action in {"long", "short"} and strength >= threshold:
-                passed += 1
-            elif gates == {"strength"} and strength >= threshold:
-                passed += 1
-            elif "strength" in gates and not (gates - {"strength"}) and strength >= threshold:
-                passed += 1
-        return passed / max(len(pool), 1)
-
-    best = base_strength_min
-    for t_int in range(int(floor * 100), int(ceiling * 100) + 1):
-        t = t_int / 100.0
-        if simulate(t) >= target_signal_rate:
-            best = t
-
-    p30 = strengths[max(0, int(len(strengths) * 0.30) - 1)]
-    passing = [float(s.get("strength") or 0) for s in pool if str(s.get("action") or "") in {"long", "short"}]
-    blocked = [
+    passing = [
         float(s.get("strength") or 0)
         for s in pool
-        if str(s.get("action") or "") == "wait" and set(s.get("gates_failed") or []) <= {"strength"}
+        if str(s.get("action") or "") in {"long", "short"}
     ]
-    if passing and blocked:
-        mid = (min(passing) + max(blocked)) / 2.0
-        best = min(best, mid)
-    suggested = round(min(ceiling, max(floor, min(best, p30 + 0.01))), 3)
+    if not passing:
+        return {
+            "applied": True,
+            "strength_min": base_strength_min,
+            "base_strength_min": base_strength_min,
+            "samples": n,
+            "directional_samples": len(pool),
+            "note": "no_passing_signals_keep_base",
+        }
+
+    passing.sort()
+    p25 = passing[max(0, int(len(passing) * 0.25))]
+    suggested = round(min(ceiling, max(floor, min(base_strength_min, p25))), 3)
 
     return {
         "applied": True,
         "strength_min": suggested,
         "base_strength_min": base_strength_min,
-        "target_signal_rate": target_signal_rate,
-        "simulated_rate": round(simulate(suggested), 3),
-        "strength_p30": round(p30, 3),
+        "strength_p25_passing": round(p25, 3),
         "samples": n,
         "directional_samples": len(pool),
+        "passing_signals": len(passing),
     }
 
 
@@ -231,7 +213,6 @@ def write_gate_overrides(suggestions: dict[str, Any]) -> Path:
     payload = {
         "updated_at": datetime.now(UTC).isoformat(),
         "strength_min": suggestions.get("strength_min"),
-        "simulated_rate": suggestions.get("simulated_rate"),
         "source": "calibrate_verdict_v2",
     }
     GATE_OVERRIDES_JSON.parent.mkdir(parents=True, exist_ok=True)

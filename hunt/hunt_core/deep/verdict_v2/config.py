@@ -25,7 +25,7 @@ class SignalGates:
 class TradePlanConfig:
     entry_atr_pad: float = 0.25
     stop_atr_fallback: float = 1.5
-    min_rr_tp1: float = 0.8
+    min_rr_tp1: float = 1.0
 
 
 @dataclass
@@ -39,9 +39,6 @@ class VerdictV2Config:
     trade_rr_favorable: float = 1.2
     trade_rr_poor: float = 0.8
     tg_verbose: bool = False
-    auto_tune_gates: bool = True
-    auto_tune_min_samples: int = 8
-    target_signal_rate: float = 0.20
     signal_queue_enabled: bool = True
     signal_queue_top_n: int = 3
     signal_queue_tg_footer: bool = True
@@ -136,25 +133,46 @@ def _load_json_file(path: Path) -> dict[str, Any]:
 
 
 def _apply_runtime_gate_tune(cfg: VerdictV2Config, root: dict[str, Any]) -> VerdictV2Config:
+    _ = root
     if os.getenv("HUNT_V2_STRENGTH_MIN"):
         return cfg
     overrides = _load_json_file(VERDICT_V2_GATE_OVERRIDES_JSON)
     if overrides.get("strength_min") is not None:
         cfg.gates.strength_min = float(overrides["strength_min"])
-        return cfg
-    if not bool(root.get("auto_tune_gates", True)):
-        return cfg
-    report = _load_json_file(VERDICT_V2_CALIBRATION_JSON)
-    suggested = report.get("suggested_gates") if isinstance(report.get("suggested_gates"), dict) else {}
-    min_samples = int(root.get("auto_tune_min_samples", 8) or 8)
-    if not suggested.get("applied") or int(report.get("samples") or 0) < min_samples:
-        return cfg
-    cfg.gates.strength_min = float(suggested.get("strength_min", cfg.gates.strength_min))
     return cfg
+
+
+_KNOWN_VERDICT_V2_ROOT_KEYS = frozenset(
+    {
+        "enabled",
+        "horizon_primary",
+        "pattern_ambiguity_spread",
+        "fragility_high_threshold",
+        "disagreement_high_threshold",
+        "trade_rr_favorable",
+        "trade_rr_poor",
+        "tg_verbose",
+        "signal_queue_enabled",
+        "signal_queue_top_n",
+        "signal_queue_tg_footer",
+        "signal_queue_tg_batch",
+        "signal_queue_tg_min_rank",
+        "signal_queue_ttl_hours",
+    }
+)
+
+
+def _reject_unknown_verdict_v2_keys(section: dict[str, Any], *, allowed: frozenset[str], label: str) -> None:
+    unknown = sorted(
+        k for k, v in section.items() if k not in allowed and not isinstance(v, dict)
+    )
+    if unknown:
+        raise ValueError(f"Unknown {label} keys (fail-closed): {', '.join(unknown)}")
 
 
 def load_verdict_v2_config() -> VerdictV2Config:
     root = _load_toml_section("verdict_v2")
+    _reject_unknown_verdict_v2_keys(root, allowed=_KNOWN_VERDICT_V2_ROOT_KEYS, label="verdict_v2")
     gates_t = _load_toml_section("verdict_v2.signal_gates")
     tp_t = _load_toml_section("verdict_v2.trade_plan")
     pa = _float_map(_load_toml_section("verdict_v2.priorities_a"))
@@ -178,7 +196,7 @@ def load_verdict_v2_config() -> VerdictV2Config:
         stop_atr_fallback=float(
             os.getenv("HUNT_V2_STOP_ATR_FALLBACK", tp_t.get("stop_atr_fallback", 1.5)) or 1.5
         ),
-        min_rr_tp1=float(tp_t.get("min_rr_tp1", 0.8) or 0.8),
+        min_rr_tp1=float(tp_t.get("min_rr_tp1", 1.0) or 1.0),
     )
     verbose_env = os.getenv("HUNT_DEEP_TG_VERBOSE", "").strip().lower()
     verbose = verbose_env in {"1", "true", "yes"} if verbose_env else bool(root.get("tg_verbose", False))
@@ -191,9 +209,6 @@ def load_verdict_v2_config() -> VerdictV2Config:
         trade_rr_favorable=float(root.get("trade_rr_favorable", 1.2) or 1.2),
         trade_rr_poor=float(root.get("trade_rr_poor", 0.8) or 0.8),
         tg_verbose=verbose,
-        auto_tune_gates=bool(root.get("auto_tune_gates", True)),
-        auto_tune_min_samples=int(root.get("auto_tune_min_samples", 8) or 8),
-        target_signal_rate=float(root.get("target_signal_rate", 0.20) or 0.20),
         signal_queue_enabled=bool(root.get("signal_queue_enabled", True)),
         signal_queue_top_n=int(root.get("signal_queue_top_n", 3) or 3),
         signal_queue_tg_footer=bool(root.get("signal_queue_tg_footer", True)),
