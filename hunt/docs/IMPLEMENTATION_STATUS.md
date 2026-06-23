@@ -61,7 +61,7 @@ cd hunt && .venv/bin/python -m hunt_core._dev.check_imports
 
 ## Git (§0 plan — committed 2026-06-22)
 
-`redesign-p0` … `redesign-p9` on branch `dev` — 10 phase commits. Suite green post-commit.
+`redesign-p0` … `redesign-p9` on branch **`fix/hunt-phase0-data-integrity`** (fast-forward from `dev`, 2026-06-22). Suite green.
 
 ## Out of scope (operator)
 | Supervised live `watch` soak | ✅ smoke `watch --once` exit 0; multi-hour soak — operator |
