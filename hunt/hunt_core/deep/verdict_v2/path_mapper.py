@@ -41,20 +41,27 @@ def _path_direction(path: PathType) -> str:
 
 
 def _move_bounds(row: dict[str, Any], direction: str) -> tuple[float, float]:
+    """Expected move = envelope of nearest→farthest TP ladder (not far liq magnet alone)."""
     price = safe_float(row.get("price"))
     atr = atr_from_row(row)
     atr_pct = (atr / price * 100) if price > 0 and atr > 0 else 2.0
-    if direction == "long":
-        targets, _ = _collect_upward_targets(row, price) if price > 0 else ([], [])
-        if targets:
-            mv = abs(pct_move(price, min(targets, key=lambda t: t - price)))
-            return (max(0.5, mv * 0.4), mv)
-    elif direction == "short":
-        targets, _ = _collect_downward_targets(row, price) if price > 0 else ([], [])
-        if targets:
-            mv = abs(pct_move(price, max(targets, key=lambda t: price - t)))
-            return (max(0.5, mv * 0.4), mv)
-    return (atr_pct * 0.8, atr_pct * 2.5)
+    if direction == "long" and price > 0:
+        targets, _ = _collect_upward_targets(row, price)
+        if len(targets) >= 1:
+            nearest = min(targets[:3])
+            farthest = max(targets[:3])
+            lo = abs(pct_move(price, nearest))
+            hi = abs(pct_move(price, farthest))
+            return (round(max(0.3, lo * 0.95), 2), round(max(lo, hi), 2))
+    elif direction == "short" and price > 0:
+        targets, _ = _collect_downward_targets(row, price)
+        if len(targets) >= 1:
+            nearest = max(targets[:3])
+            farthest = min(targets[:3])
+            lo = abs(pct_move(price, nearest))
+            hi = abs(pct_move(price, farthest))
+            return (round(max(0.3, lo * 0.95), 2), round(max(lo, hi), 2))
+    return (round(atr_pct * 0.8, 2), round(atr_pct * 2.5, 2))
 
 
 def _time_bounds(path: PathType) -> tuple[float, float]:
@@ -106,12 +113,13 @@ def map_to_expected_path(
 ) -> ExpectedPath:
     pid = patterns.primary.id
     path_type = _PATTERN_PATH.get(pid, "range")
-    if topo.kind == "aligned_trend":
-        if topo.a_dominant == "long" and pid in _CONTINUATION_PATTERNS:
-            path_type = "continuation_up"
-        elif topo.a_dominant == "short" and pid in _CONTINUATION_PATTERNS:
-            path_type = "continuation_down"
     direction = _path_direction(path_type)
+    if topo.kind == "aligned_trend" and direction != "neutral":
+        if topo.a_dominant == "long" and pid in _CONTINUATION_PATTERNS and direction == "long":
+            path_type = "continuation_up"
+        elif topo.a_dominant == "short" and pid in _CONTINUATION_PATTERNS and direction == "short":
+            path_type = "continuation_down"
+        direction = _path_direction(path_type)
     move_lo, move_hi = _move_bounds(row, direction)
     time_lo, time_hi = _time_bounds(path_type)
     price = safe_float(row.get("price"))

@@ -122,9 +122,6 @@ fragility_high_threshold = 0.65
 disagreement_high_threshold = 0.65
 trade_rr_favorable = 1.2
 trade_rr_poor = 0.8
-auto_tune_gates = true
-auto_tune_min_samples = 8
-target_signal_rate = 0.20
 signal_queue_enabled = true
 signal_queue_top_n = 3
 signal_queue_tg_footer = true
@@ -143,7 +140,7 @@ require_timing_c = true
 [deep.verdict_v2.trade_plan]
 entry_atr_pad = 0.25
 stop_atr_fallback = 1.5
-min_rr_tp1 = 0.8
+min_rr_tp1 = 1.0
 
 [deep.verdict_v2.priorities_a]
 macro_trend = 0.28

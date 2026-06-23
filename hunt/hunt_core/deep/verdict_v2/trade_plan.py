@@ -24,7 +24,10 @@ def build_trade_plan(
     atr = atr_from_row(row)
     zone_mid = (zone[0] + zone[1]) / 2.0
     entry_type = "pullback_limit" if price > 0 and abs(price - zone_mid) > atr * 0.12 else "market"
-    stop, stop_src = pick_stop(row, direction, zone_mid)
+    from hunt_core.deep.verdict_v2.levels import pick_catalyst_level
+
+    cat_level, _ = pick_catalyst_level(row, direction)
+    stop, stop_src = pick_stop(row, direction, zone_mid, catalyst_level=cat_level)
     targets, tgt_factors = pick_targets(row, direction)
 
     if not targets:
