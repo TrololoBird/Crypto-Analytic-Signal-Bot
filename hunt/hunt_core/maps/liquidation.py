@@ -230,42 +230,6 @@ def _bucket_events(
     return buckets
 
 
-def _prospective_levels(
-    current_price: float,
-    *,
-    n_buckets: int,
-    price_range_pct: float,
-    leverage_tiers: tuple[int, ...] = _DEFAULT_LEVERAGE_TIERS,
-    maintenance_margin_rates: tuple[float, ...] | None = None,
-    leverage_weights: tuple[float, ...] | None = None,
-) -> list[tuple[float, float, str]]:
-    if current_price <= 0:
-        return []
-    out: list[tuple[float, float, str]] = []
-    weights = leverage_weights or tuple(1.0 / len(leverage_tiers) for _ in leverage_tiers)
-    if maintenance_margin_rates:
-        for i, mmr in enumerate(maintenance_margin_rates):
-            if mmr <= 0 or mmr >= 1:
-                continue
-            w = weights[i % len(weights)] if weights else mmr
-            long_liq = current_price * (1.0 - mmr)
-            short_liq = current_price * (1.0 + mmr)
-            out.append((long_liq, w, "long"))
-            out.append((short_liq, w, "short"))
-    else:
-        for i, lev in enumerate(leverage_tiers):
-            if lev <= 0:
-                continue
-            w = weights[i % len(weights)] if weights else (1.0 / lev)
-            long_liq = current_price * (1.0 - 1.0 / lev)
-            short_liq = current_price * (1.0 + 1.0 / lev)
-            out.append((long_liq, w, "long"))
-            out.append((short_liq, w, "short"))
-    span = current_price * price_range_pct / 100.0
-    lo = current_price - span
-    hi = current_price + span
-    return [(p, w, side) for p, w, side in out if lo <= p <= hi]
-
 
 def entry_anchored_forward_zones(
     oi_bars: list[dict[str, Any]],
@@ -523,47 +487,18 @@ def build_liquidation_heatmap(
     )
     event_count = int(sum(v.get("events", 0) for v in realized.values()))
 
-    forward_map: dict[int, dict[str, float]] = {}
-    for price, weight, side in _prospective_levels(
-        current_price,
-        n_buckets=n_buckets,
-        price_range_pct=price_range_pct,
-        leverage_tiers=lev_tiers or _DEFAULT_LEVERAGE_TIERS,
-        maintenance_margin_rates=mm_rates,
-        leverage_weights=leverage_weights,
-    ):
-        b = int((price - price_min) / bucket_size)
-        b = max(0, min(n_buckets - 1, b))
-        row = forward_map.setdefault(b, {"long": 0.0, "short": 0.0, "total": 0.0, "events": 0.0})
-        synthetic = current_price * weight * forward_blend
-        row["total"] += synthetic
-        if side == "long":
-            row["long"] += synthetic
-        else:
-            row["short"] += synthetic
-
-    _consume_swept_levels(
-        forward_map,
-        current_price=current_price,
-        price_min=price_min,
-        bucket_size=bucket_size,
-        n_buckets=n_buckets,
-    )
-
-    blend = forward_blend if event_count == 0 else min(forward_blend, 0.15 + event_count * 0.02)
-    merged = _merge_cluster_maps(realized, forward_map, blend_weights=(1.0, blend))
-    confidence = _resolved_forward_confidence(symbol, event_count=event_count, forward_blend=forward_blend)
-    synth_source = "leverage_tier_estimate" if event_count == 0 else "realized"
+    if event_count == 0:
+        return None
 
     return _build_heatmap_from_map(
-        merged,
+        realized,
         current_price=current_price,
         price_min=price_min,
         bucket_size=bucket_size,
         n_buckets=n_buckets,
-        forward_confidence=round(confidence, 3),
+        forward_confidence=1.0,
         realized_events=event_count,
-        zone_source=synth_source,
+        zone_source="realized",
     )
 
 
