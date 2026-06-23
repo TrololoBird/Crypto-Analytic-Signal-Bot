@@ -395,10 +395,12 @@ async def deep_pinned_loop(
                 if row.get("error"):
                     LOG.info("deep_pinned_tick_error", symbol=sym, error=row.get("error"))
                     continue
-                if material_deep_change(sym, row, prev=prev):
-                    transition = emitter.preview_deep_row(row)
-                    if transition.event != "none":
-                        lifecycle_candidates.append((row, transition))
+                # Lifecycle spine is the SOLE emission gate — dedup/cooldown/silence all live in
+                # process_lifecycle_tick. No legacy fingerprint pre-gate: it would suppress real
+                # forming→activated advances (price entering the zone without a fingerprint flip).
+                transition = emitter.preview_deep_row(row)
+                if transition.event != "none":
+                    lifecycle_candidates.append((row, transition))
                 from hunt_core._dev.expansion_lab.config import load_expansion_config
                 from hunt_core.runtime.expansion_alerts import (
                     expansion_change_fingerprint,
