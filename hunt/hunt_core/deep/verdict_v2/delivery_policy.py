@@ -1,27 +1,7 @@
-"""Pinned TG delivery policy — batch + rank-aware (V2.5)."""
+"""Pinned TG delivery helpers — batch hero + peers footer."""
 from __future__ import annotations
 
-import json
 from typing import Any
-
-
-def queue_fingerprint(queue: dict[str, Any] | None) -> str:
-    if not queue:
-        return ""
-    top3 = queue.get("top3") or []
-    sig = [
-        (
-            item.get("symbol"),
-            item.get("action"),
-            item.get("lifecycle"),
-            item.get("rank"),
-            # activation excluded — it's an entry price that drifts with market price every tick,
-            # causing spurious re-fires independent of any real setup change.
-        )
-        for item in top3
-        if isinstance(item, dict)
-    ]
-    return json.dumps(sig, sort_keys=True)
 
 
 def symbol_queue_rank(symbol: str, queue: dict[str, Any] | None) -> int:
@@ -60,39 +40,14 @@ def pick_hero_row(changed_rows: list[dict[str, Any]], queue: dict[str, Any] | No
     return best[1] if best else changed_rows[0]
 
 
-def should_send_pinned_batch(
-    hero: dict[str, Any],
-    *,
-    queue: dict[str, Any],
-    prev_queue: dict[str, Any] | None,
-    hero_prev: dict[str, Any] | None,
-    fingerprint_fn,
-) -> bool:
-    """True when hero or queue materially changed, or WAITING→ACTIVE promotion."""
-    if hero_prev is None:
-        return True
-    if fingerprint_fn(hero) != fingerprint_fn(hero_prev):
-        return True
-    if queue_fingerprint(queue) != queue_fingerprint(prev_queue):
-        return True
-    sym = str(hero.get("symbol") or "").upper()
-    reg = queue.get("registry") if isinstance(queue.get("registry"), dict) else {}
-    prev_reg = prev_queue.get("registry") if prev_queue and isinstance(prev_queue.get("registry"), dict) else {}
-    promoted = (reg.get(sym) or {}).get("promoted_at")
-    prev_promoted = (prev_reg.get(sym) or {}).get("promoted_at")
-    if promoted and promoted != prev_promoted:
-        return True
-    return False
-
-
 def filter_notify_candidates(
     changed_rows: list[dict[str, Any]],
     queue: dict[str, Any] | None,
     *,
     min_rank: int = 2,
 ) -> list[dict[str, Any]]:
-    """Only LONG/SHORT material changes reach pinned TG (WAIT is monitor-only)."""
-    _ = min_rank  # rank filter applies to queue footer only; WAIT never delivers
+    """Only LONG/SHORT rows reach pinned TG (WAIT is monitor-only)."""
+    _ = min_rank
     out: list[dict[str, Any]] = []
     for row in changed_rows:
         summary = row.get("verdict_v2_summary") or {}

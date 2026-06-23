@@ -827,6 +827,11 @@ def format_delivery_card(
         lines.append("")
         lines.append("<i>Signal-only · closed 5m/1m confirm · открывай сделку вручную</i>")
 
+    sym_cmd = str(row.get("symbol") or "").upper()
+    if sym_cmd:
+        lines.append("")
+        lines.append(f"<i>Deep-анализ: /signal {html.escape(sym_cmd)}</i>")
+
     return "\n".join(lines)
 
 

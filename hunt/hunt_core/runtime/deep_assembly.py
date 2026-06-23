@@ -62,39 +62,6 @@ def append_deep_tick_jsonl(row: dict[str, Any]) -> None:
     append_jsonl_lines(DEEP_TICKS_JSONL, [serialize_tick_row(row)])
 
 
-def deep_change_fingerprint(row: dict[str, Any]) -> str:
-    """Hash material pinned deep state for change-only TG policy."""
-    v2 = row.get("verdict_v2")
-    dec = getattr(v2, "signal_decision", None) if v2 else None
-    plan = getattr(dec, "trade_plan", None) if dec else None
-    cat = getattr(v2, "catalyst", None) if v2 else None
-    path = getattr(v2, "expected_path", None) if v2 else None
-
-    action = str(getattr(dec, "action", "") or "")
-    path_type = str(getattr(path, "type", "") or "")
-    # Trigger level excluded — it fluctuates with price every tick causing spurious re-fires.
-    # Material change = action direction or scenario type changed.
-    entry = sl = 0.0
-    if plan:
-        try:
-            # Round aggressively so minor price drift (< 0.5%) doesn't look like a change.
-            entry_mid = (plan.entry_zone[0] + plan.entry_zone[1]) / 2
-            entry = round(float(entry_mid), 1)
-            sl = round(float(plan.stop_loss), 1)
-        except (TypeError, ValueError, IndexError):
-            pass
-
-    return json.dumps(
-        {
-            "action": action,
-            "path": path_type,
-            "entry": entry,
-            "sl": sl,
-        },
-        sort_keys=True,
-    )
-
-
 def material_deep_change(
     symbol: str,
     row: dict[str, Any],
@@ -102,12 +69,15 @@ def material_deep_change(
     prev: dict[str, Any] | None,
     now: datetime | None = None,
 ) -> bool:
-    """True when verdict/phase/key levels changed or stale heartbeat exceeded."""
-    if not deep_tg_on_change():
-        return True
+    """True when verdict action changed — telemetry only (TG uses lifecycle spine)."""
+    _ = symbol
     if prev is None:
         return True
-    if deep_change_fingerprint(row) != deep_change_fingerprint(prev):
+    prev_summary = prev.get("verdict_v2_summary") if isinstance(prev.get("verdict_v2_summary"), dict) else {}
+    summary = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else {}
+    if str(prev_summary.get("action") or "wait") != str(summary.get("action") or "wait"):
+        return True
+    if str(prev_summary.get("path") or "") != str(summary.get("path") or ""):
         return True
     now = now or datetime.now(UTC)
     ts = row.get("ts") or prev.get("ts")
@@ -322,8 +292,11 @@ async def send_deep_change_telegram(
     row: dict[str, Any],
     *,
     cycle_peers: list[dict[str, Any]] | None = None,
+    lifecycle_event: str = "signal",
 ) -> bool:
     """Send deep analysis TG when material change detected."""
+    import html
+
     from hunt_core.analysis.confluence_grid import build_confluence_grid, format_grid_telegram
     from hunt_core.deep.format_pinned_signal import format_pinned_signal
     from hunt_core.deliver._sections import format_intraday_maps_telegram
@@ -344,6 +317,15 @@ async def send_deep_change_telegram(
         LOG.info("deep_pinned_tg_skipped_arbiter", symbol=sym, blockers=blockers)
         return False
     blocks: list[str] = []
+    if lifecycle_event == "activated":
+        sym_label = str(row.get("symbol") or "").upper().replace("USDT", "-USDT")
+        summary = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else {}
+        rr = summary.get("rr_primary")
+        rr_label = summary.get("rr_base_label") or "R:R (от входа)"
+        blocks.append(
+            f"✅ <b>Активация</b> · {html.escape(sym_label)} · "
+            f"{html.escape(rr_label)} <code>{rr}</code>"
+        )
     pinned_block = format_pinned_signal(row)
     if pinned_block:
         blocks.append(pinned_block)
@@ -397,17 +379,13 @@ async def deep_pinned_loop(
     LOG.info("deep_pinned_loop_start", symbols=list(PINNED_SYMBOLS), interval_s=interval)
     while not should_stop():
         from hunt_core.deep.verdict_v2.config import load_verdict_v2_config
-        from hunt_core.deep.verdict_v2.delivery_policy import (
-            filter_notify_candidates,
-            pick_hero_row,
-            should_send_pinned_batch,
-        )
+        from hunt_core.deep.verdict_v2.delivery_policy import pick_hero_row
         from hunt_core.deep.verdict_v2.signal_queue import load_signal_queue
+        from hunt_core.signals.emit import SignalEmitter
 
         v2cfg = load_verdict_v2_config()
-        prev_queue = load_signal_queue()
-        cycle_changes: list[dict[str, Any]] = []
-        cycle_first_touch: set[str] = set()
+        emitter = SignalEmitter()
+        lifecycle_candidates: list[dict[str, Any]] = []
         for sym in PINNED_SYMBOLS:
             if should_stop():
                 break
@@ -418,9 +396,9 @@ async def deep_pinned_loop(
                     LOG.info("deep_pinned_tick_error", symbol=sym, error=row.get("error"))
                     continue
                 if material_deep_change(sym, row, prev=prev):
-                    cycle_changes.append(row)
-                    if prev is None:
-                        cycle_first_touch.add(sym.upper())
+                    transition = emitter.preview_deep_row(row)
+                    if transition.event != "none":
+                        lifecycle_candidates.append((row, transition))
                 from hunt_core._dev.expansion_lab.config import load_expansion_config
                 from hunt_core.runtime.expansion_alerts import (
                     expansion_change_fingerprint,
@@ -459,56 +437,26 @@ async def deep_pinned_loop(
             except Exception:
                 LOG.exception("deep_pinned_loop_symbol_failed", symbol=sym)
 
-        if send_telegram and broadcaster is not None and cycle_changes:
-            queue = load_signal_queue()
-            filtered = filter_notify_candidates(
-                cycle_changes,
-                queue,
-                min_rank=v2cfg.signal_queue_tg_min_rank,
-            )
-            if cycle_first_touch:
-                seen = {str(r.get("symbol") or "").upper() for r in filtered}
-                for row in cycle_changes:
-                    sym_u = str(row.get("symbol") or "").upper()
-                    if sym_u not in cycle_first_touch or sym_u in seen:
-                        continue
-                    summary = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else {}
-                    if str(summary.get("action") or "wait").lower() in {"long", "short"}:
-                        filtered.append(row)
-                        seen.add(sym_u)
-            if filtered:
-                if v2cfg.signal_queue_tg_batch:
-                    hero = pick_hero_row(filtered, queue)
-                    if hero:
-                        hero_sym = str(hero.get("symbol") or "").upper()
-                        hero_prev = deep_query_store().get(hero_sym)
-                        from hunt_core.deep.arbiter import deep_cooldown_ok, mark_deep_sent
-                        cooldown_h = deep_tg_stale_hours() / 8.0
-                        if should_send_pinned_batch(
-                            hero,
-                            queue=queue,
-                            prev_queue=prev_queue,
-                            hero_prev=hero_prev,
-                            fingerprint_fn=deep_change_fingerprint,
-                        ) and deep_cooldown_ok(hero_sym):
-                            if await send_deep_change_telegram(
-                                broadcaster,
-                                hero,
-                                cycle_peers=filtered,
-                            ):
-                                mark_deep_sent(hero_sym)
-                else:
-                    from hunt_core.deep.arbiter import deep_cooldown_ok, mark_deep_sent
+        if send_telegram and broadcaster is not None and lifecycle_candidates:
+            from hunt_core.deep.arbiter import deep_cooldown_ok, mark_deep_sent
 
-                    batch_sent_at = datetime.now(UTC)
-                    sent_syms: list[str] = []
-                    for row in filtered:
-                        sym = str(row.get("symbol") or "").upper()
-                        if deep_cooldown_ok(sym):
-                            if await send_deep_change_telegram(broadcaster, row):
-                                sent_syms.append(sym)
-                    for sym in sent_syms:
-                        mark_deep_sent(sym, now=batch_sent_at)
+            queue = load_signal_queue()
+            rows_only = [r for r, _ in lifecycle_candidates]
+            if v2cfg.signal_queue_tg_batch and len(lifecycle_candidates) > 1:
+                hero = pick_hero_row(rows_only, queue)
+                to_send = [(hero, tr) for r, tr in lifecycle_candidates if r is hero] if hero else lifecycle_candidates[:1]
+            else:
+                to_send = lifecycle_candidates
+            for row, transition in to_send:
+                sym = str(row.get("symbol") or "").upper()
+                if deep_cooldown_ok(sym):
+                    if await emitter.emit_deep(
+                        broadcaster,
+                        row,
+                        cycle_peers=rows_only,
+                        transition=transition,
+                    ):
+                        mark_deep_sent(sym)
         try:
             await asyncio.sleep(max(30.0, interval))
         except asyncio.CancelledError:
@@ -558,7 +506,6 @@ async def expansion_outcome_review_loop(
 __all__ = [
     "append_deep_tick_jsonl",
     "assemble_deep_tick",
-    "deep_change_fingerprint",
     "deep_pinned_interval_s",
     "expansion_outcome_review_loop",
     "expansion_review_interval_s",

@@ -251,10 +251,15 @@ async def run_loop(
         LOG.info("watch_once_regime_cached", regime=getattr(cached, "regime", None))
 
     _startup_tg = os.getenv("HUNT_STARTUP_TELEGRAM", "1").strip().lower()
+    from hunt_core.paths import SESSION_DIR
+
+    startup_sentinel = SESSION_DIR / "startup_telegram.sent"
+    cold_start = not startup_sentinel.exists()
     if (
         broadcaster is not None
         and send_telegram
         and not once
+        and cold_start
         and _startup_tg not in {"0", "false", "no"}
     ):
         cross_line = ", ".join(cross_cfg.exchanges) if cross_cfg.enabled else "off"
@@ -265,7 +270,9 @@ async def run_loop(
                 f"Cross-intel: {cross_line}\n"
                 "<i>Не auto-trade</i>"
             )
-            LOG.info("watch_startup_telegram_sent", chat=settings.target_chat_id)
+            startup_sentinel.parent.mkdir(parents=True, exist_ok=True)
+            startup_sentinel.write_text(clock.now_utc().isoformat(), encoding="utf-8")
+            LOG.info("watch_startup_telegram_sent", chat=settings.target_chat_id, cold_start=True)
         except Exception:
             LOG.exception("watch_startup_telegram_failed")
 
