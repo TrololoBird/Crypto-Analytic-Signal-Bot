@@ -7,7 +7,7 @@ from typing import Any
 def build_deep_report(row: dict[str, Any], *, symbol: str = "", **kwargs: Any) -> Any:
     from hunt_core.deep.build import build_deep_report as _build
 
-    sym = symbol or str(row.get("symbol") or "")
+    symbol or str(row.get("symbol") or "")
     return _build(row, **kwargs)
 
 

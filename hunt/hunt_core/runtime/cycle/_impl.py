@@ -9,7 +9,6 @@ import os
 from typing import Any
 
 from hunt_core.domain.config import SYMBOL_TICK_TIMEOUT_S
-from hunt_core.params.store import effective_hunt_params
 
 from hunt_core.shared.market import HuntCcxtStreams, apply_live_price_to_row
 
@@ -29,14 +28,13 @@ HUNT_SNIPER_TOP_LS_MAX = SNIPER_CONFIG.top_ls_max
 HUNT_SNIPER_REQUIRE_TOP_LS = SNIPER_CONFIG.require_top_ls
 HUNT_SNIPER_CHASE_TOL = SNIPER_CONFIG.chase_tol
 HUNT_SNAPSHOT_PARALLEL = max(1, int(os.getenv("HUNT_SNAPSHOT_PARALLEL", "6")))
-_HOT_TICK_TIMEOUT_S = float(os.getenv("HUNT_HOT_TICK_TIMEOUT_S", "60") or 60)
+
 _TICK_LOCK = asyncio.Lock()
 
 
 def _evaluate_delivery_row(
     row: dict[str, Any],
     *,
-    hot_path: bool,
     direction: str,
     setup: dict[str, Any],
     lifecycle: dict[str, Any] | None,
@@ -48,7 +46,6 @@ def _evaluate_delivery_row(
 
     return evaluate_delivery_row(
         row,
-        hot_path=hot_path,
         direction=direction,
         setup=setup,
         lifecycle=lifecycle,
@@ -137,22 +134,6 @@ def _save_state(state: dict[str, str]) -> None:
 
 
 from hunt_core.runtime.cycle._cycle_tick import run_tick
-
-
-async def run_hot_kline_tick(
-    symbols: tuple[str, ...],
-    ctx: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Hot 1m-close tick — serialized with cold tick via ``_TICK_LOCK``."""
-    async with _TICK_LOCK:
-        return await run_tick(
-            symbols,
-            **{
-                **{k: v for k, v in ctx.items() if k not in ("active", "tier", "hot_path")},
-                "tier": "hot",
-                "hot_path": True,
-            },
-        )
 
 
 from hunt_core.runtime.cycle._cycle_loop import run_loop

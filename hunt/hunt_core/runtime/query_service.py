@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.scanner.detect.delivery_support import GateResult
 from hunt_core.market.client import HuntCcxtClient
 

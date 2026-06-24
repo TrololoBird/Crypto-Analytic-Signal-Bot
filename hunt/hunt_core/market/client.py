@@ -2221,14 +2221,5 @@ def wall_cluster_to_dict(cluster: WallCluster) -> dict[str, Any]:
 
 # --- liquidation heatmap (canonical impl in hunt_core.maps.liquidation) ---
 
-from hunt_core.maps.liquidation import (
-    LiquidationCluster,
-    LiquidationDensityZone,
-    LiquidationHeatmap,
-    build_liquidation_heatmap,
-    heatmap_to_market_dict,
-    leverage_tiers_from_brackets,
-    maintenance_rates_from_tiers,
-)
 
 

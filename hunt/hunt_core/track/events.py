@@ -290,7 +290,7 @@ def audit_probe_row(row: dict[str, Any], *, source: str = "signal_cmd") -> dict[
     checks: list[str] = []
     sym = str(row.get("symbol") or "")
     lc = row.get("lifecycle") or {}
-    tf = row.get("timeframes") or {}
+    row.get("timeframes") or {}
     cal = effective_hunt_params(sym)
     bias = str(lc.get("recommended_bias") or "")
 

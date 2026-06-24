@@ -87,7 +87,7 @@ class FilterConfig(_StrictModel):
     min_bars_15m: int = Field(default=500, ge=30, le=5000)
     min_bars_1h: int = Field(default=300, ge=30, le=5000)
     min_bars_5m: int = Field(default=200, ge=30, le=5000)
-    min_bars_4h: int = Field(default=300, ge=30, le=5000)
+    min_bars_4h: int = Field(default=250, ge=30, le=5000)
     setups: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 

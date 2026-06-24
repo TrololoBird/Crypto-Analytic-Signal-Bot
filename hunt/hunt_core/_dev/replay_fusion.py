@@ -30,8 +30,7 @@ from dataclasses import dataclass, field
 import polars as pl
 
 from hunt_core.scanner.detect import build_detection
-from hunt_core.scanner.detect import factors as F
-from hunt_core.scanner.detect.fusion import fuse, vol_adjusted_magnitude
+from hunt_core.scanner.detect.fusion import vol_adjusted_magnitude
 from hunt_core.scanner.detect.magnitude_cache import clear_magnitude_cache
 from hunt_core.scanner.detect.phase import clear_phase_sticky, phase_sticky_enabled
 from hunt_core.scanner.detect.windows import DEFAULT_LOOKBACK, build_window

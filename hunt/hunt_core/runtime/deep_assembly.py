@@ -1,9 +1,8 @@
 """Module 1 Deep tick orchestrator — pinned continuous + on-demand query plane."""
 from __future__ import annotations
 
-import json
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog

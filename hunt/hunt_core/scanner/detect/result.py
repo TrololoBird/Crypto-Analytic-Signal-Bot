@@ -13,7 +13,6 @@ from typing import Any
 
 import polars as pl
 
-from hunt_core.scanner.detect import calibrate as C
 from hunt_core.scanner.detect import fusion as Fz
 from hunt_core.scanner.detect import phase as Ph
 from hunt_core.scanner.detect.factors import FactorScore, compute_factors

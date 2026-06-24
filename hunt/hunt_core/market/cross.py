@@ -95,7 +95,7 @@ def apply_cross_snapshot_to_market(
     secondary_funding = {k: v for k, v in funding.items() if k != "binance"}
     secondary_oi = dict(oi_usd)
     has_ws = bool(ws_cross)
-    has_rest = bool(merged.get("symbol"))
+    bool(merged.get("symbol"))
     if has_ws and secondary_funding:
         source = "hybrid"
     elif has_ws:

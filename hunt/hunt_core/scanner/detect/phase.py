@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-import polars as pl
 
 from hunt_core.scanner.detect import calibrate as C
 from hunt_core.scanner.detect.config import fusion_params

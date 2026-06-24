@@ -9,7 +9,6 @@ from hunt_core.market.streams import HuntCcxtStreams
 def evaluate_delivery_row(
     row: dict[str, Any],
     *,
-    hot_path: bool,
     direction: str,
     setup: dict[str, Any],
     lifecycle: dict[str, Any] | None,
@@ -17,7 +16,7 @@ def evaluate_delivery_row(
     refresh_live_price: bool = False,
     ws_feed: HuntCcxtStreams | None = None,
 ) -> tuple[Any, Any]:
-    use_fast = hot_path or row.get("tick_path") in {
+    use_fast = row.get("tick_path") in {
         "hot_ws",
         "hot_bootstrap",
         "hot_delta",

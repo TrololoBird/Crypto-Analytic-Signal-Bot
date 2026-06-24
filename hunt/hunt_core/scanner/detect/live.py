@@ -6,7 +6,6 @@ from typing import Any
 import polars as pl
 
 from hunt_core.scanner.detect import fusion as Fz
-from hunt_core.scanner.detect import phase as Ph
 from hunt_core.scanner.detect.config import fusion_params
 from hunt_core.scanner.detect.magnitude_cache import magnitude_history_for_frame
 from hunt_core.scanner.detect.result import Detection, build_detection

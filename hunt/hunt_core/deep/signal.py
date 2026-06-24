@@ -763,7 +763,7 @@ def _resolve_liquidity_sr(row: dict[str, Any]) -> tuple[float | None, float | No
 def build_liquidity_scenarios(row: dict[str, Any]) -> LiquidityScenarioPack:
     """Rank path scenarios from row snapshot (no extra REST)."""
     price = _f(row.get("price")) or 0.0
-    regime = row.get("regime") or {}
+    row.get("regime") or {}
     dump = row.get("dump") or {}
     long_setup = row.get("long") or {}
     cx = row.get("cross_microstructure") or {}
@@ -1142,7 +1142,7 @@ def format_liquidity_scenarios_telegram(pack: LiquidityScenarioPack | dict[str, 
 
 
 
-from hunt_core.shared.facts.order_flow import OrderFlowSynthesis, fmt_flow_qty, synthesize_order_flow
+from hunt_core.shared.facts.order_flow import OrderFlowSynthesis, synthesize_order_flow
 
 
 def format_order_flow_block(synth: OrderFlowSynthesis | dict[str, Any]) -> str:

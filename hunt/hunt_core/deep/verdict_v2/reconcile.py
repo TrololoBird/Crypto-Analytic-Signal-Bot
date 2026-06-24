@@ -1,7 +1,7 @@
 """Context reconciliation — direction vs order-flow / liquidity / structure."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from hunt_core.deep.verdict_v2._helpers import safe_float

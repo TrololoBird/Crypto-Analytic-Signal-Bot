@@ -12,7 +12,6 @@ from hunt_core.deep.plan import finalize_plan_geometry
 from hunt_core.deep.verdict_v2.orchestrator import build_scenario_verdict
 from hunt_core.deep.verdict_v2.path_mapper import map_to_expected_path
 from hunt_core.deep.verdict_v2.patterns import generate_patterns
-from hunt_core.deep.verdict_v2.reconcile import reconcile_context
 from hunt_core.deep.verdict_v2.config import VerdictV2Config
 from hunt_core.deep.verdict_v2.horizon_topology import classify_topology
 from hunt_core.deep.verdict_v2.signal_queue import build_top3, format_queue_telegram

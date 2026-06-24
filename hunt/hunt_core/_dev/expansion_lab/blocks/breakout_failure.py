@@ -5,7 +5,7 @@ on weak volume with no OI confirmation, then loses the level. Pre-dump evidence.
 """
 from __future__ import annotations
 
-from hunt_core._dev.expansion_lab._util import clamp01, opt_float, safe_float
+from hunt_core._dev.expansion_lab._util import clamp01, opt_float
 from hunt_core._dev.expansion_lab.blocks._common import abstain, result
 from hunt_core._dev.expansion_lab.types import BlockContext, BlockResult
 

@@ -18,7 +18,7 @@ from hunt_core.data.scanner import (
     prescan_from_tickers,
 )
 from hunt_core.data.baseline_store import batch_update_baselines
-from hunt_core.data.universe import MAX_PRESCAN_MERGE, PINNED_SYMBOLS, resolve_watch_universe
+from hunt_core.data.universe import PINNED_SYMBOLS, resolve_watch_universe
 from hunt_core.deliver.digest import DigestCandidate, get_digest_scheduler
 from hunt_core.deliver.telegram import TelegramBroadcaster
 from hunt_core.domain.config import (
@@ -44,7 +44,6 @@ from hunt_core.shared.market import (
     refresh_cross_exchange_cache,
 )
 from hunt_core.params.store import migrate_calibration_split, prescan_thresholds
-from hunt_core.runtime.cycle._cycle_confirm import _advisory_tg_enabled
 from hunt_core.runtime.cycle._cycle_tick import run_tick
 from hunt_core.runtime.state import LOG, OUT_PATH, SYMBOL_WATCH_MODES, new_session_state, should_stop
 from hunt_core.runtime.telegram_commands import build_hunt_telegram_commands
@@ -108,7 +107,6 @@ async def run_loop(
 
     from hunt_core.runtime.cycle import _impl as _loop_impl
 
-    run_hot_kline_tick = _loop_impl.run_hot_kline_tick
     _overlay_ws_tickers = _loop_impl._overlay_ws_tickers
     _TICK_LOCK = _loop_impl._TICK_LOCK
 
@@ -195,11 +193,6 @@ async def run_loop(
     spot_companion = plane.spot
     ws_feed.set_symbols(list(cli_symbols))
     await ws_feed.start()
-    from hunt_core.runtime.hot_loop import HotKlineLoop
-
-    hot_kline_loop = HotKlineLoop(run_hot_tick=run_hot_kline_tick)
-    if not once:
-        hot_kline_loop.start(ws_feed, once=False)
     # Persistent across ticks: kline/OI caches live in client; oi_flush/oi_build need prev tick.
     prev_oi: dict[str, float | None] = {}
     last_bias: dict[str, str] = {}
@@ -689,9 +682,7 @@ async def run_loop(
                     "prescan_outlier_by_sym": prescan_outlier_by_sym,
                     "symbol_state": symbol_state,
                     "feature_lake": feature_lake,
-                    "hot_path": False,
                 }
-                hot_kline_loop.set_tick_ctx(tick_ctx)
                 if not once:
                     faulthandler.cancel_dump_traceback_later()
                     faulthandler.dump_traceback_later(

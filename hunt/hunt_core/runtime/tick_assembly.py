@@ -40,7 +40,6 @@ from hunt_core.features.snapshot import (
     apply_rest_enrichments_local,
     attach_cross_market_fields,
     attach_pp_flags,
-    attach_research_setup_fields,
     btc_beta_1h,
     btc_corr_1h,
     col as _col,
@@ -126,7 +125,6 @@ from hunt_core.shared.market import (
     HuntCcxtClient,
     HuntCcxtSpotCompanion,
     HuntCcxtStreams,
-    attach_cross_microstructure,
     normalize_depth_levels,
     resolve_live_price,
 )
@@ -1197,100 +1195,4 @@ async def snapshot_symbol(
 
     return result
 
-
-async def hot_tick_symbol(
-    client: HuntCcxtClient,
-    settings: Any,
-    minimums: dict[str, int],
-    symbol: str,
-    *,
-    watch_mode: WatchMode,
-    prev_oi: float | None,
-    premium_all: dict[str, dict[str, float]],
-    funding_info_all: dict[str, dict[str, float | int]],
-    btc_work_1h: Any | None,
-    exchange_by_sym: dict[str, Any],
-    ticker_by_sym: dict[str, dict[str, Any]],
-    ws_feed: HuntCcxtStreams | None = None,
-    spot_companion: HuntCcxtSpotCompanion | None = None,
-    pump_stats: dict[str, Any] | None = None,
-    symbol_state: SymbolStateStore | None = None,
-    btc_work_1m: Any | None = None,
-) -> dict[str, Any]:
-    """WS-first tick: cached klines + TTL enrichment — no REST klines on hot path."""
-    from hunt_core.data.frame_cache import get_frame_cache
-
-    cache = get_frame_cache()
-    if cache.has_delta_ready(symbol):
-        kline_map = cache.kline_map(symbol)
-        enrich = cache.enrichment_pack(symbol) or {}
-        return await snapshot_symbol(
-            client,
-            settings,
-            minimums,
-            symbol,
-            watch_mode=watch_mode,
-            prev_oi=prev_oi,
-            premium_all=premium_all,
-            funding_info_all=funding_info_all,
-            btc_work_1h=btc_work_1h,
-            btc_work_1m=btc_work_1m,
-            exchange_by_sym=exchange_by_sym,
-            ticker_by_sym=ticker_by_sym,
-            ws_feed=ws_feed,
-            spot_companion=spot_companion,
-            pump_stats=pump_stats,
-            tier="hot",
-            symbol_state=symbol_state,
-            kline_map_override=kline_map,
-            enrichment_pack_override=enrich,
-        )
-    if not cache.is_ready(symbol):
-        row = await snapshot_symbol(
-            client,
-            settings,
-            minimums,
-            symbol,
-            watch_mode=watch_mode,
-            prev_oi=prev_oi,
-            premium_all=premium_all,
-            funding_info_all=funding_info_all,
-            btc_work_1h=btc_work_1h,
-            btc_work_1m=btc_work_1m,
-            exchange_by_sym=exchange_by_sym,
-            ticker_by_sym=ticker_by_sym,
-            ws_feed=ws_feed,
-            spot_companion=spot_companion,
-            pump_stats=pump_stats,
-            tier="fast",
-            symbol_state=symbol_state,
-            stagger_klines_ms=0,
-        )
-        row["tick_path"] = "hot_bootstrap"
-        if not row.get("error"):
-            get_frame_cache().seed_carry_row(symbol, row)
-        return row
-    kline_map = cache.kline_map(symbol)
-    enrich = cache.enrichment_pack(symbol) or {}
-    return await snapshot_symbol(
-        client,
-        settings,
-        minimums,
-        symbol,
-        watch_mode=watch_mode,
-        prev_oi=prev_oi,
-        premium_all=premium_all,
-        funding_info_all=funding_info_all,
-        btc_work_1h=btc_work_1h,
-        btc_work_1m=btc_work_1m,
-        exchange_by_sym=exchange_by_sym,
-        ticker_by_sym=ticker_by_sym,
-        ws_feed=ws_feed,
-        spot_companion=spot_companion,
-        pump_stats=pump_stats,
-        tier="hot",
-        symbol_state=symbol_state,
-        kline_map_override=kline_map,
-        enrichment_pack_override=enrich,
-    )
 

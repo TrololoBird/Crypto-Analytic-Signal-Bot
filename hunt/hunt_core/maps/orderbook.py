@@ -14,7 +14,6 @@ from hunt_core.market.client import (
     depth_snapshot_from_book,
     detect_wall_clusters,
     normalize_depth_levels,
-    top_depth_walls,
     wall_cluster_to_dict,
 )
 

@@ -13,10 +13,8 @@ from typing import Any
 from hunt_core.shared.contract import validate_signal_contract
 from hunt_core.shared.geometry import (
     DEFAULT_MIN_RR as _DEFAULT_MIN_RR,
-    geometry_block_evidence,
     geometry_block_reason,
     resolve_min_rr as _resolve_min_rr,
-    setup_risk_reward as _setup_rr,
 )
 
 

@@ -4,9 +4,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
-from hunt_core.paths import DATA, DELIVERY_STATE, LAB_OUTCOME_LEDGER
+from hunt_core.paths import DELIVERY_STATE, LAB_OUTCOME_LEDGER
 
 STATE_PATH = DELIVERY_STATE
 LAB_LEDGER_PATH = LAB_OUTCOME_LEDGER

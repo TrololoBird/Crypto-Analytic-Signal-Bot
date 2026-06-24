@@ -1,7 +1,6 @@
 """Validate feature lake schema alignment with registry and FeatureVector."""
 from __future__ import annotations
 
-import sys
 from dataclasses import fields
 
 from hunt_core.features.feature_engine import FeatureVector, load_feature_registry

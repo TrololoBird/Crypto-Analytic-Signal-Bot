@@ -552,7 +552,6 @@ async def probe_symbol_signal(
                 note=f"signal_probe phase={dump.get('phase')}",
             )
             direction, _, _, _ = resolve_trade_direction(row)
-            setup = dump if direction == "short" else long_setup
             notify_phase = (
                 "dump_imminent" if direction == "short" else "long_imminent"
             )

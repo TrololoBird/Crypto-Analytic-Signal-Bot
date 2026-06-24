@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.domain.config import load_settings

@@ -67,7 +67,7 @@ def evaluate_must_pass(row: dict[str, Any], *, direction: str) -> tuple[bool, li
     lc = row.get("lifecycle") or {}
     bias = str(lc.get("recommended_bias") or "wait")
     phase = str(lc.get("phase") or "")
-    fall_pct = float(lc.get("fall_from_high_pct") or 0)
+    float(lc.get("fall_from_high_pct") or 0)
     if direction == "short" and bias == "long":
         distribution_fade = phase in {"exhaustion_at_high", "distribution"} and bool(
             setup.get("confirmed")

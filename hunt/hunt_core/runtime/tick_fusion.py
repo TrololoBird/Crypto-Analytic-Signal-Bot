@@ -19,7 +19,6 @@ def run_fusion_detection(
     hunt_l: float,
 ) -> tuple[Any, str, str, dict[str, Any]]:
     """Build live fusion detection from closed 15m feature vector."""
-    from hunt_core.scanner.detect.delivery_setup import build_delivery_setup
     from hunt_core.scanner.detect.live import build_live_detection
     from hunt_core.scanner.gate._lifecycle import fusion_lifecycle_dict
     from hunt_core.features.feature_engine import build_feature_vector

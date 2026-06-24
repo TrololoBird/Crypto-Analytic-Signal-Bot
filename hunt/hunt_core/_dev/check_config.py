@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from hunt_core.domain.config import load_config_defaults_toml
 

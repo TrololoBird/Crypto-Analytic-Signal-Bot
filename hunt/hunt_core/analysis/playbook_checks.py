@@ -1,7 +1,6 @@
 """Shared playbook checklist — single source for fusion rank and delivery gates."""
 from __future__ import annotations
 
-from typing import Any
 
 # Required checks per archetype (named standards, not fuel weights).
 PLAYBOOK_REQUIRED: dict[str, frozenset[str]] = {

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hunt_core.paths import VERDICT_V2_CALIBRATION_JSON, VERDICT_V2_GATE_OVERRIDES_JSON
+from hunt_core.paths import VERDICT_V2_GATE_OVERRIDES_JSON
 
 
 @dataclass

@@ -706,7 +706,6 @@ def score_hunt_row(
         tier, move_z, tier_mode = change_24h_tier(adaptive, symbol, change_24h)
     else:
         tier_mode = "static"
-        move_z = None
         if move >= HUNT_PUMP_EXTREME_PCT:
             tier = "extreme"
         elif move >= HUNT_RANGE_HOT_PCT:

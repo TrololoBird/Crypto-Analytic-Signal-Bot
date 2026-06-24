@@ -6,7 +6,6 @@ import math
 from hunt_core.scanner.detect.factor_registry_loader import (
     factor_status,
     load_factor_registry,
-    production_factors,
     quarantine_factors,
 )
 

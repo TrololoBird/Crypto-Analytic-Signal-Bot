@@ -6,7 +6,7 @@ expansion scenario's own geometry — it is *not* the Verdict trade plan.
 """
 from __future__ import annotations
 
-from hunt_core._dev.expansion_lab._util import opt_float, safe_float
+from hunt_core._dev.expansion_lab._util import opt_float
 from hunt_core._dev.expansion_lab.types import BlockContext, ExpansionExecution
 
 

@@ -679,7 +679,6 @@ def main() -> int:
         issues.append("detect_cex_dump triple-gate fixture must fire short")
 
     import inspect
-    from hunt_core.scanner.gate import policy as gate_policy
     from hunt_core.scanner.gate._policy_decl import _decl_check_ev_delivery as _ev_decl
     from hunt_core.scanner.setups import catalog as setup_catalog
 
@@ -889,7 +888,7 @@ def main() -> int:
     if 'setup.get("dump_score") or setup.get("long_score")' in eval_src:
         issues.append("evaluate_delivery must not use cross-direction score for family_vote")
 
-    from hunt_core.deep.signal import btc_market_context, resolve_trade_direction
+    from hunt_core.deep.signal import resolve_trade_direction
     from hunt_core.data.universe import is_pinned_symbol as _pin_shim  # noqa: F401
 
     dir_row = {
@@ -1181,7 +1180,7 @@ def main() -> int:
     if hunt_skip_reason("distribution", "short") is not None:
         issues.append("distribution short must not be hunt-skipped")
 
-    from hunt_core.scanner.detect.phase import PRE_DUMP, PRE_PUMP, MID
+    from hunt_core.scanner.detect.phase import PRE_DUMP, MID
     from hunt_core.scanner.gate._mission import mission_delivery_block
     from hunt_core.scanner.gate._lifecycle import fusion_lifecycle_flags, fusion_lifecycle_dict
 

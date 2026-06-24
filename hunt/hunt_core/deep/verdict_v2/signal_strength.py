@@ -60,7 +60,6 @@ def apply_reconcile_to_strength(
     strength: SignalStrength,
     reconcile: "ReconciliationResult",
 ) -> SignalStrength:
-    from hunt_core.deep.verdict_v2.reconcile import ReconciliationResult
 
     if reconcile.level == "coherent" or reconcile.strength_multiplier >= 1.0:
         return strength

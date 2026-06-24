@@ -14,7 +14,7 @@ from hunt_core._dev.expansion_lab._util import clamp01
 from hunt_core._dev.expansion_lab.config import ExpansionConfig, load_expansion_config
 from hunt_core._dev.expansion_lab.ranking.opportunity_score import compute_opportunity_score
 from hunt_core._dev.expansion_lab.rotation.engine import compute_rotation_scores
-from hunt_core._dev.expansion_lab.types import ExpansionOpportunity, MetaScores
+from hunt_core._dev.expansion_lab.types import ExpansionOpportunity
 
 
 def _opportunity_from(item: Any, cfg: ExpansionConfig) -> ExpansionOpportunity | None:

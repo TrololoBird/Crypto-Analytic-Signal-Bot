@@ -1,8 +1,6 @@
 """Strategy-neutral forecasting / levels / conviction toolkit."""
 from __future__ import annotations
 
-from typing import Any
-
 from hunt_core.shared.primitives.prokol import detect_prokol
 from hunt_core.shared.primitives.targets import collect_downward_targets, collect_upward_targets
 

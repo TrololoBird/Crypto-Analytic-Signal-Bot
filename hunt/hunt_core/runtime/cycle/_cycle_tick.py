@@ -79,7 +79,7 @@ from hunt_core.track.tracker import (
     symbol_loss_streak_cooldown,
     symbol_repeat_loser_blocked,
 )
-from hunt_core.runtime.tick_assembly import hot_tick_symbol, snapshot_symbol
+from hunt_core.runtime.tick_assembly import snapshot_symbol
 from hunt_core.data.lake import FeatureLakeWriter
 
 
@@ -130,7 +130,6 @@ async def run_tick(
     feature_lake: FeatureLakeWriter | None = None,
     tier_by_symbol: dict[str, SnapshotTier] | None = None,
     snapshot_parallel: int | None = None,
-    hot_path: bool = False,
 ) -> list[dict[str, Any]]:
     from hunt_core.runtime.cycle import _impl as _tick_impl
 
@@ -141,7 +140,6 @@ async def run_tick(
     _overlay_ws_tickers = _tick_impl._overlay_ws_tickers
     _refresh_live_price = _tick_impl._refresh_live_price
     HUNT_SNAPSHOT_PARALLEL = _tick_impl.HUNT_SNAPSHOT_PARALLEL
-    _HOT_TICK_TIMEOUT_S = _tick_impl._HOT_TICK_TIMEOUT_S
     HUNT_SNIPER_MODE = _tick_impl.HUNT_SNIPER_MODE
     HUNT_SNIPER_LIVE_PHASES = _tick_impl.HUNT_SNIPER_LIVE_PHASES
     HUNT_SNIPER_TOP_LS_MAX = _tick_impl.HUNT_SNIPER_TOP_LS_MAX
@@ -221,71 +219,43 @@ async def run_tick(
                 lifecycle_bias=last_bias.get(sym),
             )
             try:
-                snap_timeout = _HOT_TICK_TIMEOUT_S if hot_path else SYMBOL_TICK_TIMEOUT_S
-                if hot_path:
-                    row = await asyncio.wait_for(
-                        hot_tick_symbol(
-                            client,
-                            settings,
-                            minimums,
-                            sym,
-                            watch_mode=mode,
-                            prev_oi=prev_oi.get(sym),
-                            premium_all=premium_all,
-                            funding_info_all=funding_info_all,
-                            btc_work_1h=btc_work_1h,
-                            btc_work_1m=btc_work_1m,
-                            exchange_by_sym=exchange_by_sym,
-                            ticker_by_sym=ticker_by_sym,
-                            ws_feed=ws_feed,
-                            spot_companion=spot_companion,
-                            pump_stats=(
-                                pump_stats_by_sym.get(sym) if pump_stats_by_sym else None
-                            ),
-                            symbol_state=symbol_state,
+                row = await asyncio.wait_for(
+                    snapshot_symbol(
+                        client,
+                        settings,
+                        minimums,
+                        sym,
+                        watch_mode=mode,
+                        prev_oi=prev_oi.get(sym),
+                        premium_all=premium_all,
+                        funding_info_all=funding_info_all,
+                        btc_work_1h=btc_work_1h,
+                        btc_work_1m=btc_work_1m,
+                        exchange_by_sym=exchange_by_sym,
+                        ticker_by_sym=ticker_by_sym,
+                        ws_feed=ws_feed,
+                        spot_companion=spot_companion,
+                        pump_stats=(
+                            pump_stats_by_sym.get(sym) if pump_stats_by_sym else None
                         ),
-                        timeout=snap_timeout,
-                    )
-                else:
-                    row = await asyncio.wait_for(
-                        snapshot_symbol(
-                            client,
-                            settings,
-                            minimums,
-                            sym,
-                            watch_mode=mode,
-                            prev_oi=prev_oi.get(sym),
-                            premium_all=premium_all,
-                            funding_info_all=funding_info_all,
-                            btc_work_1h=btc_work_1h,
-                            btc_work_1m=btc_work_1m,
-                            exchange_by_sym=exchange_by_sym,
-                            ticker_by_sym=ticker_by_sym,
-                            ws_feed=ws_feed,
-                            spot_companion=spot_companion,
-                            pump_stats=(
-                                pump_stats_by_sym.get(sym) if pump_stats_by_sym else None
-                            ),
-                            tier=sym_tier,
-                            symbol_state=symbol_state,
-                        ),
-                        timeout=snap_timeout,
-                    )
+                        tier=sym_tier,
+                        symbol_state=symbol_state,
+                    ),
+                    timeout=SYMBOL_TICK_TIMEOUT_S,
+                )
                 return sym, row
             except TimeoutError:
                 LOG.warning(
                     "watch_symbol_timeout",
                     symbol=sym,
-                    timeout_s=snap_timeout,
-                    hot_path=hot_path,
+                    timeout_s=SYMBOL_TICK_TIMEOUT_S,
                 )
                 return sym, {
                     "ts": now.isoformat(),
                     "symbol": sym,
                     "error": "symbol_tick_timeout",
-                    "tick_path": "hot_error" if hot_path else "rest_error",
+                    "tick_path": "rest_error",
                     "snapshot_tier": tier,
-                    "hot_tick_no_rest": hot_path,
                 }
             except defensive_exc_types(asyncio.IncompleteReadError) as exc:
                 LOG.warning("dump_symbol_failed", symbol=sym, error=repr(exc))
@@ -293,9 +263,8 @@ async def run_tick(
                     "ts": now.isoformat(),
                     "symbol": sym,
                     "error": repr(exc),
-                    "tick_path": "hot_error" if hot_path else "rest_error",
+                    "tick_path": "rest_error",
                     "snapshot_tier": tier,
-                    "hot_tick_no_rest": hot_path,
                 }
 
         sem = asyncio.Semaphore(parallel)
@@ -307,7 +276,7 @@ async def run_tick(
         snap_pairs = await asyncio.gather(*[_bounded_snapshot(s) for s in ordered])
         row_by_sym = dict(snap_pairs)
         snap_elapsed = round(time.monotonic() - tick_started, 2)
-        if len(ordered) > 1 or hot_path:
+        if len(ordered) > 1:
             full_n = sum(1 for s in ordered if _tier_for(s) == "full")
             LOG.info(
                 "watch_snapshot_batch",
@@ -315,7 +284,6 @@ async def run_tick(
                 parallel=parallel,
                 elapsed_s=snap_elapsed,
                 tier=tier,
-                hot_path=hot_path,
                 full_symbols=full_n,
                 fast_symbols=len(ordered) - full_n,
                 used_weight_1m=client.used_weight_1m(),  # Binance IP budget; cap 2400/min
@@ -424,15 +392,14 @@ async def run_tick(
                         ),
                     ),
                 )
-                if not hot_path:
-                    prev_path = get_frame_cache().get_last_tick_path(symbol)
-                    if prev_path in {
-                        "hot_ws",
-                        "hot_delta",
-                        "hot_bootstrap",
-                        "hot_carry",
-                    }:
-                        pass  # hot→full path unified under fusion delivery
+                prev_path = get_frame_cache().get_last_tick_path(symbol)
+                if prev_path in {
+                    "hot_ws",
+                    "hot_delta",
+                    "hot_bootstrap",
+                    "hot_carry",
+                }:
+                    pass  # hot→full path unified under fusion delivery
                 get_frame_cache().set_last_tick_path(
                     symbol, str(row.get("tick_path") or "")
                 )
@@ -485,10 +452,14 @@ async def run_tick(
                     short_phase=dump.get("phase") or "—",
                     short_confirmed=bool(dump.get("confirmed")),
                     short_gate=_tick_gate(dump),
+                    short_magnitude=dump.get("magnitude") if isinstance(dump, dict) else None,
+                    short_gate_threshold=dump.get("gate_threshold") if isinstance(dump, dict) else None,
                     long_score=_tick_conviction(long_setup),
                     long_phase=long_setup.get("phase") or "—",
                     long_confirmed=bool(long_setup.get("confirmed")),
                     long_gate=_tick_gate(long_setup),
+                    long_magnitude=long_setup.get("magnitude") if isinstance(long_setup, dict) else None,
+                    long_gate_threshold=long_setup.get("gate_threshold") if isinstance(long_setup, dict) else None,
                     data_missing=(row.get("data_quality") or {}).get("fields_missing") or [],
                 )
                 skip_short = dump.get("hunt_skipped") or (
@@ -716,7 +687,6 @@ async def run_tick(
                             continue
                         gate, delivery_tier = _evaluate_delivery_row(
                             row,
-                            hot_path=hot_path,
                             direction=ndir,
                             setup=nsetup,
                             lifecycle=lc_dict,
@@ -973,7 +943,6 @@ async def run_tick(
                                 continue
                             armed_gate, armed_tier = _evaluate_delivery_row(
                                 row,
-                                hot_path=hot_path,
                                 direction=direction,
                                 setup=setup,
                                 lifecycle=lifecycle_raw
@@ -1132,7 +1101,6 @@ async def run_tick(
                         if confirmed_setup:
                             confirm_gate, confirm_tier = _evaluate_delivery_row(
                                 row,
-                                hot_path=hot_path,
                                 direction=direction,
                                 setup=setup,
                                 lifecycle=lifecycle_raw
@@ -1324,10 +1292,8 @@ async def run_tick(
                             )
                             continue
                         # Confirm delivery always passes full lane on live price
-                        # (HOME-USDT 2026-06-18: hot lane bypassed family_vote / RR).
                         gate, delivery_tier = _evaluate_delivery_row(
                             row,
-                            hot_path=False,
                             direction=direction,
                             setup=setup,
                             lifecycle=lifecycle_raw
