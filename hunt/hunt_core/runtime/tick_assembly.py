@@ -1074,12 +1074,6 @@ async def snapshot_symbol(
         long_setup["bars_1h"] = bars_1h
         result["dump"] = dump
         result["long"] = long_setup
-        try:
-            from hunt_core.analysis.manipulation_fusion import stamp_fusion_on_row
-
-            stamp_fusion_on_row(result)
-        except Exception as exc:
-            LOG.debug("manipulation_fusion_stamp_skipped | symbol=%s error=%s", symbol, exc)
         if side in {"long", "short"}:
             from hunt_core.track.outcome_ledger import maybe_append_candidate_ledger
 
