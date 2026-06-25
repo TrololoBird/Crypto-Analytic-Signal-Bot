@@ -15,10 +15,16 @@ from hunt_core.deep.verdict_v2.types import (
 )
 
 
+_BASELINE_TREND = 0.45
+_BASELINE_MEAN_REVERSION = 0.35
+_BASELINE_LIQUIDITY = 0.30
+_BASELINE_DISTRIBUTION = 0.32
+
+
 def _gen_trend(row: dict[str, Any], topo: HorizonTopology, mat: MaturityFeatures) -> PatternCandidate:
     structure = row.get("structure") if isinstance(row.get("structure"), dict) else {}
     bias = str(structure.get("structure_bias") or "wait")
-    score = 0.45
+    score = _BASELINE_TREND
     direction: str = "neutral"
     evidence: list[str] = []
     if topo.kind == "aligned_trend":
@@ -50,7 +56,7 @@ def _gen_mean_reversion(row: dict[str, Any], topo: HorizonTopology) -> PatternCa
     regime = row.get("regime") if isinstance(row.get("regime"), dict) else {}
     price = safe_float(row.get("price"))
     poc = safe_float(regime.get("poc_1h"))
-    score = 0.35
+    score = _BASELINE_MEAN_REVERSION
     direction: str = "neutral"
     evidence: list[str] = []
     if topo.kind == "compression":
@@ -69,7 +75,7 @@ def _gen_liquidity(row: dict[str, Any]) -> PatternCandidate:
     market = row.get("market") if isinstance(row.get("market"), dict) else {}
     mps = safe_float(market.get("liq_magnet_pull_short_pct"))
     mpl = safe_float(market.get("liq_magnet_pull_long_pct"))
-    score = 0.3
+    score = _BASELINE_LIQUIDITY
     direction: str = "neutral"
     evidence: list[str] = []
     if mps > mpl and mps > 0.5:
@@ -88,18 +94,35 @@ def _gen_liquidity(row: dict[str, Any]) -> PatternCandidate:
 
 
 def _gen_distribution(row: dict[str, Any], ctx: str) -> PatternCandidate:
+    structure = row.get("structure") if isinstance(row.get("structure"), dict) else {}
     market = row.get("market") if isinstance(row.get("market"), dict) else {}
     fz = safe_float(market.get("funding_zscore_48h"))
-    score = 0.32
-    direction: str = "short"
+    score = _BASELINE_DISTRIBUTION
+    direction: str = "neutral"
     evidence: list[str] = []
+    bias = str(structure.get("structure_bias") or "")
     if ctx == "bull_distribution":
         score += 0.22
+        direction = "short"
         evidence.append("bull_distribution_ctx")
+    elif ctx == "bear_accumulation":
+        score += 0.22
+        direction = "long"
+        evidence.append("bear_accumulation_ctx")
     if fz > 1.0:
         score += 0.15
+        if direction == "neutral":
+            direction = "short"
         evidence.append("crowded_funding")
-    return PatternCandidate(id="distribution", raw_score=clamp01(score), direction_hint=direction, evidence=evidence)  # type: ignore[arg-type]
+    elif fz < -1.0:
+        score += 0.15
+        if direction == "neutral":
+            direction = "long"
+        evidence.append("depressed_funding")
+    if direction == "neutral" and bias in {"long", "short"}:
+        direction = "short" if bias == "long" else "long"
+    pid = "distribution" if direction == "short" else "accumulation"
+    return PatternCandidate(id=pid, raw_score=clamp01(score), direction_hint=direction, evidence=evidence)  # type: ignore[arg-type]
 
 
 _PATTERN_EQUIV: dict[str, frozenset[str]] = {

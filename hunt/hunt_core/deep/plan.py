@@ -11,6 +11,12 @@ _LOG = structlog.get_logger(__name__)
 
 _MAX_RR = 10.0
 _MIN_RR = 0.3
+_ZONE_MAX_WIDTH_ATR_MULT = 1.8
+_ZONE_MAX_WIDTH_PRICE_PCT = 0.018
+_SL_ATR_BUFFER = 1.2
+_SL_ZONE_WIDTH_FACTOR = 0.5
+_TP_FALLBACK_ATR_BASE = 1.5
+_ENTRY_PAD_K = 0.35
 PlanDirection = Literal["long", "short"]
 
 
@@ -23,8 +29,9 @@ def _rr(entry: float, target: float, stop: float, direction: str) -> float:
 
 
 def _worst_zone_edge(zone: tuple[float, float], direction: str) -> float:
+    """Worst-case entry edge: long buys at top (hi), short sells at bottom (lo)."""
     lo, hi = zone
-    return lo if direction == "long" else hi
+    return hi if direction == "long" else lo
 
 
 def _zone_midpoint(zone: tuple[float, float]) -> float:
@@ -63,7 +70,7 @@ def _clamp_entry_zone_to_targets(
     if ez_lo >= ez_hi:
         return ez_lo, ez_hi
     ref = price_hint if price_hint > 0 else _zone_midpoint((ez_lo, ez_hi))
-    max_width = max(atr * 1.8, ref * 0.018)
+    max_width = max(atr * _ZONE_MAX_WIDTH_ATR_MULT, ref * _ZONE_MAX_WIDTH_PRICE_PCT)
     if ez_hi - ez_lo > max_width:
         if direction == "long":
             ez_hi = ez_lo + max_width
@@ -74,11 +81,11 @@ def _clamp_entry_zone_to_targets(
         if direction == "long" and tp1 > 0 and ez_hi >= tp1:
             ez_hi = min(ez_hi, tp1 * 0.998)
             if ez_hi <= ez_lo:
-                ez_hi = ez_lo + min(max_width, max(atr * 0.35, ref * 0.001))
+                ez_hi = ez_lo + min(max_width, max(atr * _ENTRY_PAD_K, ref * 0.001))
         elif direction == "short" and tp1 > 0 and ez_lo <= tp1:
             ez_lo = max(ez_lo, tp1 * 1.002)
             if ez_lo >= ez_hi:
-                ez_lo = ez_hi - min(max_width, max(atr * 0.35, ref * 0.001))
+                ez_lo = ez_hi - min(max_width, max(atr * _ENTRY_PAD_K, ref * 0.001))
     return round(ez_lo, 6), round(ez_hi, 6)
 
 
@@ -98,10 +105,10 @@ def finalize_plan_geometry(
     sl = float(p.get("stop_loss") or p.get("stop") or 0.0)
 
     if direction == "long" and sl >= ez_lo and ez_lo > 0:
-        sl = ez_lo - max(atr * 1.2, abs(ez_hi - ez_lo) * 0.5)
+        sl = ez_lo - max(atr * _SL_ATR_BUFFER, abs(ez_hi - ez_lo) * _SL_ZONE_WIDTH_FACTOR)
         p["stop_loss"] = round(sl, 6)
     elif direction == "short" and sl <= ez_hi and ez_hi > 0:
-        sl = ez_hi + max(atr * 1.2, abs(ez_hi - ez_lo) * 0.5)
+        sl = ez_hi + max(atr * _SL_ATR_BUFFER, abs(ez_hi - ez_lo) * _SL_ZONE_WIDTH_FACTOR)
         p["stop_loss"] = round(sl, 6)
 
     tps_raw = [p.get("tp1"), p.get("tp2"), p.get("tp3")]
@@ -124,7 +131,7 @@ def finalize_plan_geometry(
         tps = sorted(tps, reverse=True)
 
     while len(tps) < 3:
-        mult = (len(tps) + 2) * 1.5
+        mult = (len(tps) + 2) * _TP_FALLBACK_ATR_BASE
         if direction == "long":
             tps.append(entry_ref_mid + atr * mult)
         else:
@@ -133,7 +140,7 @@ def finalize_plan_geometry(
     for i, tp in enumerate(tps):
         rr = _rr(entry_ref_mid, tp, sl, direction)
         if rr < _MIN_RR or rr > _MAX_RR:
-            mult = (i + 2) * 1.5
+            mult = (i + 2) * _TP_FALLBACK_ATR_BASE
             tps[i] = (entry_ref_mid + atr * mult) if direction == "long" else (entry_ref_mid - atr * mult)
 
     if direction == "long":
@@ -145,7 +152,7 @@ def finalize_plan_geometry(
     for i, tp in enumerate(tps):
         rr = _rr(entry_ref_mid, tp, sl, direction)
         if rr < prev_rr:
-            mult = (i + 2) * 1.5
+            mult = (i + 2) * _TP_FALLBACK_ATR_BASE
             tps[i] = (entry_ref_mid + atr * mult) if direction == "long" else (entry_ref_mid - atr * mult)
         prev_rr = max(prev_rr, _rr(entry_ref_mid, tps[i], sl, direction))
 
@@ -162,7 +169,7 @@ def finalize_plan_geometry(
     _replaced = False
     for i, tp in enumerate(tps):
         if _rr(entry_ref_mid, tp, sl, direction) < _MIN_RR:
-            mult = (i + 2) * 1.5
+            mult = (i + 2) * _TP_FALLBACK_ATR_BASE
             tps[i] = (entry_ref_mid + atr * mult) if direction == "long" else (entry_ref_mid - atr * mult)
             _replaced = True
     if _replaced:
@@ -193,20 +200,10 @@ def finalize_plan_geometry(
     return p
 
 
-def validate_plan_geometry(
-    plan: dict[str, Any],
-    *,
-    direction: str,
-    atr: float,
-) -> dict[str, Any]:
-    """Alias — prefer ``finalize_plan_geometry``."""
-    return finalize_plan_geometry(plan, direction=direction, atr=atr)  # type: ignore[arg-type]
-
-
 def build_trade_plan(row: dict[str, Any], *, side: str, price: float, atr: float) -> dict[str, Any]:
-    lo, hi = atr_pad(price, atr, k=0.35)
-    tgt_lo, tgt_hi = forecast_band(price, atr, side=side, k=1.5)
-    stop = price - atr * 1.2 if side == "long" else price + atr * 1.2
+    lo, hi = atr_pad(price, atr, k=_ENTRY_PAD_K)
+    tgt_lo, tgt_hi = forecast_band(price, atr, side=side, k=_TP_FALLBACK_ATR_BASE)
+    stop = price - atr * _SL_ATR_BUFFER if side == "long" else price + atr * _SL_ATR_BUFFER
     plan = {
         "entry_zone": [round(lo, 6), round(hi, 6)],
         "stop_loss": round(stop, 6),
@@ -217,4 +214,4 @@ def build_trade_plan(row: dict[str, Any], *, side: str, price: float, atr: float
     return finalize_plan_geometry(plan, direction=side, atr=atr)  # type: ignore[arg-type]
 
 
-__all__ = ["build_trade_plan", "finalize_plan_geometry", "plan_geometry_valid", "validate_plan_geometry"]
+__all__ = ["build_trade_plan", "finalize_plan_geometry", "plan_geometry_valid"]

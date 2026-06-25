@@ -170,7 +170,7 @@ def build_detection(
     signal_type = "none"
     is_pre = phase_info.phase in {"pre_pump", "pre_dump", "coil"}
     if is_pre and ctx and fusion.side in {"long", "short"}:
-        energy_hits = len(prep_tags) if prep_ready else 0
+        energy_hits = len(prep_tags)
         # structure_score uses raw book imbalance (independent of fusion z_dir)
         market_ctx = ctx.get("market") if isinstance(ctx.get("market"), dict) else {}
         book_imb = float(

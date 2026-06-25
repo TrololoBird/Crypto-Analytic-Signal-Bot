@@ -2080,8 +2080,18 @@ def top_depth_walls(
     return ranked[: max(1, int(top_n))]
 
 
-def normalize_depth_levels(raw: Any) -> list[tuple[float, float]]:
-    """Accept ccxt [[p,q],…] or list of {price, qty} dicts."""
+def normalize_depth_levels(
+    raw: Any,
+    *,
+    side: str = "",
+) -> list[tuple[float, float]]:
+    """Accept ccxt [[p,q],…] or list of {price, qty} dicts.
+
+    When *side* is ``"bid"`` the result is sorted price-descending (best
+    bid first).  When ``"ask"`` — price-ascending (best ask first).
+    Without *side* the original order is preserved (CCXT default is
+    already correct).
+    """
     if not isinstance(raw, list):
         return []
     out: list[tuple[float, float]] = []
@@ -2093,6 +2103,10 @@ def normalize_depth_levels(raw: Any) -> list[tuple[float, float]]:
             q = item.get("qty")
             if p is not None and q is not None:
                 out.append((float(p), float(q)))
+    if side == "bid":
+        out.sort(key=lambda x: x[0], reverse=True)
+    elif side == "ask":
+        out.sort(key=lambda x: x[0])
     return out
 
 
@@ -2102,7 +2116,12 @@ def depth_snapshot_from_book(
     *,
     top_n: int = _TOP_BOOK_WALL_LEVELS,
 ) -> dict[str, Any]:
-    """Build hunt depth snapshot with ranked walls."""
+    """Build hunt depth snapshot with ranked walls.
+
+    Best bid/ask are derived from price-sorted data (bid descending, ask
+    ascending) — independent of the notional-ranked ``top_depth_walls``
+    output used for wall display.
+    """
     if not bids or not asks:
         return {
             "bid_price": None,
@@ -2112,9 +2131,11 @@ def depth_snapshot_from_book(
             "bid_levels": [],
             "ask_levels": [],
         }
+    best_bid = max(p for p, _q in bids)
+    best_ask = min(p for p, _q in asks)
     return {
-        "bid_price": float(bids[0][0]),
-        "ask_price": float(asks[0][0]),
+        "bid_price": best_bid,
+        "ask_price": best_ask,
         "bid_qty": round(sum(q for _p, q in bids), 4),
         "ask_qty": round(sum(q for _p, q in asks), 4),
         "bid_levels": top_depth_walls(bids, top_n=top_n),

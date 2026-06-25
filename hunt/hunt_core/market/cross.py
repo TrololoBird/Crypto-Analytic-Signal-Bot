@@ -332,9 +332,6 @@ async def refresh_cross_exchange_cache(
 
 
 
-
-LOG = logging.getLogger("hunt_core.market.cross")
-
 _PRIMARY = "binance"
 
 

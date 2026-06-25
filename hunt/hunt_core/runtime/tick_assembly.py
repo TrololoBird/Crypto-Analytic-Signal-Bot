@@ -170,13 +170,6 @@ def _update_rolling_quote_vol_baseline(
             market["quote_vol_baseline"] = round(baseline, 4)
 
 
-# Backward-compat re-exports
-kline_limits = kline_limits
-safe_fetch = safe_fetch
-squeeze_watch = squeeze_watch
-format_squeeze_telegram = format_squeeze_telegram
-
-
 def _patch_market_live(
     market: dict[str, Any],
     *,

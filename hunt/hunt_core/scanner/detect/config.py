@@ -20,12 +20,12 @@ class FusionParams:
 
     min_n: int = 30
     lookback: int = 120
-    q_gate: float = 0.92
+    q_gate: float = 0.75
     q_phase: float = 0.85
     min_active_factors: int = 2
     # Gate: effective threshold = max(symbol quantile, global_gate_floor).
-    global_gate_floor: float = 0.55
-    abs_magnitude_floor: float = 0.5
+    global_gate_floor: float = 0.25
+    abs_magnitude_floor: float = 0.15
     vol_floor_pct: float = 0.15
     fusion_score_scale: float = 25.0
     # CUSUM (standardized returns): k slack in σ; span for EWM anchor.
@@ -37,7 +37,7 @@ class FusionParams:
     # Funding is step-wise; needs longer history than generic min_n.
     funding_min_n: int = 48
     # Pre-phase gate constants (per-symbol quantile calibration TBD).
-    pre_gate_min_energy: int = 3
+    pre_gate_min_energy: int = 1
     pre_gate_min_structure: float = 0.18
     pre_gate_min_magnitude: float = 0.15
     # MAD scale floor + robust-z clip (winsorization).

@@ -9,8 +9,8 @@ from hunt_core.shared.primitives.targets import (
     collect_upward_targets as _collect_upward_targets,
 )
 
-_STOP_BUFFER_ATR = 0.35
-_CATALYST_BUFFER_ATR = 0.25
+_STOP_BUFFER_ATR = 0.12
+_CATALYST_BUFFER_ATR = 0.10
 
 
 def _structure(row: dict[str, Any]) -> dict[str, Any]:
@@ -211,6 +211,12 @@ def entry_zone(row: dict[str, Any], direction: str, pad_atr: float) -> tuple[tup
     hi = round(max(anchor, price) + pad * 0.5, 6)
     if lo >= hi:
         lo, hi = round(price, 6), round(price + pad, 6)
+    # Guard: for short, entry zone must stay above local support — don't enter below support.
+    local_support = levels.get("support") or levels.get("pool_below") or 0.0
+    if local_support > 0 and lo < local_support:
+        lo = round(local_support * 1.0005, 6)
+        if lo >= hi:
+            hi = round(lo + pad * 0.5, 6)
     return (lo, hi), "struct_rally_zone"
 
 

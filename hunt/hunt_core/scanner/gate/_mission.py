@@ -102,15 +102,15 @@ def assess_preparation_readiness(
 
     energy_hits = 0
     oi_z = float(market.get("oi_z") or market.get("map_oi_z") or 0)
-    if oi_z >= 0.8:
+    if oi_z >= 0.4:
         energy_hits += 1
         reasons.append("oi_build")
     acc = float(market.get("map_accumulation_score") or market.get("map_vp_accumulation") or 0)
-    if acc >= 0.45:
+    if acc >= 0.25:
         energy_hits += 1
         reasons.append("vol_coil")
-    imb = abs(float(market.get("depth_imbalance") or market.get("map_book_imbalance_1pct") or 0))
-    if imb >= 0.12:
+    imb = abs(float(market.get("depth_imbalance") or market.get("map_book_imbalance_1pct") or market.get("ws_depth_imbalance") or 0))
+    if imb >= 0.06:
         energy_hits += 1
         reasons.append("flow_imbalance")
     if int(market.get("map_absorption_count") or 0) >= 1 or int(market.get("map_sticky_wall_count") or 0) >= 1:

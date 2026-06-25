@@ -18,6 +18,7 @@ class SignalGates:
     trade_quality_min: float = 0.45
     rr_primary_min: float = 0.75
     data_coverage_min: float = 0.50
+    catalyst_min: float = 0.35
     require_timing_c: bool = True
 
 
@@ -188,6 +189,9 @@ def load_verdict_v2_config() -> VerdictV2Config:
         rr_primary_min=float(os.getenv("HUNT_V2_RR_PRIMARY_MIN", gates_t.get("rr_primary_min", 0.75)) or 0.75),
         data_coverage_min=float(
             os.getenv("HUNT_V2_DATA_COVERAGE_MIN", gates_t.get("data_coverage_min", 0.50)) or 0.50
+        ),
+        catalyst_min=float(
+            os.getenv("HUNT_V2_CATALYST_MIN", gates_t.get("catalyst_min", 0.35)) or 0.35
         ),
         require_timing_c=bool(gates_t.get("require_timing_c", True)),
     )

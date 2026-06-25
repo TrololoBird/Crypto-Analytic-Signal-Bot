@@ -213,14 +213,8 @@ def _phase_human(phase: str) -> str:
 
 
 def _pct_str(a: float, b: float, direction: str) -> str:
-    """Percentage distance from entry to target."""
-    if a <= 0 or b <= 0:
-        return ""
-    if direction == "short":
-        pct = (a - b) / a * 100.0
-    else:
-        pct = (b - a) / a * 100.0
-    return f"+{pct:.1f}%"
+    from hunt_core.deliver._math import pct_str
+    return pct_str(a, b, direction)
 
 
 def _reason_human(setup: dict[str, Any], *, direction: str, lc_phase: str) -> str:

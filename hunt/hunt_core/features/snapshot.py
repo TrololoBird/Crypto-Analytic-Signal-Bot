@@ -153,11 +153,10 @@ def session_stats(work_1m: Any, *, bars: int = 1440) -> dict[str, Any]:
     lows = [float(x) for x in work_1m["low"].to_list()[-n:]]
     closes = [float(x) for x in work_1m["close"].to_list()[-n:]]
     hi, lo, last = max(highs), min(lows), closes[-1]
-    (hi + lo) / 2.0 if hi > lo else last
     return {
         "high_24h": round(hi, 6),
         "low_24h": round(lo, 6),
-        "range_pct_24h": round((hi / lo - 1) * 100, 2) if lo else None,
+        "range_pct_24h": round((hi / lo - 1) * 100, 2) if lo > 0 else None,
         "pos_in_range": round((last - lo) / (hi - lo), 3) if hi > lo else 0.5,
         "bars_1m_used": n,
     }
@@ -1273,31 +1272,3 @@ def format_squeeze_telegram(row: dict[str, Any]) -> str:
     return _fmt(row)
 
 
-_distribution_stats = distribution_stats
-
-# P2 split legacy aliases
-_apply_cross_exchange_flat = apply_cross_exchange_flat
-_apply_rest_enrichments_local = apply_rest_enrichments_local
-_attach_pp_flags = attach_pp_flags
-_attach_research_setup_fields = attach_research_setup_fields
-_btc_beta_1h = btc_beta_1h
-_btc_corr_1h = btc_corr_1h
-_col = col
-_data_quality_report = data_quality_report
-_distribution_stats = distribution_stats
-_enrich_work_research_frames = enrich_work_research_frames
-_format_squeeze_telegram = format_squeeze_telegram
-_impulse_context = impulse_context
-_kline_integrity_reject = kline_integrity_reject
-_kline_limits = kline_limits
-_lite_prepared = lite_prepared
-_market_snapshot = market_snapshot
-_merge_research_tf_fields = merge_research_tf_fields
-_merge_ws_kline_closed = merge_ws_kline_closed
-_regime_snapshot = regime_snapshot
-_rsi14_from_ohlc = rsi14_from_ohlc
-_session_stats = session_stats
-_squeeze_watch = squeeze_watch
-_tf_snapshot = tf_snapshot
-_tf_snapshot_for_symbol = tf_snapshot_for_symbol
-_tf_snapshot_lite = tf_snapshot_lite

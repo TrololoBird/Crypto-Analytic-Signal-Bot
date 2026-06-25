@@ -99,6 +99,12 @@ def _ru_catalyst(label: str) -> str:
     return _CATALYST_RU.get(label.strip(), label.strip())
 
 
+def _rr_fmt(rr_mid: float, rr_worst: float, *, zone_wide: bool) -> str:
+    if zone_wide and rr_worst > 0 and abs(rr_mid - rr_worst) >= 0.15:
+        return f"{rr_worst:.1f}–{rr_mid:.1f}R"
+    return f"{rr_mid:.1f}R"
+
+
 def _px(v: float) -> str:
     if v >= 1000:
         return f"{v:,.2f}"
@@ -119,6 +125,10 @@ def _dedup_narrative(path_type: str, narrative: str) -> str:
     return narr
 
 
+_SOFT_NARRATIVE_STRENGTH_FLOOR = 0.52
+_FLOW_CONVICTION_MIN = 0.55
+
+
 def _gate_label(code: str) -> str:
     return _GATE_RU.get(code.lower(), code.replace("_", " "))
 
@@ -134,7 +144,7 @@ def _use_soft_narrative(
     """Weaken flow-heavy pattern words when there is no trade permission or flow proof."""
     if action == "WAIT":
         return True
-    if strength_label == "weak" or strength_score < 0.52:
+    if strength_label == "weak" or strength_score < _SOFT_NARRATIVE_STRENGTH_FLOOR:
         return True
     if pattern_id in _FLOW_HEAVY_PATTERNS and not flow_evidence:
         return True
@@ -145,7 +155,7 @@ def _flow_evidence_present(v2: ScenarioVerdict) -> bool:
     flow = v2.engine_outputs.get("flow") if isinstance(v2.engine_outputs, dict) else None
     if flow is None:
         return False
-    return bool(flow.evidence) and max(float(flow.long), float(flow.short)) >= 0.55
+    return bool(flow.evidence) and max(float(flow.long), float(flow.short)) >= _FLOW_CONVICTION_MIN
 
 
 def _hypothesis_header(action: str, gates_failed: tuple[str, ...] | list[str]) -> str:
@@ -209,32 +219,20 @@ def _gate_diagnostic_lines(
     return lines
 
 
-def _why_wait_lines(
-    gates_failed: tuple[str, ...] | list[str],
-    reconcile_caveats: tuple[str, ...] | list[str],
-) -> list[str]:
-    lines: list[str] = []
-    seen: set[str] = set()
-    for code in gates_failed:
-        label = _gate_label(str(code))
-        if label not in seen:
-            lines.append(f"• {label}")
-            seen.add(label)
-    for caveat in reconcile_caveats[:3]:
-        text = str(caveat).strip()
-        if text and text not in seen:
-            lines.append(f"• {text}")
-            seen.add(text)
-    return lines
+def format_pinned_signal(
+    row: dict[str, Any],
+    verdict: ScenarioVerdict | None = None,
+    *,
+    cfg: Any = None,
+) -> str:
+    from hunt_core.deep.verdict_v2.config import VerdictV2Config as _CfgType
 
-
-def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = None) -> str:
     v2 = verdict or row.get("verdict_v2")
-    # Defensive: a JSONL-roundtripped row carries verdict_v2 as a plain dict, which
-    # has no ``.signal_decision``. Callers should use the summary fallback; bail here
-    # rather than raising AttributeError mid-render.
     if not isinstance(v2, ScenarioVerdict):
         return ""
+    if cfg is None:
+        from hunt_core.deep.verdict_v2.config import load_verdict_v2_config
+        cfg = load_verdict_v2_config()
     sym = html.escape(str(row.get("symbol") or "").replace("USDT", "-USDT"))
     dec = v2.signal_decision
     path = v2.expected_path
@@ -247,9 +245,6 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
     action = dec.action.upper()
     action_ru = _ACTION_RU.get(action, action)
     emoji = {"LONG": "🟢", "SHORT": "🔴", "WAIT": "⏳"}.get(action, "⏳")
-    from hunt_core.deep.verdict_v2.config import load_verdict_v2_config
-
-    cfg = load_verdict_v2_config()
     pattern_id = v2.pattern_confidence.primary.id
     flow_ok = _flow_evidence_present(v2)
     soft_narr = _use_soft_narrative(
@@ -314,17 +309,13 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
         rr_cons2 = plan.rr_conservative_tp2
         rr_cons3 = plan.rr_conservative_tp3
         zone_wide = hi > 0 and lo > 0 and (hi - lo) / lo > 0.003
-        def _rr_fmt(rr_mid: float, rr_worst: float) -> str:
-            if zone_wide and rr_worst > 0 and abs(rr_mid - rr_worst) >= 0.15:
-                return f"{rr_worst:.1f}–{rr_mid:.1f}R"
-            return f"{rr_mid:.1f}R"
         lines.extend(
             [
                 f"Зона входа: <code>{_px(lo)}</code> – <code>{_px(hi)}</code> ({entry_type_ru})",
                 f"Stop-loss: <code>{_px(plan.stop_loss)}</code>",
-                f"TP1: <code>{_px(plan.take_profit_1)}</code> ({_rr_fmt(plan.rr_tp1, rr_cons1)} · {rr_label})",
-                f"TP2: <code>{_px(plan.take_profit_2)}</code> ({_rr_fmt(plan.rr_tp2, rr_cons2)})",
-                f"TP3: <code>{_px(plan.take_profit_3)}</code> ({_rr_fmt(plan.rr_tp3, rr_cons3)})",
+                f"TP1: <code>{_px(plan.take_profit_1)}</code> ({_rr_fmt(plan.rr_tp1, rr_cons1, zone_wide=zone_wide)} · {rr_label})",
+                f"TP2: <code>{_px(plan.take_profit_2)}</code> ({_rr_fmt(plan.rr_tp2, rr_cons2, zone_wide=zone_wide)})",
+                f"TP3: <code>{_px(plan.take_profit_3)}</code> ({_rr_fmt(plan.rr_tp3, rr_cons3, zone_wide=zone_wide)})",
             ]
         )
     elif plan and tq.verdict == "favorable":
@@ -367,24 +358,25 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
         "breakout": "пробой",
         "reversal": "разворот",
     }
-    if act and act != "idle" and _show_activation_block(action, tq.verdict):
-        act_ru = _ACT_RU.get(act, act.replace("_", " "))
-        lines.append(f"Активация: <b>{html.escape(act_ru)}</b>")
-
     # Plan activation is a directional-trade artifact — never on WAIT/poor rows.
     evt = summary.get("activation_event")
+    _has_plan_event = (
+        action in {"LONG", "SHORT"}
+        and isinstance(evt, dict)
+        and evt.get("event") == "plan_activated"
+    )
+    if act and act != "idle" and _show_activation_block(action, tq.verdict) and not _has_plan_event:
+        act_ru = _ACT_RU.get(act, act.replace("_", " "))
+        lines.append(f"Цена: <b>{html.escape(act_ru)}</b>")
     if action in {"LONG", "SHORT"} and isinstance(evt, dict) and evt.get("event") == "plan_activated":
         try:
             fill = float(evt.get("fill_reference") or 0)
         except (TypeError, ValueError):
             fill = 0.0
         if fill > 0:
-            rr_base = str(evt.get("rr_base_label") or "R:R (от входа)")
             lines.append(
-                f"✅ <b>План активирован</b> @ <code>{_px(fill)}</code> · "
-                f"TP1 {float(evt.get('rr_tp1') or 0):.1f}R · "
-                f"TP2 {float(evt.get('rr_tp2') or 0):.1f}R · "
-                f"TP3 {float(evt.get('rr_tp3') or 0):.1f}R · <i>{html.escape(rr_base)}</i>"
+                f"✅ <b>Вход рекомендован</b> @ <code>{_px(fill)}</code> · "
+                f"<i>TP1/SL указаны выше</i>"
             )
 
     # Alt scenario: show opposite-direction path as invalidation scenario
@@ -435,6 +427,5 @@ __all__ = [
     "_hypothesis_header",
     "_show_activation_block",
     "_use_soft_narrative",
-    "_why_wait_lines",
     "format_pinned_signal",
 ]

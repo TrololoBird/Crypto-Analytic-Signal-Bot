@@ -18,28 +18,145 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from hunt_core.errors import DEFENSIVE_EXC
 
-# ── Shared contract types/constants (single source of truth: engine.contract_base) ──
-from engine.contract_base import (
-    DEFAULT_MAX_RISK_REWARD,
-    DEFAULT_MIN_RISK_REWARD,
-    DEFAULT_SCALE_WEIGHTS,
-    RISK_REWARD_EPSILON,
-    SignalContractIssue,
-)
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
-# ── Shared contract functions (single source of truth: engine.contract) ──
-from engine.contract import (
-    default_ttl_bars,  # noqa: F401 — re-exported for hunt_core.domain.schemas
-    normalize_direction,
-    normalize_scale_weights,  # noqa: F401 — re-exported for hunt_core.domain.schemas
-    positive_float,
-    resolve_target_rr,  # noqa: F401 — re-exported for hunt_core.domain.schemas
-    valid_until_from,  # noqa: F401 — re-exported for hunt_core.domain.schemas
-)
+# ── Shared contract types/constants (inlined from engine.contract_base) ──
+
+DEFAULT_SCALE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
+DEFAULT_TARGET_RR: tuple[float, float, float] = (1.9, 3.0, 5.0)
+DEFAULT_MIN_RISK_REWARD = 1.9
+DEFAULT_MAX_RISK_REWARD = 10.0
+RISK_REWARD_EPSILON = 1e-9
+SIGNAL_ENTRY_PAD_ATR: float = 0.35
+
+TIMEFRAME_MINUTES: dict[str, int] = {
+    "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+    "1h": 60, "2h": 120, "4h": 240, "1d": 1440,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class SignalContractIssue:
+    field: str
+    reason: str
+    value: object = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {"field": self.field, "reason": self.reason, "value": self.value}
+
+
+# ── Shared contract functions (inlined from engine.contract) ──
+
+def _finite_float(value: object, default: float | None = None) -> float | None:
+    if value is None:
+        return default
+    try:
+        f = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(f):
+        return default
+    return f
+
+
+def positive_float(value: object, default: float | None = None) -> float | None:
+    numeric = _finite_float(value, default=None)
+    if numeric is None or numeric <= 0.0:
+        return default
+    return numeric
+
+
+def normalize_direction(direction: str) -> str | None:
+    value = str(direction or "").strip().lower()
+    if value in {"long", "buy", "bull", "bullish"}:
+        return "long"
+    if value in {"short", "sell", "bear", "bearish"}:
+        return "short"
+    return None
+
+
+def resolve_target_rr(settings: Any | None = None) -> tuple[float, float, float]:
+    if settings is None:
+        return DEFAULT_TARGET_RR
+    try:
+        raw = getattr(settings, "target_rr", None)
+        if raw is not None and len(raw) == 3:
+            return tuple(float(x) for x in raw)  # type: ignore[return-value]
+    except (TypeError, ValueError):
+        pass
+    return DEFAULT_TARGET_RR
+
+
+def _timeframe_minutes(timeframe: str | None) -> int:
+    raw = str(timeframe or "15m").lower().strip()
+    primary = raw.split("+", 1)[0].strip()
+    if primary in TIMEFRAME_MINUTES:
+        return TIMEFRAME_MINUTES[primary]
+    if primary.endswith("m"):
+        numeric = positive_float(primary[:-1])
+        return int(numeric) if numeric else 15
+    if primary.endswith("h"):
+        numeric = positive_float(primary[:-1])
+        return int(numeric * 60) if numeric else 60
+    return 15
+
+
+_SETUP_TTL_MINUTES: dict[str, int] = {}
+_SETUP_TTL_BARS: dict[str, int] = {}
+_FAMILY_TTL_BARS: dict[str, int] = {}
+
+
+def default_ttl_bars(setup_id: str, strategy_family: str, timeframe: str | None = None) -> int:
+    if setup_id in _SETUP_TTL_MINUTES:
+        tf_min = max(1, _timeframe_minutes(timeframe))
+        return max(1, min(96, round(_SETUP_TTL_MINUTES[setup_id] / tf_min)))
+    if setup_id in _SETUP_TTL_BARS:
+        return _SETUP_TTL_BARS[setup_id]
+    family = str(strategy_family or "").strip().lower()
+    if family in _FAMILY_TTL_BARS:
+        return _FAMILY_TTL_BARS[family]
+    minutes = _timeframe_minutes(timeframe)
+    if minutes <= 5:
+        return 24
+    if minutes >= 60:
+        return 8
+    return 24
+
+
+def valid_until_from(
+    *,
+    created_at: datetime | None,
+    setup_id: str,
+    strategy_family: str,
+    timeframe: str | None,
+    ttl_bars: int | None = None,
+) -> datetime:
+    anchor = created_at or datetime.now(UTC)
+    anchor = anchor.replace(tzinfo=UTC) if anchor.tzinfo is None else anchor.astimezone(UTC)
+    bars = int(ttl_bars) if ttl_bars is not None else default_ttl_bars(setup_id, strategy_family, timeframe)
+    bars = max(1, min(bars, 96))
+    return anchor + timedelta(minutes=_timeframe_minutes(timeframe) * bars)
+
+
+def normalize_scale_weights(
+    weights: tuple[float, float, float] | list[float] | None,
+) -> tuple[float, float, float]:
+    if not weights or len(weights) != 3:
+        return DEFAULT_SCALE_WEIGHTS
+    cleaned: list[float] = []
+    for value in weights:
+        numeric = _finite_float(value, default=0.0) or 0.0
+        cleaned.append(max(0.0, numeric))
+    total = sum(cleaned)
+    if total <= 0.0:
+        return DEFAULT_SCALE_WEIGHTS
+    normalized = tuple(round(value / total, 4) for value in cleaned)
+    drift = round(1.0 - sum(normalized), 4)
+    return (normalized[0] + drift, normalized[1], normalized[2])
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from datetime import datetime
 
 LOG = logging.getLogger("bot.contracts")
 
@@ -434,8 +551,8 @@ def outcome_from_row(row: dict[str, Any], *, source: str) -> OutcomeRecord:
         direction=row.get("direction", "short"),  # type: ignore[typeddict-item]
         lifecycle_phase=str(phase),
         fuel=row.get("fuel"),
-        entry_lo=float(row.get("entry_lo") or row.get("entry_lo", 0)),
-        entry_hi=float(row.get("entry_hi") or row.get("entry_hi", 0)),
+        entry_lo=float(row.get("entry_lo") or 0),
+        entry_hi=float(row.get("entry_hi") or 0),
         stop_loss=float(row.get("stop_loss") or 0),
         tp1=float(row.get("tp1") or 0),
         tp2=float(row.get("tp2") or 0),
@@ -972,7 +1089,9 @@ def build_setup_delivery_contract(
     lc = row.get("lifecycle") if isinstance(row.get("lifecycle"), dict) else {}
     fuel_key = "dump_fuel" if direction == "short" else "long_fuel"
     score_key = "dump_score" if direction == "short" else "long_score"
-    tp2 = setup.get("tp2") or setup.get("tp1")
+    tp1 = setup.get("tp1")
+    tp2 = setup.get("tp2") or tp1
+    tp3 = setup.get("tp3") or tp2
     return SetupDeliveryContract(
         symbol=str(row.get("symbol") or "").upper(),
         direction="short" if direction == "short" else "long",
@@ -982,9 +1101,9 @@ def build_setup_delivery_contract(
         entry_lo=entry_lo,
         entry_hi=entry_hi,
         stop_loss=float(setup.get("stop_loss") or 0),
-        tp1=float(setup.get("tp1") or 0),
+        tp1=float(tp1 or 0),
         tp2=float(tp2 or 0),
-        tp3=float(tp2 or 0),
+        tp3=float(tp3 or 0),
         invalidation_above=setup.get("invalidation_above"),
         invalidation_below=setup.get("invalidation_below"),
         fuel=float(setup.get(fuel_key) or 0) if setup.get(fuel_key) is not None else None,

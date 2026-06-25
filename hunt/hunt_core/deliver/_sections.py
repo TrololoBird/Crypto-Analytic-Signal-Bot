@@ -8,19 +8,13 @@ from hunt_core.deliver._labels import fmt_price
 
 
 
-def _pct_str(a: float, b: float, direction: str) -> str:
-    from hunt_core.deliver.dispatch import _pct_str as _p
-    return _p(a, b, direction)
-
-
-def _risk_pct_str(entry: float, stop: float | None, direction: str) -> str:
-    from hunt_core.deliver.dispatch import _risk_pct_str as _r
-    return _r(entry, stop, direction)
+from hunt_core.deliver._math import pct_str as _pct_str
+from hunt_core.deliver._math import risk_pct_str as _risk_pct_str
+from hunt_core.deliver._math import worst_entry_from_setup as _worst_entry_from_setup_raw
 
 
 def _worst_entry_edge(entry_lo: float, entry_hi: float, *, direction: str, price: float) -> float:
-    from hunt_core.deliver.dispatch import _worst_entry_from_setup
-    return _worst_entry_from_setup({"entry_zone": [entry_lo, entry_hi]}, direction=direction, price=price)
+    return _worst_entry_from_setup_raw({"entry_zone": [entry_lo, entry_hi]}, direction=direction, price=price)
 
 
 _fmt_price = fmt_price
@@ -220,17 +214,26 @@ def format_volume_profile_section(row: dict[str, Any]) -> str:
         lines[-1] += f" · VAH <code>{_fmt_price(float(vah))}</code>"
     if val is not None:
         lines[-1] += f" · VAL <code>{_fmt_price(float(val))}</code>"
-    cx = row.get("cross_microstructure") or {}
+    poc_15m: float | None = None
+    vah_15m: float | None = None
+    poc_15m_src = ""
     if isinstance(vp_map, dict):
         prof_15 = next((p for p in (vp_map.get("profiles") or []) if isinstance(p, dict) and p.get("period") == "15m"), None)
         if prof_15 and prof_15.get("poc") is not None:
-            lines.append(f"15m POC <code>{_fmt_price(float(prof_15['poc']))}</code>")
-    vp15 = cx.get("volume_profile_15m") or {}
-    if vp15.get("poc") is not None:
-        lines.append(
-            f"15m POC <code>{_fmt_price(float(vp15['poc']))}</code>"
-            + (f" · VAH <code>{_fmt_price(float(vp15['vah']))}</code>" if vp15.get("vah") else "")
-        )
+            poc_15m = float(prof_15["poc"])
+            poc_15m_src = "maps"
+    if poc_15m is None:
+        cx = row.get("cross_microstructure") or {}
+        vp15 = cx.get("volume_profile_15m") or {}
+        if vp15.get("poc") is not None:
+            poc_15m = float(vp15["poc"])
+            vah_15m = float(vp15["vah"]) if vp15.get("vah") else None
+            poc_15m_src = "cross"
+    if poc_15m is not None:
+        line_15 = f"15m POC <code>{_fmt_price(poc_15m)}</code>"
+        if vah_15m is not None:
+            line_15 += f" · VAH <code>{_fmt_price(vah_15m)}</code>"
+        lines.append(line_15)
     return "\n".join(lines)
 
 
@@ -538,7 +541,9 @@ def format_book_walls_section(row: dict[str, Any]) -> str:
         tag = str(ex_raw)[:3].upper()
         if tag in {"?", "NON"}:
             tag = "BNC"
-        return f"{emoji} {side}: {tag} {_fmt_price(float(px))} (${float(notional or 0)/1e3:.1f}k)"
+        vc = lvl.get("venue_count") or 1
+        agg = " агр." if int(vc) > 1 else ""
+        return f"{emoji} {side}: {tag}{agg} {_fmt_price(float(px))} (${float(notional or 0)/1e3:.1f}k)"
 
     def _top_per_venue(side_key: str) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []

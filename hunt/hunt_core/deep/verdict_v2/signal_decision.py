@@ -95,7 +95,7 @@ def decide_signal(
         gates_failed.append("fragility")
     if data.coverage_score < cfg.gates.data_coverage_min:
         gates_failed.append("coverage")
-    if catalyst.confidence < 0.35:
+    if catalyst.confidence < cfg.gates.catalyst_min:
         gates_failed.append("catalyst")
     if trade_q.score < cfg.gates.trade_quality_min:
         gates_failed.append("trade_quality")

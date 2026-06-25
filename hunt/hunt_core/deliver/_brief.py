@@ -26,19 +26,13 @@ _PUMP_LIFECYCLE_PHASES = frozenset(
 )
 
 
-def _pct_str(a: float, b: float, direction: str) -> str:
-    from hunt_core.deliver.dispatch import _pct_str as _p
-    return _p(a, b, direction)
-
-
-def _risk_pct_str(entry: float, stop: float | None, direction: str) -> str:
-    from hunt_core.deliver.dispatch import _risk_pct_str as _r
-    return _r(entry, stop, direction)
+from hunt_core.deliver._math import pct_str as _pct_str
+from hunt_core.deliver._math import risk_pct_str as _risk_pct_str
+from hunt_core.deliver._math import worst_entry_from_setup as _worst_entry_from_setup_raw
 
 
 def _worst_entry_edge(entry_lo: float, entry_hi: float, *, direction: str, price: float) -> float:
-    from hunt_core.deliver.dispatch import _worst_entry_from_setup
-    return _worst_entry_from_setup({"entry_zone": [entry_lo, entry_hi]}, direction=direction, price=price)
+    return _worst_entry_from_setup_raw({"entry_zone": [entry_lo, entry_hi]}, direction=direction, price=price)
 
 
 _fmt_price = fmt_price

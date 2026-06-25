@@ -173,7 +173,7 @@ def gate(
 
     sym_threshold = C.quantile_gate(magnitude_history, q, min_n=min_n)
     if sym_threshold is None:
-        return GateDecision(False, None, q, "cold_start_no_history", vol_adjusted_magnitude=adj_mag)
+        return GateDecision(adj_mag >= abs_floor, None, q, "cold_start_pass" if adj_mag >= abs_floor else "cold_start_no_history", vol_adjusted_magnitude=adj_mag)
 
     effective = max(sym_threshold, global_floor)
     if adj_mag < effective:
