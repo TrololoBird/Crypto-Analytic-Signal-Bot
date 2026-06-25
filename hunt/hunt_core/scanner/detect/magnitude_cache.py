@@ -49,6 +49,9 @@ def magnitude_history_for_frame(
         wi = build_window(frame.head(i + 1), symbol=sym, tf=tf, lookback=lookback)
         mags.append(bar_magnitude(wi))
 
+    if lookback > 0 and len(mags) > lookback:
+        mags = mags[-lookback:]
+
     _cache[key] = (height, mags)
     return pl.Series(mags[:-1], dtype=pl.Float64) if len(mags) > 1 else None
 
