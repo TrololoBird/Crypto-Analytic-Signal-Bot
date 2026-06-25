@@ -105,18 +105,25 @@ def build_delivery_setup(detection: Detection, row: dict[str, Any]) -> dict[str,
     Geometry comes from levels.py; the decision (side, confirmed, p_win, phase) and the
     factor evidence come from the Detection. Flag fields the old advisory/EV stack set
     are defaulted off — the fusion gate is the single delivery decision.
+
+    Dual-gate: pre_phase signals get wider entry, tighter SL, forecast label.
     """
     market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    is_pre = detection.signal_type == "pre_phase"
     setup: dict[str, Any] = {
         "symbol": detection.symbol,
         "direction": detection.side,
-        "confirmed": detection.gate_open,
+        "confirmed": detection.gate_open or detection.pre_gate_open,
+        "signal_type": detection.signal_type,
         "fusion_score": round(detection.fusion.fusion_score, 1),
-        "p_win": round(detection.fusion.fusion_score / 100.0, 4),
+        # NOT calibrated P(win) — magnitude×0.25 strength index, rank only
+        "fusion_strength": round(detection.fusion.fusion_score / 100.0, 4),
+        "p_win": round(detection.fusion.fusion_score / 100.0, 4),  # DEPRECATED — use fusion_strength
         "magnitude": round(detection.magnitude, 4),
         "vol_adj_magnitude": round(detection.gate.vol_adjusted_magnitude, 4),
         "phase": detection.phase,
         "lifecycle_phase": detection.phase,
+        "forecast": is_pre,
         "confirm_hard": [f.name for f in detection.active_factors if f.kind == "directional"],
         "triggers": {f.name: round(f.score, 3) for f in detection.active_factors},
         "quarantine_factors": {
@@ -129,7 +136,15 @@ def build_delivery_setup(detection: Detection, row: dict[str, Any]) -> dict[str,
         "intrabar_confirmed": False,
         "ev_primary": None,
         "gate_reason": detection.gate.reason,
+        "pre_gate_open": detection.pre_gate_open,
     }
+    if detection.pre_gate is not None:
+        setup["pre_gate"] = {
+            "open": detection.pre_gate.pre_gate_open,
+            "energy_hits": detection.pre_gate.energy_hits,
+            "structure_score": round(detection.pre_gate.structure_score, 3),
+            "reason": detection.pre_gate.reason,
+        }
     side_score = round(detection.fusion.fusion_score, 1)
     setup["dump_score" if detection.side == "short" else "long_score"] = side_score
 
@@ -140,12 +155,45 @@ def build_delivery_setup(detection: Detection, row: dict[str, Any]) -> dict[str,
         setup["levels_viable"] = False
         setup["levels_veto"] = [f"geometry_error:{type(exc).__name__}"]
 
+    _apply_pre_phase_sl_guard(setup, side=detection.side)
+
     from hunt_core.shared.contract import compute_setup_risk_reward
 
     rr = compute_setup_risk_reward(setup, direction=detection.side or "long")
     if rr is not None:
         setup["risk_reward"] = round(float(rr), 4)
     return setup
+
+
+def _apply_pre_phase_sl_guard(setup: dict[str, Any], side: str) -> None:
+    """Pre-phase SL guard: push SL outside entry zone + assert invariant.
+
+    For pre_phase signals (low magnitude, high uncertainty) the geometry may place
+    SL inside the entry zone — late price confirmation can invalidate before fill.
+    This guard pushes SL further out to guarantee SL < entry_lo (long) / SL > entry_hi
+    (short), then asserts the invariant for 100% of pre_phase setups.
+    """
+    if setup.get("signal_type") != "pre_phase":
+        return
+
+    entry = setup.get("entry_zone")
+    sl = setup.get("stop_loss")
+    if not isinstance(entry, (list, tuple)) or len(entry) < 2 or sl is None:
+        return
+
+    entry_lo, entry_hi = float(entry[0]), float(entry[1])
+    if side == "long":
+        safe_sl = min(float(sl), entry_lo * 0.998)
+        setup["stop_loss"] = round(safe_sl, 6)
+        assert safe_sl < entry_lo, (
+            f"Pre-phase long SL {safe_sl:.6g} >= entry_lo {entry_lo:.6g}"
+        )
+    elif side == "short":
+        safe_sl = max(float(sl), entry_hi * 1.002)
+        setup["stop_loss"] = round(safe_sl, 6)
+        assert safe_sl > entry_hi, (
+            f"Pre-phase short SL {safe_sl:.6g} <= entry_hi {entry_hi:.6g}"
+        )
 
 
 __all__ = ["build_delivery_setup"]

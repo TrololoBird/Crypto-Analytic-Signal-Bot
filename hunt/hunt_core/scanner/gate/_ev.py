@@ -49,7 +49,7 @@ def resolve_delivery_ev(
         except (TypeError, ValueError):
             LOG.debug("resolve_delivery_ev_shadow_ev_parse_failed raw=%r", shadow.get("ev"))
 
-    for key in ("delivery_p_win", "p_win", "catalog_p_win"):
+    for key in ("delivery_p_win", "fusion_strength", "p_win", "catalog_p_win"):
         raw = setup.get(key)
         if raw is not None:
             try:
@@ -145,7 +145,7 @@ def setup_fusion_score(setup: dict[str, Any]) -> float | None:
 
 def setup_p_win(setup: dict[str, Any]) -> float | None:
     """Calibrated P(win) in [0, 1] — primary delivery strength."""
-    for key in ("delivery_p_win", "p_win", "catalog_p_win"):
+    for key in ("delivery_p_win", "fusion_strength", "p_win", "catalog_p_win"):
         raw = setup.get(key)
         if raw is None:
             continue

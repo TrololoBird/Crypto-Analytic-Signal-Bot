@@ -10,9 +10,10 @@ def predict_p_win(
     direction: str = "",
     structure: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Fusion p_win is the calibrated win probability; no separate shadow model."""
+    """Read fusion_strength (preferred) or legacy p_win; NOT calibrated P(win)."""
+    raw = setup.get("fusion_strength") if setup.get("fusion_strength") is not None else setup.get("p_win")
     try:
-        p = float(setup.get("p_win")) if setup.get("p_win") is not None else None
+        p = float(raw) if raw is not None else None
     except (TypeError, ValueError):
         p = None
     return {"p_win": p, "source": "fusion"}
