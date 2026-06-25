@@ -324,7 +324,7 @@ def compute_return_entropy_50(df: Any) -> float | None:
         from hunt_core.features.research_plugins import compute_return_entropy_50 as _ent
 
         return _ent(df)
-    except ImportError, ModuleNotFoundError:
+    except (ImportError, ModuleNotFoundError):
         return None
 
 
@@ -334,7 +334,7 @@ def detect_volume_regime_break(df: Any, *, window: int = 50) -> bool:
         from hunt_core.features.research_plugins import detect_volume_regime_break as _ks
 
         return _ks(df, window=window)
-    except ImportError, ModuleNotFoundError:
+    except (ImportError, ModuleNotFoundError):
         return False
 
 
@@ -344,7 +344,7 @@ def symbol_regime_features(df: Any) -> dict[str, Any]:
         from hunt_core.features.research_plugins import symbol_regime_features as _feat
 
         return _feat(df)
-    except ImportError, ModuleNotFoundError:
+    except (ImportError, ModuleNotFoundError):
         return {}
 
 

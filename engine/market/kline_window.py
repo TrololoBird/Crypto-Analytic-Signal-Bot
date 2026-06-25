@@ -66,7 +66,7 @@ async def fetch_forensic_candle_pack(
                 bars_before=bars_before,
                 bars_after=bars_after,
             )
-        except OSError, ValueError, RuntimeError:
+        except (OSError, ValueError, RuntimeError):
             packs[tf] = pl.DataFrame()
     if symbol != "BTCUSDT":
         try:
@@ -78,7 +78,7 @@ async def fetch_forensic_candle_pack(
                 bars_before=bars_before,
                 bars_after=bars_after,
             )
-        except OSError, ValueError, RuntimeError:
+        except (OSError, ValueError, RuntimeError):
             packs["btc_15m"] = pl.DataFrame()
     return packs
 

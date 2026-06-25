@@ -40,7 +40,7 @@ def detect_bb_squeeze_release(frame: pl.DataFrame, *, timeframe: str = "15m") ->
     try:
         was_squeeze = bool(work.item(-2, "spec_squeeze"))
         is_squeeze = bool(work.item(-1, "spec_squeeze"))
-    except IndexError, ValueError, TypeError:
+    except (IndexError, ValueError, TypeError):
         return None
     if not was_squeeze or is_squeeze:
         return None

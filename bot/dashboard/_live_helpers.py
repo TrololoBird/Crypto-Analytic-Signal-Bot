@@ -26,14 +26,14 @@ JsonDict = dict[str, Any]
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(float(value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
 
 
@@ -51,7 +51,7 @@ def _parse_ts(value: Any) -> datetime | None:
         return value if value.tzinfo else value.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(str(value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
@@ -63,7 +63,7 @@ def _parse_datetime(value: Any) -> datetime | None:
         return value if value.tzinfo else value.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(str(value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
@@ -279,7 +279,7 @@ def _normalize_kline_row(row: dict[str, Any]) -> dict[str, Any] | None:
         high_px = float(row.get("high") or row.get("h") or 0.0)
         low_px = float(row.get("low") or row.get("l") or 0.0)
         close_px = float(row.get("close") or row.get("c") or 0.0)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     if close_px <= 0.0:
         return None

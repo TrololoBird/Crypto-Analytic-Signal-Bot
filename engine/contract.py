@@ -35,7 +35,7 @@ def resolve_target_rr(settings: Any | None = None) -> tuple[float, float, float]
         return DEFAULT_TARGET_RR
     try:
         values = tuple(float(item) for item in configured)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return DEFAULT_TARGET_RR
     if len(values) != 3 or not all(math.isfinite(item) and item > 0.0 for item in values):
         return DEFAULT_TARGET_RR
@@ -591,7 +591,7 @@ def validate_signal_contract(
                         )
     try:
         scale_weights = [float(item) for item in scale_weights_raw]
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         scale_weights = []
     if len(scale_weights) < 2:
         issues.append(

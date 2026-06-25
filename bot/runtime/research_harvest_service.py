@@ -60,7 +60,7 @@ class ResearchHarvestService:
         if rh.include_ws_enrichments:
             try:
                 ws_enrichments = self._bot._ws_cache_enrichments(symbol)
-            except AttributeError, KeyError, TypeError, ValueError:
+            except (AttributeError, KeyError, TypeError, ValueError):
                 ws_enrichments = {}
         snap = prepared_snapshot(
             result.prepared,

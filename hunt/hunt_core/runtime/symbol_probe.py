@@ -646,7 +646,7 @@ async def _tracker_levels_backtest(client: Any, sym: str) -> dict[str, Any] | No
         direction = str(sig.get("direction") or "")
         try:
             opened = datetime.fromisoformat(str(sig.get("opened_at")))
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             return None
         age_min = (datetime.now(UTC) - opened).total_seconds() / 60.0
         limit = min(1000, max(12, int(age_min / 5) + 2))

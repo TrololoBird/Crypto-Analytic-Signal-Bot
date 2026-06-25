@@ -512,7 +512,7 @@ def _macd_alignment(prepared: PreparedSymbol, signal: Signal) -> float:
         macd_line = float(frame.item(-1, "macd_line") or 0.0)
         macd_signal = float(frame.item(-1, "macd_signal") or 0.0)
         macd_hist = float(frame.item(-1, "macd_hist") or 0.0)
-    except IndexError, TypeError, ValueError:
+    except (IndexError, TypeError, ValueError):
         return 0.5
     if not (math.isfinite(macd_line) and math.isfinite(macd_signal) and math.isfinite(macd_hist)):
         return 0.5
@@ -545,7 +545,7 @@ def _obv_alignment(prepared: PreparedSymbol, signal: Signal) -> float:
         obv_val = float(frame.item(-1, "obv") or 0.0)
         obv_ema = float(frame.item(-1, "obv_ema20") or 0.0)
         obv_above = float(frame.item(-1, "obv_above_ema") or 0.0)
-    except IndexError, TypeError, ValueError:
+    except (IndexError, TypeError, ValueError):
         return 0.5
     if not (math.isfinite(obv_val) and math.isfinite(obv_ema)):
         return 0.5
@@ -576,7 +576,7 @@ def _adx_strength(prepared: PreparedSymbol, signal: Signal) -> float:
         adx = float(frame.item(-1, "adx14") or 0.0)
         plus_di = float(frame.item(-1, "plus_di14") or 0.0)
         minus_di = float(frame.item(-1, "minus_di14") or 0.0)
-    except IndexError, TypeError, ValueError:
+    except (IndexError, TypeError, ValueError):
         return 0.5
     if not (math.isfinite(adx) and math.isfinite(plus_di) and math.isfinite(minus_di)):
         return 0.5
@@ -604,7 +604,7 @@ def _keltner_position(prepared: PreparedSymbol, signal: Signal) -> float:
         close = float(frame.item(-1, "close") or 0.0)
         upper = float(frame.item(-1, "kc_upper") or 0.0)
         lower = float(frame.item(-1, "kc_lower") or 0.0)
-    except IndexError, TypeError, ValueError:
+    except (IndexError, TypeError, ValueError):
         return 0.5
     if not (math.isfinite(close) and math.isfinite(upper) and math.isfinite(lower)):
         return 0.5
@@ -645,7 +645,7 @@ def _vwap_position(prepared: PreparedSymbol, signal: Signal) -> float:
         return 0.5
     try:
         deviation = float(frame.item(-1, col) or 0.0)
-    except IndexError, TypeError, ValueError:
+    except (IndexError, TypeError, ValueError):
         return 0.5
     if not math.isfinite(deviation):
         return 0.5
@@ -701,7 +701,7 @@ def _volume_profile_position(prepared: PreparedSymbol, signal: Signal) -> float:
         return 0.5
     try:
         close = float(frame.item(-1, "close") or 0.0)
-    except IndexError, TypeError, ValueError:
+    except (IndexError, TypeError, ValueError):
         return 0.5
     if not math.isfinite(close):
         return 0.5
@@ -728,7 +728,7 @@ def _pivot_proximity(prepared: PreparedSymbol, signal: Signal) -> float:
         return 0.5
     try:
         close = float(frame.item(-1, "close"))
-    except IndexError, TypeError, ValueError:
+    except (IndexError, TypeError, ValueError):
         return 0.5
     if not math.isfinite(close):
         return 0.5
@@ -764,7 +764,7 @@ def _btc_correlation_penalty(prepared: PreparedSymbol, signal: Signal) -> float:
         return 0.5
     try:
         ref_change = float(ref_change)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return 0.5
     if not math.isfinite(ref_change):
         return 0.5
@@ -805,7 +805,7 @@ def _orderflow_imbalance_leg(prepared: PreparedSymbol, signal: Signal) -> float:
         delta_mean = float(delta_tail.mean() or 0.5)
         delta_std = float(delta_tail.std() or 0.0)
         current_delta = float(frame.item(-1, "delta_ratio") or 0.5)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return 0.5
     if delta_std <= 0:
         return 0.5
@@ -838,7 +838,7 @@ def _aggression_shift_leg(prepared: PreparedSymbol, signal: Signal) -> float:
             delta = float(frame.item(-1, "delta_ratio") or 0.0)
             close = float(frame.item(-1, "close") or 0.0)
             prev_close = float(frame.item(-2, "close") or close)
-        except IndexError, TypeError, ValueError:
+        except (IndexError, TypeError, ValueError):
             return 0.5
         price_up = close > prev_close
         if price_up and delta < -0.02 and signal.direction == "short":
@@ -848,7 +848,7 @@ def _aggression_shift_leg(prepared: PreparedSymbol, signal: Signal) -> float:
         return 0.45
     try:
         shift_val = float(shift)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return 0.5
     if signal.direction == "long" and shift_val >= 0.03:
         return 0.82
@@ -868,7 +868,7 @@ def _depth_imbalance_leg(prepared: PreparedSymbol, signal: Signal) -> float:
     try:
         depth_val = float(depth)
         micro_val = float(micro) if micro is not None else 0.0
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return 0.5
     threshold = 0.12
     if signal.direction == "long":

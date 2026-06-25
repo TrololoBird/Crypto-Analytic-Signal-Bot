@@ -100,7 +100,7 @@ def _optional_float(value: Any) -> float | None:
         return None
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     if not math.isfinite(numeric):
         return None
@@ -257,7 +257,7 @@ def _resolve_symbol_filter(
         return default
     try:
         value = float(raw)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     return value if math.isfinite(value) else default
 
@@ -290,12 +290,12 @@ def _benchmark_context_guard(
             continue
         try:
             pct_1h_values.append(float(raw_pct))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             pct_1h_values.append(None)
     context_age_seconds = getattr(prepared, "context_snapshot_age_seconds", None)
     try:
         context_age = float(context_age_seconds) if context_age_seconds is not None else None
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         context_age = None
     benchmark_context_stale = bool(
         context
@@ -319,11 +319,11 @@ def _benchmark_context_guard(
         bias = str(payload.get("bias") or "neutral").lower()
         try:
             pct_1h = float(payload.get("pct_1h") or 0.0)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             pct_1h = 0.0
         try:
             pct_4h = float(payload.get("pct_4h") or 0.0)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             pct_4h = 0.0
         move_score = max(abs(pct_1h) / 0.006, abs(pct_4h) / 0.015)
         if move_score < 1.0 and bias == "neutral":
@@ -488,13 +488,13 @@ def _regime_short_gate(
             if isinstance(_btc_payload, dict):
                 try:
                     _btc_pct_1h = float(_btc_payload.get("pct_1h") or 0.0)
-                except TypeError, ValueError:
+                except (TypeError, ValueError):
                     _btc_pct_1h = 0.0
             if _btc_pct_1h >= 0.006:
                 _btc_corr = getattr(prepared, "btc_corr_1h", None)
                 try:
                     _btc_corr_f = float(_btc_corr) if _btc_corr is not None else None
-                except TypeError, ValueError:
+                except (TypeError, ValueError):
                     _btc_corr_f = None
                 if _btc_corr_f is not None and abs(_btc_corr_f) < 0.7:
                     return (
@@ -638,11 +638,11 @@ def _latest_frame_float(frame: pl.DataFrame | None, column: str) -> float | None
         return None
     try:
         value = frame.item(-1, column)
-    except IndexError, TypeError, ValueError:
+    except (IndexError, TypeError, ValueError):
         return None
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return numeric if math.isfinite(numeric) else None
 

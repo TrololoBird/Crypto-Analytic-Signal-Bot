@@ -71,13 +71,13 @@ class TelemetryManager:
                 continue
             try:
                 value = frame.item(-1, column)
-            except IndexError, TypeError, ValueError:
+            except (IndexError, TypeError, ValueError):
                 continue
             if value is None:
                 continue
             try:
                 numeric = float(value)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 continue
             if numeric == numeric and numeric not in (float("inf"), float("-inf")):
                 snapshot[column] = numeric
@@ -395,7 +395,7 @@ class TelemetryManager:
         if isinstance(result.funnel, dict):
             try:
                 selected_count = int(result.funnel.get("selected", delivered_count) or 0)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 selected_count = delivered_count
         delivery_attempt_count = sum(
             int(value or 0)

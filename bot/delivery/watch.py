@@ -226,7 +226,7 @@ class AlertCoordinator:
                             * 10_000.0,
                             1,
                         )
-                    except TypeError, ValueError, ZeroDivisionError:
+                    except (TypeError, ValueError, ZeroDivisionError):
                         early_entry_advantage_bps = None
                 # Enrich with context from the original watch candidate.
                 ctx = state.candidate.context or {}

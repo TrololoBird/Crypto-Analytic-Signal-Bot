@@ -332,7 +332,7 @@ def _detect_structure_pullback_extended(
     if bb_pct_b is not None:
         try:
             bb_pct_b = float(bb_pct_b)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             bb_pct_b = None
     if bb_pct_b is not None:
         if direction == "long" and bb_pct_b > 0.90:

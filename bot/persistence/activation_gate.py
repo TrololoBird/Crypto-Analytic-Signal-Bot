@@ -35,7 +35,7 @@ def _feature_float(features: dict[str, Any] | None, *keys: str) -> float | None:
             continue
         try:
             value = float(raw)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
         if math.isfinite(value):
             return value

@@ -143,7 +143,7 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 def _safe_float(value: Any, default: float | None = None) -> float | None:
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     if not math.isfinite(numeric):
         return default

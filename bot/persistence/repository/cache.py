@@ -421,7 +421,7 @@ def _cache_finite_int(value: object, *, default: int | None = None) -> int | Non
         if value is None:
             return default
         return int(float(value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
 
 

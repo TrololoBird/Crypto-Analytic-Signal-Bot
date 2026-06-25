@@ -292,7 +292,7 @@ class SignalTracker(_SignalTrackerBases):
         else:
             try:
                 normalized_weights = tuple(float(weight) for weight in weights)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 normalized_weights = (0.5, 0.3, 0.2)
             if len(normalized_weights) != 3 or not all(
                 math.isfinite(weight) and weight >= 0.0 for weight in normalized_weights
@@ -417,7 +417,7 @@ class SignalTracker(_SignalTrackerBases):
         try:
             entry = float(entry_price)
             stop = float(risk_stop)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return 0.0
         if entry <= 0.0 or not math.isfinite(entry) or not math.isfinite(stop):
             return 0.0
@@ -680,7 +680,6 @@ class SignalTracker(_SignalTrackerBases):
             "breakeven_stop": {"stop_loss": 1},
             "expired": {"expired": 1},
             "ambiguous_exit": {"ambiguous_exit": 1},
-            "setup_invalidated": {"setup_invalidated": 1},
         }.get(reason)
         if deltas:
             await self.memory_repo.increment_tracking_stats(**deltas)
@@ -759,7 +758,7 @@ class SignalTracker(_SignalTrackerBases):
             entry = float(entry_price)
             exit_px = float(exit_price)
             stop = float(risk_stop)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
         if not all(math.isfinite(value) for value in (entry, exit_px, stop)):
             return None
@@ -790,7 +789,7 @@ class SignalTracker(_SignalTrackerBases):
                 continue
             try:
                 tracked = self._tracked_from_payload(row)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 LOG.debug(
                     "skip stuck pending repair | tracking_id=%s parse_failed",
                     row.get("tracking_id"),
@@ -804,7 +803,7 @@ class SignalTracker(_SignalTrackerBases):
                     lp = float(last_price)
                     if _price_in_entry_zone(tracked, lp):
                         fill_price = lp
-                except TypeError, ValueError:
+                except (TypeError, ValueError):
                     pass
             await self._mark_activated(
                 tracked,
@@ -853,7 +852,7 @@ class SignalTracker(_SignalTrackerBases):
             return
         try:
             tracked = self._tracked_from_payload(row)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return
         if tracked.status != "pending" or tracked.signal_message_id is not None:
             return
@@ -968,7 +967,7 @@ class SignalTracker(_SignalTrackerBases):
                         )
                     except DEFENSIVE_EXC as exc:
                         LOG.warning("quality_monitor_update_failed", extra={"exc": str(exc)})
-            except OSError, ValueError:
+            except (OSError, ValueError):
                 LOG.debug("record_outcome failed for %s (non-critical)", tracked.setup_id)
 
         # Persist outcome before returning the close event. Fire-and-forget lost

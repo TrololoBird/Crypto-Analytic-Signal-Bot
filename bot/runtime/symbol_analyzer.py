@@ -150,7 +150,7 @@ def _apply_setup_score_adjustment(
     """Apply adaptive setup scoring without converting mild penalties into hard blocks."""
     try:
         adjustment = float(score_adjustment)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         adjustment = 0.0
     if not adjustment:
         return signal, {"applied": False, "adjustment": 0.0}
@@ -252,13 +252,13 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
             return None
         try:
             value = frame.item(-1, column)
-        except IndexError, TypeError, ValueError:
+        except (IndexError, TypeError, ValueError):
             return None
         try:
             if value is None:
                 return None
             numeric = float(value)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
         return (
             numeric if numeric == numeric and numeric not in (float("inf"), float("-inf")) else None
@@ -274,7 +274,7 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
         try:
             prev = float(frame.item(-2, "close") or 0.0)
             last = float(frame.item(-1, "close") or 0.0)
-        except IndexError, TypeError, ValueError:
+        except (IndexError, TypeError, ValueError):
             return None
         if prev <= 0.0 or last <= 0.0:
             return None
@@ -302,7 +302,7 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
                     continue
                 try:
                     _, frame = cached
-                except TypeError, ValueError:
+                except (TypeError, ValueError):
                     continue
                 change = self._hourly_close_change_pct(frame)
                 if change is not None:
@@ -1005,7 +1005,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                         for value in _frame["close"].to_list()
                         if value is not None and float(value) > 0.0
                     ]
-                except IndexError, TypeError, ValueError, AttributeError:
+                except (IndexError, TypeError, ValueError, AttributeError):
                     continue
                 if len(closes) < 10:
                     continue
@@ -1055,7 +1055,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
         next_last_price = item.last_price
         try:
             ticker_last_price = float(ticker.get("last_price") or 0.0)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return item
         if ticker_last_price > 0:
             next_last_price = ticker_last_price

@@ -22,7 +22,7 @@ _SPEC_COLUMN_CACHE_LOCK = threading.Lock()
 def as_float(value: object, default: float = 0.0) -> float:
     try:
         numeric = float(value) if value is not None else default
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     return numeric if math.isfinite(numeric) else default
 

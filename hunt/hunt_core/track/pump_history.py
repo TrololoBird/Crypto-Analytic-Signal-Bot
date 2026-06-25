@@ -160,7 +160,7 @@ def load_pump_history(path: Path = PUMP_HISTORY) -> PumpHistoryStore:
         return PumpHistoryStore()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return PumpHistoryStore()
     if not isinstance(raw, dict):
         return PumpHistoryStore()

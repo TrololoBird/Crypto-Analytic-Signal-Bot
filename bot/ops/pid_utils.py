@@ -36,7 +36,7 @@ def pid_is_alive(pid: int) -> bool:
 def read_pid_file(pid_file: Path) -> int:
     try:
         return int(pid_file.read_text(encoding="utf-8").strip() or "0")
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return 0
 
 
@@ -125,7 +125,7 @@ def find_bot_main_pids(repo_root: Path) -> list[int]:
             cwd=str(repo_root),
             timeout=30,
         )
-    except subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired:
+    except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired):
         return []
     pids: list[int] = []
     for raw_line in raw.splitlines():

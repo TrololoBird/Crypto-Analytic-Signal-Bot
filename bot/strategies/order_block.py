@@ -139,7 +139,7 @@ def _detect_order_block_extended(
         zone_values_valid = all(
             math.isfinite(float(value)) and float(value) > 0.0 for value in (ob_low, ob_high)
         )
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         zone_values_valid = False
     if (
         direction not in {"long", "short"}

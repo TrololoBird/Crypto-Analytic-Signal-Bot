@@ -60,7 +60,7 @@ def _fmt_audit_metric(name: str, value: float | None, suffix: str = "") -> str |
         return None
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return f"{name}={numeric:.2f}{suffix}"
 

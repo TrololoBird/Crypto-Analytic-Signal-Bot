@@ -110,7 +110,7 @@ def _parse_dt(value: Any) -> datetime | None:
         return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(str(value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
@@ -123,7 +123,7 @@ def _roc10_at_index(work: pl.DataFrame, end_idx: int, lookback: int = 10) -> flo
     try:
         start = float(work.item(start_idx, "close"))
         end = float(work.item(end_idx, "close"))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     if start <= 0.0 or end <= 0.0:
         return None
@@ -318,7 +318,7 @@ def build_forensic_case(
     if candles_15m is not None and not candles_15m.is_empty() and event_dt is not None:
         try:
             work = _prepare_frame(candles_15m)
-        except ValueError, TypeError, RuntimeError:
+        except (ValueError, TypeError, RuntimeError):
             work = candles_15m
         closed_valid, roc_signal, roc_prev = assess_closed_candle_validity(
             work, event_dt=event_dt, direction=direction
@@ -350,7 +350,7 @@ def build_forensic_case(
                 btc_roc = _roc10_at_index(btc_closed, btc_closed.height - 1)
                 btc_dir = _direction_from_roc(btc_roc, threshold=0.05)
                 btc_aligned = btc_dir is None or btc_dir == direction.lower()
-        except ValueError, TypeError, RuntimeError:
+        except (ValueError, TypeError, RuntimeError):
             pass
 
     entry_deviation = 0.0
@@ -500,7 +500,7 @@ def _f(value: Any) -> float | None:
         return None
     try:
         parsed = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     if parsed != parsed:
         return None
