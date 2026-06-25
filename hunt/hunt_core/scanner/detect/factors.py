@@ -71,10 +71,11 @@ def factor_book(window: FeatureWindow) -> FactorScore:
 
 
 def factor_structure(window: FeatureWindow) -> FactorScore:
-    """Price/RSI/BB stretch — mean-reverting: overbought ⇒ short, oversold ⇒ long.
+    """Price/RSI/BB stretch — trend-following: stretch ⇒ strength in stretch direction.
 
     Each stretch input is robust-z'd vs the symbol's own window, so "overbought" means
     *extended relative to this symbol's recent behaviour*, not a fixed RSI level.
+    Was previously mean-reverting (score = -stretch) — adversarial for impulse detection.
     """
     z_rsi = C.robust_z(window.col("rsi14"))
     z_bb = C.robust_z(window.col("bb_pct_b"))
@@ -82,8 +83,8 @@ def factor_structure(window: FeatureWindow) -> FactorScore:
     stretch, parts = _mean_active({"rsi14": z_rsi, "bb_pct_b": z_bb, "zscore30": z_pos})
     if stretch is None:
         return _abstain("structure", DIRECTIONAL, "structure_inputs_missing")
-    score = -stretch  # mean reversion: positive stretch ⇒ short pressure
-    return FactorScore("structure", DIRECTIONAL, score, True, f"reversion_z={score:+.2f}", parts)
+    score = stretch  # trend-following: positive stretch ⇒ long pressure
+    return FactorScore("structure", DIRECTIONAL, score, True, f"structure_z={score:+.2f}", parts)
 
 
 def factor_funding(window: FeatureWindow) -> FactorScore:
