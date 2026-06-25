@@ -1167,7 +1167,7 @@ def tf_snapshot(
         "taker_imbalance_cusum": round(_col(df, "taker_imbalance_cusum", 0, idx=idx), 3)
         if "taker_imbalance_cusum" in df.columns
         else None,
-        **_distribution_stats(df, idx=idx),
+        **distribution_stats(df, idx=idx),
         "delta_ratio": round(_col(df, "delta_ratio", 0.5, idx=idx), 3)
         if "delta_ratio" in df.columns
         else None,
