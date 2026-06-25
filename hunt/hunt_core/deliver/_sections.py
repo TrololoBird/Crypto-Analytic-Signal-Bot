@@ -605,8 +605,17 @@ def format_book_walls_section(row: dict[str, Any]) -> str:
                 return ""
             return f"{emoji} {side}: " + " · ".join(parts)
 
-        bid_line = _wall_line("Покупка", bids, "🟢")
-        ask_line = _wall_line("Продажа", asks, "🔴")
+        bids_sorted = sorted(
+            [lvl for lvl in bids if isinstance(lvl, dict) and lvl.get("price") is not None],
+            key=lambda r: float(r["price"]),
+            reverse=True,
+        ) if bids else []
+        asks_sorted = sorted(
+            [lvl for lvl in asks if isinstance(lvl, dict) and lvl.get("price") is not None],
+            key=lambda r: float(r["price"]),
+        ) if asks else []
+        bid_line = _wall_line("Покупка", bids_sorted, "🟢")
+        ask_line = _wall_line("Продажа", asks_sorted, "🔴")
         if bid_line:
             lines.append(bid_line)
         if ask_line:
@@ -629,8 +638,11 @@ def format_book_walls_section(row: dict[str, Any]) -> str:
         ice = ob.get("iceberg_levels") or []
         if ice and isinstance(ice[0], dict):
             i0 = ice[0]
+            side_ru = "покупка" if i0.get("side") == "bid" else "продажа"
+            ratio = i0.get("replenishment_ratio")
+            ratio_s = f" · пополнение ×{float(ratio):.1f}" if ratio else ""
             lines.append(
-                f"Iceberg {i0.get('side', '?')} @ <code>{_fmt_price(float(i0.get('price') or 0))}</code>"
+                f"🧊 Скрытый ордер ({side_ru}) @ <code>{_fmt_price(float(i0.get('price') or 0))}</code>{ratio_s}"
             )
     return "\n".join(lines)
 

@@ -204,6 +204,9 @@ class TradePlan:
     invalidation_reason: str
     level_sources: list[str] = field(default_factory=list)
     entry_reference: float = 0.0
+    rr_conservative_tp1: float = 0.0
+    rr_conservative_tp2: float = 0.0
+    rr_conservative_tp3: float = 0.0
     rr_base_label: str = "≈R:R (от края зоны)"
     plan_lifecycle: PlanLifecycle = "forming"
 

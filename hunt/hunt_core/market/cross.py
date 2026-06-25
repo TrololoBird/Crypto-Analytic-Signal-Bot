@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +16,38 @@ from hunt_core.features.volume_profile import volume_profile_levels
 from hunt_core.market.client import aggregate_cross_exchange_walls, depth_snapshot_from_book
 
 LOG = logging.getLogger("hunt_core.market.cross")
+
+# Per-venue circuit breaker (Task 3)
+_venue_error_count: dict[str, int] = {}
+_venue_temp_skip: dict[str, float] = {}
+_VENUE_CIRCUIT_BREAKER_MAX_ERRORS = 3
+_VENUE_CIRCUIT_BREAKER_COOLDOWN_S = 300.0
+_VENUE_FETCH_TIMEOUT_S = 10.0
+
+
+def _venue_is_skipped(venue: str) -> bool:
+    expiry = _venue_temp_skip.get(venue)
+    if expiry is not None and time.monotonic() < expiry:
+        return True
+    _venue_temp_skip.pop(venue, None)
+    _venue_error_count.pop(venue, None)
+    return False
+
+
+def _record_venue_error(venue: str) -> None:
+    _venue_error_count[venue] = _venue_error_count.get(venue, 0) + 1
+    if _venue_error_count[venue] >= _VENUE_CIRCUIT_BREAKER_MAX_ERRORS:
+        _venue_temp_skip[venue] = time.monotonic() + _VENUE_CIRCUIT_BREAKER_COOLDOWN_S
+        LOG.warning(
+            "venue_circuit_breaker | venue=%s errors=%s skip_until=%s",
+            venue, _venue_error_count[venue],
+            _venue_temp_skip[venue],
+        )
+
+
+def _record_venue_success(venue: str) -> None:
+    _venue_error_count.pop(venue, None)
+
 
 SECONDARY_EXCHANGES: tuple[str, ...] = ("bybit", "okx", "bitget")
 
@@ -209,9 +242,22 @@ async def fetch_secondary_ticker_overlay(
         return {}
 
     async def _one(name: str) -> tuple[str, list[dict[str, Any]]]:
+        if _venue_is_skipped(name):
+            LOG.info("secondary_ticker_overlay_skipped | exchange=%s circuit_open", name)
+            return name, []
         try:
-            return name, await client.fetch_secondary_tickers(name)
+            result = await asyncio.wait_for(
+                client.fetch_secondary_tickers(name),
+                timeout=_VENUE_FETCH_TIMEOUT_S,
+            )
+            _record_venue_success(name)
+            return name, result
+        except asyncio.TimeoutError:
+            _record_venue_error(name)
+            LOG.warning("secondary_ticker_overlay_timeout | exchange=%s", name)
+            return name, []
         except Exception as exc:
+            _record_venue_error(name)
             LOG.warning("secondary_ticker_overlay_failed | exchange=%s error=%s", name, exc)
             return name, []
 
@@ -262,9 +308,15 @@ async def refresh_cross_exchange_cache(
     async def _one(sym: str) -> None:
         nonlocal updated
         async with sem:
-            snap = await client.fetch_cross_exchange_snapshot(sym)
-            cache[sym] = snap
-            updated += 1
+            try:
+                snap = await asyncio.wait_for(
+                    client.fetch_cross_exchange_snapshot(sym),
+                    timeout=_VENUE_FETCH_TIMEOUT_S,
+                )
+                cache[sym] = snap
+                updated += 1
+            except asyncio.TimeoutError:
+                LOG.warning("cross_exchange_refresh_timeout | symbol=%s", sym)
 
     results = await asyncio.gather(*(_one(s) for s in targets), return_exceptions=True)
     for sym, res in zip(targets, results):

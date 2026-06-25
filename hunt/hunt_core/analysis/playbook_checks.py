@@ -11,7 +11,6 @@ PLAYBOOK_REQUIRED: dict[str, frozenset[str]] = {
             "oi_distribution",
             "bear_cvd_div",
             "sweep_reclaim",
-            "anti_squeeze",
         }
     ),
     "prepump_long": frozenset(
@@ -35,7 +34,7 @@ PLAYBOOK_REQUIRED: dict[str, frozenset[str]] = {
 }
 
 PLAYBOOK_N_OF_M: dict[str, tuple[int, int]] = {
-    "predump_short": (4, 6),
+    "predump_short": (4, 5),
     "prepump_long": (4, 5),
     # was (5,7) before removing lagging vah_break_5m/vol_above_median_5m
     "ignition_long": (5, 5),

@@ -6,6 +6,13 @@ from typing import Any
 from hunt_core.deliver.telegram import fmt_price
 
 
+_ENTRY_TYPE_LABELS = {
+    "market": "по рынку",
+    "limit": "лимит",
+    "pullback_limit": "лимит на откате",
+}
+
+
 def format_scanner_signal(
     *,
     symbol: str,
@@ -15,13 +22,16 @@ def format_scanner_signal(
     side: str,
     entry_lo: float,
     entry_hi: float,
+    entry_type: str = "limit",
     trigger: str,
     stop: float,
     tp1: float,
     tp2: float,
+    tp3: float = 0.0,
     sl_pct: float,
-    tp1_pct: float,
-    tp2_pct: float,
+    rr_tp1: float = 0.0,
+    rr_tp2: float = 0.0,
+    rr_tp3: float = 0.0,
     invalidation: str,
     context_lines: list[str],
     ttl_hours: float,
@@ -30,16 +40,22 @@ def format_scanner_signal(
     icon = "🔴" if side.upper() == "SHORT" else "🟢"
     prefix = "🧪 ЛАБ · " if lab else ""
     ctx = "\n".join(context_lines) if context_lines else ""
+    et_label = _ENTRY_TYPE_LABELS.get(entry_type, entry_type)
+
+    tp_line = f"TP1: {fmt_price(tp1)} ({rr_tp1:.1f}R) · TP2: {fmt_price(tp2)} ({rr_tp2:.1f}R)"
+    if tp3 > 0:
+        tp_line += f"\nTP3: {fmt_price(tp3)} ({rr_tp3:.1f}R)"
+
     return (
         f"{prefix}{icon} {symbol} · {archetype}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"Состояние: {state_desc}\n"
         f"Сила сигнала: {strength:.0f} / 100 (это сила, не вероятность)\n\n"
         f"📋 Сигнал · {side.upper()}\n"
-        f"Зона входа: {fmt_price(entry_lo)}–{fmt_price(entry_hi)} (лимит)\n"
+        f"Зона входа: {fmt_price(entry_lo)}–{fmt_price(entry_hi)} ({et_label})\n"
         f"Триггер активации: {trigger}\n"
         f"Stop-loss: {fmt_price(stop)} ({sl_pct:+.1f}%)\n"
-        f"Цель 1: {fmt_price(tp1)} ({tp1_pct:+.1f}%) · Цель 2: {fmt_price(tp2)} ({tp2_pct:+.1f}%)\n"
+        f"{tp_line}\n"
         f"Инвалидация: {invalidation}\n\n"
         f"🔎 Сопровождение\n"
         f"{ctx}\n"
@@ -117,10 +133,13 @@ def format_scanner_from_setup(symbol: str, setup: dict[str, Any], row: dict[str,
     stop = float(setup.get("stop_loss") or 0)
     tp1 = float(setup.get("tp1") or 0)
     tp2 = float(setup.get("tp2") or tp1)
+    tp3 = float(setup.get("tp3") or 0)
+    entry_type = str(setup.get("entry_type") or "limit")
     mid = (lo + hi) / 2 if lo and hi else float(row.get("price") or 1)
     sl_pct = (stop - mid) / mid * 100 if direction == "short" else (mid - stop) / mid * 100
-    tp1_pct = (mid - tp1) / mid * 100 if direction == "short" else (tp1 - mid) / mid * 100
-    tp2_pct = (mid - tp2) / mid * 100 if direction == "short" else (tp2 - mid) / mid * 100
+    rr_tp1 = float(setup.get("rr_tp1") or 0)
+    rr_tp2 = float(setup.get("rr_tp2") or 0)
+    rr_tp3 = float(setup.get("rr_tp3") or 0)
     mf = row.get("manipulation_fusion") or {}
     arch = str(mf.get("archetype") or "Сканер")
     return format_scanner_signal(
@@ -131,13 +150,16 @@ def format_scanner_from_setup(symbol: str, setup: dict[str, Any], row: dict[str,
         side=direction,
         entry_lo=lo,
         entry_hi=hi,
+        entry_type=entry_type,
         trigger=str(setup.get("trigger") or "закрытие 5m"),
         stop=stop,
         tp1=tp1,
         tp2=tp2,
+        tp3=tp3,
         sl_pct=sl_pct,
-        tp1_pct=tp1_pct,
-        tp2_pct=tp2_pct,
+        rr_tp1=rr_tp1,
+        rr_tp2=rr_tp2,
+        rr_tp3=rr_tp3,
         invalidation=str(setup.get("invalidation") or "—"),
         context_lines=ctx,
         ttl_hours=float(setup.get("ttl_minutes") or 120) / 60.0,

@@ -53,7 +53,7 @@ def _move_bounds(row: dict[str, Any], direction: str) -> tuple[float, float]:
             farthest = max(targets[:3])
             lo = abs(pct_move(price, nearest))
             hi = abs(pct_move(price, farthest))
-            return (round(max(0.3, lo * 0.95), 2), round(max(lo, hi), 2))
+            return (round(max(0.3, lo), 2), round(max(lo, hi), 2))
     elif direction == "short" and price > 0:
         targets, _ = _collect_downward_targets(row, price)
         if len(targets) >= 1:
@@ -61,7 +61,7 @@ def _move_bounds(row: dict[str, Any], direction: str) -> tuple[float, float]:
             farthest = min(targets[:3])
             lo = abs(pct_move(price, nearest))
             hi = abs(pct_move(price, farthest))
-            return (round(max(0.3, lo * 0.95), 2), round(max(lo, hi), 2))
+            return (round(max(0.3, lo), 2), round(max(lo, hi), 2))
     return (round(atr_pct * 0.8, 2), round(atr_pct * 2.5, 2))
 
 
@@ -90,7 +90,7 @@ def adjust_expected_move_from_plan(path: ExpectedPath, plan: TradePlan | None) -
         return path
     nearest_pct = abs(pct_move(entry, tp1))
     lo, hi = path.expected_move_pct
-    lo = min(lo, nearest_pct * 0.95)
+    lo = min(lo, nearest_pct)
     hi = max(hi, nearest_pct)
     if hi < lo:
         hi = lo * 1.5

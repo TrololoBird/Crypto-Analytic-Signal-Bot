@@ -567,11 +567,18 @@ class HuntCcxtClient:
             assert self._ticker_24h_cache is not None
             return self._ticker_24h_cache[1]
         await self.load_markets()
-        tickers = await self._rest_call(
-            lambda: self._ex.fetch_tickers(),
-            context="ticker_24h",
-            weight=40,
-        )
+        try:
+            tickers = await self._rest_call(
+                lambda: self._ex.fetch_tickers(),
+                context="ticker_24h",
+                weight=40,
+            )
+        except Exception:
+            # REST failed — serve stale cache if available rather than returning
+            # an empty list (which causes ticker_field_missing for all symbols).
+            if self._ticker_24h_cache is not None:
+                return self._ticker_24h_cache[1]
+            raise
         rows: list[dict[str, float | str]] = []
         for ccxt_sym, item in tickers.items():
             if not is_linear_usdt_swap_market(self._ex.markets.get(ccxt_sym)):
@@ -597,7 +604,11 @@ class HuntCcxtClient:
             if low > 0:
                 row["low_price"] = low
             rows.append(row)
-        self._ticker_24h_cache = (now, rows)
+        if rows:
+            self._ticker_24h_cache = (now, rows)
+        elif self._ticker_24h_cache is not None:
+            # Binance returned empty/all-filtered tickers — keep last good data.
+            return self._ticker_24h_cache[1]
         return rows
 
     async def fetch_ohlcv_list(
@@ -1880,20 +1891,20 @@ def depth_imbalance_from_levels(
     *,
     top_n: int = 20,
 ) -> float | None:
-    """Depth imbalance from top-N book levels (qty sum, not notional)."""
-    bid_qty = 0.0
-    ask_qty = 0.0
+    """Depth imbalance from top-N book levels using notional (price × qty)."""
+    bid_notional = 0.0
+    ask_notional = 0.0
     for row in (bids or [])[:top_n]:
         try:
-            bid_qty += float(row[1])
+            bid_notional += float(row[0]) * float(row[1])
         except (TypeError, ValueError, IndexError):
             continue
     for row in (asks or [])[:top_n]:
         try:
-            ask_qty += float(row[1])
+            ask_notional += float(row[0]) * float(row[1])
         except (TypeError, ValueError, IndexError):
             continue
-    return depth_imbalance_from_book(bid_qty=bid_qty, ask_qty=ask_qty, delta_ratio=None)
+    return depth_imbalance_from_book(bid_qty=bid_notional, ask_qty=ask_notional, delta_ratio=None)
 
 
 def depth_imbalance_from_book(

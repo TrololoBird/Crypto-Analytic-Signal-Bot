@@ -28,12 +28,15 @@ class Detection:
     side: str  # long | short | none
     phase: str  # pre_pump | pre_dump | mid | neutral
     watch_ok: bool  # phase is a PRE window matching side
-    gate_open: bool  # final watch-delivery decision (gate AND watch_ok)
+    gate_open: bool  # final watch-delivery decision (momentum gate AND watch_ok)
+    pre_gate_open: bool  # structure-based gate for pre-phase (bypasses magnitude floor)
+    signal_type: str  # "pre_phase" | "mid_phase" | "none"
     confidence: float
     magnitude: float
     price: float | None
     fusion: Fz.FusionScore
     gate: Fz.GateDecision
+    pre_gate: Fz.PreGateDecision | None
     phase_info: Ph.PhaseInfo
     factors: list[FactorScore] = field(default_factory=list)
     quarantine_factors: list[FactorScore] = field(default_factory=list)
@@ -44,16 +47,10 @@ class Detection:
         return [f for f in self.factors if f.active]
 
     def to_setup_dict(self) -> dict[str, object]:
-        """Adapt to the delivery-path row shape: {dump, long, lifecycle}.
-
-        The matching side carries a setup dict (``confirmed`` == final gate); the other
-        side is empty. ``lifecycle`` exposes the phase descriptor. Geometry (entry/SL/TP)
-        is attached downstream by the preserved levels path — this adapter supplies the
-        decision, side, confidence and phase only.
-        """
+        """Adapt to the delivery-path row shape: {dump, long, lifecycle}."""
         setup = {
             "direction": self.side,
-            "confirmed": self.gate_open,
+            "confirmed": self.gate_open or self.pre_gate_open,
             "fusion_score": round(self.fusion.fusion_score, 1),
             "magnitude": round(self.magnitude, 4),
             "vol_adj_magnitude": round(self.gate.vol_adjusted_magnitude, 4),
@@ -62,6 +59,7 @@ class Detection:
             "n_active": self.fusion.n_active,
             "agreement": self.fusion.agreement,
             "phase": self.phase,
+            "signal_type": self.signal_type,
             "factors": {f.name: round(f.score, 4) for f in self.active_factors},
             "quarantine_factors": {
                 f.name: round(f.score, 4) for f in self.quarantine_factors if f.active
@@ -70,6 +68,13 @@ class Detection:
             "gate_threshold": (round(self.gate.threshold, 4) if self.gate.threshold is not None else None),
             "reasons": list(self.reasons),
         }
+        if self.pre_gate is not None:
+            setup["pre_gate"] = {
+                "open": self.pre_gate.pre_gate_open,
+                "energy_hits": self.pre_gate.energy_hits,
+                "structure_score": round(self.pre_gate.structure_score, 3),
+                "reason": self.pre_gate.reason,
+            }
         lifecycle = {
             "phase": self.phase,
             "bias": self.side,
@@ -89,6 +94,8 @@ class Detection:
             "side": self.side,
             "phase": self.phase,
             "gate_open": self.gate_open,
+            "pre_gate_open": self.pre_gate_open,
+            "signal_type": self.signal_type,
             "fusion_score": round(self.fusion.fusion_score, 1),
             "magnitude": round(self.magnitude, 4),
             "n_active": self.fusion.n_active,
@@ -105,7 +112,12 @@ def build_detection(
     min_n: int | None = None,
     context: dict[str, Any] | None = None,
 ) -> Detection:
-    """Run factors → fuse → phase → gate for one bar; MID closes the watch gate."""
+    """Run factors → fuse → phase → gate for one bar; MID closes the watch gate.
+
+    Dual-gate architecture:
+    - GateDecision (momentum-based) for mid-phase signals
+    - PreGateDecision (structure-based) for pre_pump/pre_dump/coil signals
+    """
     from hunt_core.scanner.detect.factors_quarantine import compute_quarantine_factors
 
     factors = compute_factors(window, row=context)
@@ -122,6 +134,7 @@ def build_detection(
 
     reasons: list[str] = [gate_decision.reason]
     gate_open = gate_decision.gate_open and phase_info.watch_ok
+
     # High energy + undecided side → coil bracket (ARMED), not mission-blocked.
     coil_armed = (
         fusion.side == "none"
@@ -138,6 +151,8 @@ def build_detection(
     # P5: preparation readiness opens the gate when fusion magnitude/phase blocked
     # but energy+direction resolve (fixes below_abs_floor + mid on violent alts).
     ctx = context if isinstance(context, dict) else {}
+    prep_ready = False
+    prep_tags: list[str] = []
     if ctx and fusion.side in {"long", "short"}:
         from hunt_core.scanner.gate._mission import assess_preparation_readiness
 
@@ -149,6 +164,41 @@ def build_detection(
                 gate_open = True
                 reasons.append(f"prep_readiness:{','.join(prep_tags) or 'ok'}")
 
+    # Dual-gate: structure-based gate for pre-phase signals
+    pre_gate_decision: Fz.PreGateDecision | None = None
+    pre_gate_open = False
+    signal_type = "none"
+    is_pre = phase_info.phase in {"pre_pump", "pre_dump", "coil"}
+    if is_pre and ctx and fusion.side in {"long", "short"}:
+        energy_hits = len(prep_tags) if prep_ready else 0
+        # structure_score uses raw book imbalance (independent of fusion z_dir)
+        market_ctx = ctx.get("market") if isinstance(ctx.get("market"), dict) else {}
+        book_imb = float(
+            market_ctx.get("ws_depth_imbalance")
+            or market_ctx.get("depth_imbalance")
+            or market_ctx.get("map_book_imbalance_1pct")
+            or 0
+        )
+        structure_score = abs(book_imb)
+        pre_gate_decision = Fz.pre_phase_gate(
+            energy_hits=energy_hits,
+            structure_score=structure_score,
+            magnitude=fusion.magnitude,
+        )
+        pre_gate_open = pre_gate_decision.pre_gate_open
+        reasons.append(f"pre_gate:{pre_gate_decision.reason}")
+
+        if pre_gate_open:
+            signal_type = "pre_phase"
+            gate_open = True
+        else:
+            signal_type = "pre_phase_blocked"
+    elif phase_info.mid:
+        if gate_open or coil_armed:
+            signal_type = "mid_phase"
+        else:
+            signal_type = "mid_phase_blocked"
+
     return Detection(
         symbol=window.symbol,
         tf=window.tf,
@@ -156,11 +206,14 @@ def build_detection(
         phase=phase_info.phase,
         watch_ok=phase_info.watch_ok,
         gate_open=gate_open,
+        pre_gate_open=pre_gate_open,
+        signal_type=signal_type,
         confidence=fusion.fusion_score / 100.0,
         magnitude=fusion.magnitude,
         price=window.price,
         fusion=fusion,
         gate=gate_decision,
+        pre_gate=pre_gate_decision,
         phase_info=phase_info,
         factors=factors,
         quarantine_factors=quarantine,

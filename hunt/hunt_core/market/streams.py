@@ -1225,17 +1225,22 @@ class HuntCcxtStreams:
                 await self._on_ws_loop_error("bbo", exc)
 
     async def _watch_tickers_mux(self) -> None:
-        """Rolling 24h stats for all symbols via watch_tickers."""
+        """Rolling 24h stats for all symbols via watch_tickers (REST fallback on reconnect)."""
         ex = self._ws_ex()
         while not self._stop.is_set():
             syms = self._ccxt_symbols()
             if not syms:
                 await asyncio.sleep(0.5)
                 continue
+            now_ms = int(time.time() * 1000)
+            rest_fallback = time.monotonic() < self._post_reconnect_quiet_until
             try:
-                tickers = await ex.watch_tickers(syms)
+                if rest_fallback:
+                    tickers = await ex.fetch_tickers(syms)
+                    LOG.info("ticker_rest_fallback | reason=ws_reconnect quiet_until=%.1f", self._post_reconnect_quiet_until)
+                else:
+                    tickers = await ex.watch_tickers(syms)
                 self._touch()
-                now_ms = int(time.time() * 1000)
                 items = tickers.values() if isinstance(tickers, dict) else []
                 for item in items:
                     if not isinstance(item, dict):

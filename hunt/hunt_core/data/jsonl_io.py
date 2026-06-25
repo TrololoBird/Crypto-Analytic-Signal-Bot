@@ -2,7 +2,27 @@
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
+
+
+_RETENTION_DAYS = 7  # Task 5: archive rotated files older than this
+
+
+def _archive_if_expired(path: Path, *, max_age_days: int = _RETENTION_DAYS) -> None:
+    """Move a rotated file to archive/ if its mtime exceeds max_age_days."""
+    try:
+        if not path.exists():
+            return
+        mtime = path.stat().st_mtime
+        age_s = time.time() - mtime
+        if age_s > max_age_days * 86400:
+            archive_dir = path.parent / "archive"
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            dest = archive_dir / path.name
+            shutil.move(str(path), str(dest))
+    except OSError:
+        return
 
 
 def rotate_jsonl_if_needed(
@@ -33,6 +53,11 @@ def rotate_jsonl_if_needed(
         path.touch()
     except OSError:
         return
+    # Archive old rotated files
+    for idx in range(1, keep + 1):
+        p = path.with_name(f"{path.name}.{idx}")
+        if p.exists():
+            _archive_if_expired(p)
 
 
 def append_jsonl_lines(path: Path, lines: list[str]) -> None:

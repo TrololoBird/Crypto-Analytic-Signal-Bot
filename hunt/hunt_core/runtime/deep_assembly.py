@@ -184,7 +184,6 @@ async def assemble_deep_tick(
 
     try:
         from hunt_core.features.microstructure import build_microstructure_context
-        from hunt_core.deep.signal import resolve_trade_direction
 
         market = dict(row.get("market") or {})
         market["symbol"] = sym
@@ -196,8 +195,6 @@ async def assemble_deep_tick(
                 LOG.warning("deep_microstructure_failed", symbol=sym, direction=direction, error=repr(exc))
         if ms_by_dir:
             row["microstructure_by_direction"] = ms_by_dir
-            pick = resolve_trade_direction(row)[0]
-            row["microstructure"] = ms_by_dir.get(pick) or ms_by_dir.get("long")
     except Exception as exc:
         LOG.warning("deep_microstructure_pack_failed", symbol=sym, error=repr(exc))
 

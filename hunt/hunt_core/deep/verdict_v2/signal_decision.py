@@ -79,6 +79,16 @@ def decide_signal(
         gates_failed.append("path_neutral")
         return SignalDecision(action="wait", reason="Path neutral/range — no directional signal", gates_failed=gates_failed)
 
+    # timing_c is a binary veto — if bar not closed, no point evaluating strength/RR
+    if cfg.gates.require_timing_c and timing is not None and not timing.ready:
+        gates_failed.append("timing_c")
+        return SignalDecision(
+            action="wait",
+            reason="WAIT: timing_c — ждём закрытия бара",
+            gates_failed=gates_failed,
+            trade_plan=plan,
+        )
+
     if strength.score < cfg.gates.strength_min:
         gates_failed.append("strength")
     if fragility.score > cfg.gates.fragility_max:
@@ -87,8 +97,8 @@ def decide_signal(
         gates_failed.append("coverage")
     if catalyst.confidence < 0.35:
         gates_failed.append("catalyst")
-    if cfg.gates.require_timing_c and timing is not None and not timing.ready:
-        gates_failed.append("timing_c")
+    if trade_q.score < cfg.gates.trade_quality_min:
+        gates_failed.append("trade_quality")
     if plan is None:
         gates_failed.append("no_plan")
     else:
@@ -103,8 +113,14 @@ def decide_signal(
         )
         if not plan_ok:
             gates_failed.append("plan_geometry")
-        elif plan.rr_primary < cfg.gates.rr_primary_min:
-            gates_failed.append("rr_primary")
+        else:
+            rr_floor = cfg.gates.rr_primary_min
+            if strength.label == "weak":
+                rr_floor = max(rr_floor, 1.8)
+            elif strength.label == "moderate":
+                rr_floor = max(rr_floor, 1.3)
+            if plan.rr_primary < rr_floor:
+                gates_failed.append("rr_primary")
 
     if gates_failed:
         reason = f"WAIT: {', '.join(gates_failed)}"

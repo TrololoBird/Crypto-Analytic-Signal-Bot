@@ -145,7 +145,7 @@ def _contract_issues_for_setup(
         stop_loss=setup.get("stop_loss"),
         tp1=tp1,
         tp2=tp2,
-        tp3=tp2,
+        tp3=setup.get("tp3") or tp2,
         scale_weights=(0.5, 0.5),
         valid_until=datetime.now(UTC) + timedelta(hours=12),
     )
@@ -162,6 +162,8 @@ def _latch_delivery_geometry(setup: dict[str, Any]) -> None:
         "stop_loss": setup.get("stop_loss"),
         "tp1": setup.get("tp1"),
         "tp2": setup.get("tp2"),
+        "tp3": setup.get("tp3"),
+        "entry_type": setup.get("entry_type"),
         "risk_reward": setup.get("risk_reward"),
     }
 

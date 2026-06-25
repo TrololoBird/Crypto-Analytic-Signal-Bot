@@ -298,9 +298,14 @@ def _veto(reasons: list[str], price: float) -> dict[str, Any]:
         "stop_loss": 0.0,
         "tp1": 0.0,
         "tp2": 0.0,
+        "tp3": 0.0,
         "invalidation_above": 0.0,
         "invalidation_below": 0.0,
         "risk_reward": 0.0,
+        "rr_tp1": 0.0,
+        "rr_tp2": 0.0,
+        "rr_tp3": 0.0,
+        "entry_type": "limit",
         "sl_dist_pct": None,
         "tp2_dist_pct": None,
     }
@@ -1082,6 +1087,28 @@ def structural_short_levels(
     if sl_dist_pct > sl_max_pct and not structure_sl:
         veto.append("sl_nominal_too_wide")
 
+    tp3 = _f(fib_tp.get("ret_618") if "ret_618" in (fib_tp or {}) else 0.0)
+    if tp3 <= 0 or tp3 >= tp2:
+        leg = ih - il_tp
+        tp3 = round(ih - leg * 0.618, 6) if leg > 0 else round(tp2 - atr * 2, 6)
+    if tp3 >= tp2:
+        tp3 = round(tp2 - atr * 2, 6)
+    if tp3 <= 0:
+        tp3 = round(tp2 * 0.97, 6)
+
+    if entry_lo <= price <= entry_hi:
+        entry_type = "market"
+    elif price >= entry_hi:
+        dist = price - entry_hi
+        entry_type = "pullback_limit" if dist < atr * 0.5 else "limit"
+    else:
+        entry_type = "market"
+
+    risk_d = max(stop - worst, 1e-9)
+    rr_tp1 = round((worst - tp1) / risk_d, 2) if risk_d > 0 else 0.0
+    rr_tp2 = round((worst - tp2) / risk_d, 2) if risk_d > 0 else 0.0
+    rr_tp3 = round((worst - tp3) / risk_d, 2) if risk_d > 0 else 0.0
+
     return {
         "viable": not veto,
         "veto": veto,
@@ -1089,10 +1116,15 @@ def structural_short_levels(
         "stop_loss": stop,
         "tp1": tp1,
         "tp2": tp2,
+        "tp3": tp3,
         "tp1_label": tp1_label,
         "tp2_label": tp2_label,
         "invalidation_above": stop,
         "risk_reward": rr,
+        "rr_tp1": rr_tp1,
+        "rr_tp2": rr_tp2,
+        "rr_tp3": rr_tp3,
+        "entry_type": entry_type,
         "sl_dist_pct": sl_dist_pct,
         "tp2_dist_pct": round((worst - tp2) / worst * 100.0, 2),
         "level_mode": adapt.mode if tp_mode in {"fib", "fib_only", "fib_fallback"} else f"{adapt.mode}+{tp_mode}",
@@ -1235,6 +1267,26 @@ def structural_long_levels(
     if rr < min_rr:
         veto.append("rr_below_min")
 
+    tp3 = _f(fib.get("ext_1618"))
+    if tp3 <= tp2:
+        leg = ih - il
+        tp3 = round(ih + leg * 0.618, 6) if leg > 0 else round(tp2 + atr * 2, 6)
+    if tp3 <= tp2:
+        tp3 = round(tp2 + atr * 2, 6)
+
+    if entry_lo <= price <= entry_hi:
+        entry_type = "market"
+    elif price <= entry_lo:
+        dist = entry_lo - price
+        entry_type = "pullback_limit" if dist < atr * 0.5 else "limit"
+    else:
+        entry_type = "market"
+
+    risk = max(worst - stop, 1e-9)
+    rr_tp1 = round((tp1 - worst) / risk, 2) if risk > 0 else 0.0
+    rr_tp2 = round((tp2 - worst) / risk, 2) if risk > 0 else 0.0
+    rr_tp3 = round((tp3 - worst) / risk, 2) if risk > 0 else 0.0
+
     return {
         "viable": not veto,
         "veto": veto,
@@ -1242,10 +1294,15 @@ def structural_long_levels(
         "stop_loss": stop,
         "tp1": tp1,
         "tp2": tp2,
+        "tp3": tp3,
         "tp1_label": tp1_label,
         "tp2_label": tp2_label,
         "invalidation_below": stop,
         "risk_reward": rr,
+        "rr_tp1": rr_tp1,
+        "rr_tp2": rr_tp2,
+        "rr_tp3": rr_tp3,
+        "entry_type": entry_type,
         "sl_dist_pct": sl_dist_pct,
         "tp2_dist_pct": round((tp2 - worst) / worst * 100.0, 2),
         "level_mode": adapt.mode if tp_mode in {"fib", "fib_only", "fib_fallback"} else f"{adapt.mode}+{tp_mode}",
@@ -1266,6 +1323,7 @@ def fib_retracement_levels(high: float, low: float) -> dict[str, float]:
         "ret_236": round(high - leg * 0.236, 6),
         "ret_382": round(high - leg * 0.382, 6),
         "ret_50": round(high - leg * 0.5, 6),
+        "ret_618": round(high - leg * 0.618, 6),
     }
 
 

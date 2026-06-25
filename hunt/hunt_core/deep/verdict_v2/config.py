@@ -71,13 +71,13 @@ class VerdictV2Config:
     )
     priorities_c: dict[str, float] = field(
         default_factory=lambda: {
-            "macro_trend": 0.06,
-            "structural": 0.08,
-            "positioning": 0.18,
-            "derivatives": 0.10,
-            "flow": 0.20,
-            "execution_pressure": 0.16,
-            "cross_consensus": 0.14,
+            "macro_trend": 0.28,
+            "structural": 0.24,
+            "positioning": 0.20,
+            "derivatives": 0.14,
+            "flow": 0.06,
+            "execution_pressure": 0.04,
+            "cross_consensus": 0.04,
         }
     )
 

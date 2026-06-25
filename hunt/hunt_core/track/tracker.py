@@ -45,6 +45,7 @@ from hunt_core.track.events import append_signal_event as _append_event
 from hunt_core.track._tracker_fsm import (
     SignalPhase,
     INVALIDATING_CLOSE_REASONS as _INVALIDATING_CLOSE_REASONS,
+    _ACTIVE_PHASES,  # private name — used in close_signal()
     coerce_signal_phase as _coerce_signal_phase,
     initial_signal_phase as _initial_signal_phase,
     is_signal_active as _is_signal_active,
@@ -733,6 +734,136 @@ def close_signal(
         )
     except Exception:  # noqa: BLE001
         pass
+    # Task 7: auto-resolution — record outcome to ledger
+    try:
+        _ledger_event = {
+            "tp1_hit": "tp1_hit", "tp2_hit": "tp2_hit",
+            "stop_loss": "sl_hit", "stop_loss_slippage": "sl_hit",
+            "orphan_expired": "timeout", "time_stall": "timeout",
+        }.get(reason, "close")
+        from hunt_core.track.outcome_ledger import append_ledger_event
+        append_ledger_event({
+            "symbol": symbol,
+            "direction": direction,
+            "event": _ledger_event,
+            "delivered": True,
+            "reason": reason,
+            "exit_price": sig.get("exit_price"),
+            "pnl_pct": sig.get("pnl_pct"),
+            "duration_min": sig.get("duration_min"),
+            "fusion_score": sig.get("fusion_score") or sig.get("score"),
+            "entry_lifecycle_phase": sig.get("entry_lifecycle_phase"),
+            "close_lifecycle_phase": sig.get("close_lifecycle_phase"),
+            "entry_zone": [sig.get("entry_lo"), sig.get("entry_hi")],
+            "stop_loss": sig.get("stop_loss"),
+            "tp1": sig.get("tp1"),
+            "tp2": sig.get("tp2"),
+            "risk_reward": sig.get("risk_reward"),
+        })
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# Auto-resolution threshold: close signals older than this (live price check).
+AUTO_RESOLVE_TIMEOUT_HOURS = 48.0
+AUTO_RESOLVE_GRACE_MINUTES = 5.0  # ignore TP1/SL hits within first N min (entry still filling)
+
+
+def auto_resolve_active_signals(
+    tracker_state: dict[str, Any],
+    price_map: dict[str, float],
+    *,
+    now: datetime | None = None,
+    timeout_hours: float = AUTO_RESOLVE_TIMEOUT_HOURS,
+    grace_minutes: float = AUTO_RESOLVE_GRACE_MINUTES,
+) -> list[str]:
+    """Check all active signals against live price — TP1/SL/timeout resolution.
+
+    Uses live WS ticker prices (not kline extremes) so resolution happens
+    at tick granularity. Writes to outcome ledger via ``close_signal()``.
+
+    Returns list of closed signal keys (e.g. ``["BTCUSDT:long", ...]``).
+    """
+    ts = now or clock.now_utc()
+    signals = tracker_state.get("signals") or {}
+    closed: list[str] = []
+
+    for key, sig in list(signals.items()):
+        if not isinstance(sig, dict) or sig.get("status") in ("closed", "invalidated"):
+            continue
+
+        sym = sig.get("symbol") or ""
+        direction = sig.get("direction") or ""
+        if not sym or direction not in ("long", "short"):
+            continue
+
+        price = price_map.get(sym)
+        if price is None or price <= 0:
+            continue
+
+        # Grace period: ignore TP1/SL hits during entry fill window
+        age_min = _signal_age_min(sig, ts)
+        if age_min < grace_minutes:
+            continue
+        if age_min > timeout_hours * 60:
+            close_signal(
+                tracker_state,
+                symbol=sym,
+                direction=direction,
+                reason="timeout",
+                exit_price=price,
+                now=ts,
+            )
+            closed.append(key)
+            continue
+
+        tp1 = float(sig.get("tp1") or 0)
+        sl = float(sig.get("stop_loss") or 0)
+
+        if direction == "long":
+            if tp1 > 0 and price >= tp1:
+                close_signal(
+                    tracker_state,
+                    symbol=sym,
+                    direction=direction,
+                    reason="tp1_hit",
+                    exit_price=price,
+                    now=ts,
+                )
+                closed.append(key)
+            elif sl > 0 and price <= sl:
+                close_signal(
+                    tracker_state,
+                    symbol=sym,
+                    direction=direction,
+                    reason="stop_loss",
+                    exit_price=price,
+                    now=ts,
+                )
+                closed.append(key)
+        elif direction == "short":
+            if tp1 > 0 and price <= tp1:
+                close_signal(
+                    tracker_state,
+                    symbol=sym,
+                    direction=direction,
+                    reason="tp1_hit",
+                    exit_price=price,
+                    now=ts,
+                )
+                closed.append(key)
+            elif sl > 0 and price >= sl:
+                close_signal(
+                    tracker_state,
+                    symbol=sym,
+                    direction=direction,
+                    reason="stop_loss",
+                    exit_price=price,
+                    now=ts,
+                )
+                closed.append(key)
+
+    return closed
 
 
 # Minimum signal age before trusting wider bars for intrabar extremes: a live 5m

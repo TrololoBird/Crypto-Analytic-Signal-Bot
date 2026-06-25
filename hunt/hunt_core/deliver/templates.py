@@ -79,15 +79,18 @@ def format_squeeze_telegram(row: dict[str, Any]) -> str:
     dir_emoji, dir_label, evidence = _squeeze_direction(row, phase_human=phase_human)
     evidence_txt = "\n".join(f"   · {e}" for e in evidence) if evidence else "   · нет сигналов"
 
+    price = float(row.get("price") or 0)
     dump = row.get("dump") or {}
     long_setup = row.get("long") or {}
-    res = dump.get("resistance_liq") or dump.get("support_break_level")
-    sup = long_setup.get("support_zone") or dump.get("support_break_level")
+    res_raw = dump.get("resistance_liq") or dump.get("resistance_break_level")
+    res = float(res_raw) if res_raw and (price <= 0 or float(res_raw) > price) else None
+    sup_raw = long_setup.get("support_zone") or dump.get("support_break_level")
+    sup = float(sup_raw) if sup_raw and (price <= 0 or float(sup_raw) < price) else None
     level_parts: list[str] = []
-    if res:
-        level_parts.append(f"Сопротивление <code>{fmt_price(float(res))}</code>")
-    if sup and sup != res:
-        level_parts.append(f"Поддержка <code>{fmt_price(float(sup))}</code>")
+    if res is not None:
+        level_parts.append(f"Сопротивление <code>{fmt_price(res)}</code>")
+    if sup is not None:
+        level_parts.append(f"Поддержка <code>{fmt_price(sup)}</code>")
     levels_line = "  |  ".join(level_parts) if level_parts else ""
 
     lines = [

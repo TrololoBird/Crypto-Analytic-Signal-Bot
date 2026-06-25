@@ -6,18 +6,27 @@ from typing import Any
 
 def build_confluence_grid(row: dict[str, Any]) -> list[dict[str, Any]]:
     """Level map: POC/structure/fib magnets per TF."""
+    price = float(row.get("price") or 0)
     grid: list[dict[str, Any]] = []
     for tf_name in ("1h", "15m", "5m"):
         block = (row.get("timeframes") or {}).get(tf_name) or {}
         if not block or block.get("status") == "empty":
             continue
+        support = block.get("local_support") or block.get("donchian_low20")
+        resistance = block.get("local_resistance") or block.get("donchian_high20")
+        # Validate support/resistance against current price
+        if price > 0:
+            if support is not None and float(support) >= price:
+                support = None
+            if resistance is not None and float(resistance) <= price:
+                resistance = None
         entry = {
             "tf": tf_name,
             "poc": block.get("poc") or block.get("poc_1h"),
             "vah": block.get("vah"),
             "val": block.get("val"),
-            "support": block.get("local_support") or block.get("donchian_low20"),
-            "resistance": block.get("local_resistance") or block.get("donchian_high20"),
+            "support": support,
+            "resistance": resistance,
         }
         grid.append(entry)
     regime = row.get("regime") or {}

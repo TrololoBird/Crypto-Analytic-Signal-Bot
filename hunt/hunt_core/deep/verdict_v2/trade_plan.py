@@ -23,7 +23,21 @@ def build_trade_plan(
     price = safe_float(row.get("price"))
     atr = atr_from_row(row)
     zone_mid = (zone[0] + zone[1]) / 2.0
-    entry_type = "pullback_limit" if price > 0 and abs(price - zone_mid) > atr * 0.12 else "market"
+    entry_lo, entry_hi = zone[0], zone[1]
+    if entry_lo <= price <= entry_hi:
+        entry_type = "market"
+    elif direction == "long":
+        if price <= entry_lo:
+            dist = entry_lo - price
+            entry_type = "pullback_limit" if dist < atr * 0.5 else "limit"
+        else:
+            entry_type = "market"
+    else:
+        if price >= entry_hi:
+            dist = price - entry_hi
+            entry_type = "pullback_limit" if dist < atr * 0.5 else "limit"
+        else:
+            entry_type = "market"
     from hunt_core.deep.verdict_v2.levels import pick_catalyst_level
 
     cat_level, _ = pick_catalyst_level(row, direction, entry_zone=zone, atr=atr)

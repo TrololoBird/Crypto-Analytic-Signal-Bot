@@ -337,10 +337,9 @@ def run_execution_pressure(row: dict[str, Any]) -> EngineOutput:
         elif direction == "short" and score > 0.1:
             short += score * 0.15
             evidence.append(label)
-    long, short = _micro_nudge(row, long=long, short=short, evidence=evidence)
     present = sum(
         1
-        for k in ("depth_imbalance", "microprice_bias", "map_book_imbalance_1pct", "map_absorption_count")
+        for k in ("depth_imbalance", "microprice_bias", "map_book_imbalance_1pct")
         if market.get(k) is not None
     ) + (1 if ms else 0)
     info = clamp01(0.35 + present * 0.12)

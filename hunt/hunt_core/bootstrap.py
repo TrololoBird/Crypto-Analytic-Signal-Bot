@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -20,6 +21,7 @@ def bootstrap() -> Path:
     for p in (str(repo), str(hunt_root)):
         if p not in sys.path:
             sys.path.insert(0, p)
+    os.environ.setdefault("POLARS_STREAMING", "1")
     return repo
 
 

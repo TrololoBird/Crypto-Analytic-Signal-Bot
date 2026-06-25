@@ -195,7 +195,21 @@ TF_MS: dict[str, int] = {
 }
 
 # Closed-bar age multiplier before a TF is treated as stale for live signals.
-_STALE_AGE_MULT = 2.5
+# idx=-2 in audit_kline_staleness means we check the 2nd-to-last CLOSED bar,
+# which is already 1 full TF interval old. Sparse/thin symbols and REST timing
+# jitter mean this bar can be up to 2× the interval old before the next REST
+# cycle refreshes it. Multipliers below provide adequate grace per TF.
+_STALE_AGE_MULT: dict[str, float] = {
+    "1m": 5.0,
+    "3m": 4.0,
+    "5m": 4.0,
+    "15m": 4.0,   # was 2.5 (37.5 min) → now 60 min; prevents false-positives on sparse symbols
+    "1h": 3.0,
+    "4h": 2.5,    # 10 h; bootstrap frame-cache bug (fix 1) prevents 17h stale
+    "1d": 2.0,
+    "1w": 2.0,
+}
+_DEFAULT_STALE_AGE_MULT = 3.0
 
 # Core TFs required before hunt scoring / delivery on any tier.
 REQUIRED_SIGNAL_KLINE_TFS: tuple[str, ...] = ("1m", "5m", "15m", "1h", "4h")
@@ -345,9 +359,11 @@ def audit_kline_staleness(
     tf: str,
     symbol: str,
     now_ms: int | None = None,
-    max_age_mult: float = _STALE_AGE_MULT,
+    max_age_mult: float | None = None,
 ) -> list[str]:
     """Reject when the latest closed bar is older than max_age_mult * TF interval."""
+    if max_age_mult is None:
+        max_age_mult = _STALE_AGE_MULT.get(tf, _DEFAULT_STALE_AGE_MULT) if isinstance(_STALE_AGE_MULT, dict) else float(_STALE_AGE_MULT)
     if df is None or df.is_empty():
         return []
     interval_ms = TF_MS.get(tf)

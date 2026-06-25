@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -55,11 +56,15 @@ def build_authority_snapshot(
     mission_pass = not _any_prefix(codes, _MISSION_BLOCK_PREFIXES)
     rr_pass = not _any_prefix(codes, _RR_BLOCK_PREFIXES)
     contract_pass = not _any_prefix(codes, _CONTRACT_BLOCK_PREFIXES)
+    pre_gate = s.get("pre_gate") if isinstance(s.get("pre_gate"), dict) else {}
 
     return {
         "fusion_gate_open": fusion_gate_open,
         "fusion_score": s.get("fusion_score") or mf.get("primary_score"),
         "phase_fusion": lc.get("phase_fusion") or lc.get("phase") or s.get("phase"),
+        "signal_type": s.get("signal_type", "none"),
+        "pre_gate_open": pre_gate.get("open", False),
+        "pre_gate_energy": pre_gate.get("energy_hits", 0),
         "playbook_pass_ok": playbook_pass if req_n is not None else True,
         "mission_pass": mission_pass,
         "rr_pass": rr_pass,
@@ -163,6 +168,10 @@ def build_ledger_record(
 
 _CANDIDATE_LEDGER_DEDUPE: dict[str, str] = {}
 
+# Task 6: per-symbol cooldown (300s between candidates)
+_CANDIDATE_COOLDOWN_S = 300.0
+_last_candidate_by_sym: dict[str, float] = {}
+
 
 def maybe_append_candidate_ledger(
     *,
@@ -180,6 +189,11 @@ def maybe_append_candidate_ledger(
     sym = str(symbol or "").upper()
     direc = str(direction or "").lower()
     if not sym or direc not in {"long", "short"}:
+        return
+    # Per-symbol cooldown to prevent spam
+    last_ts = _last_candidate_by_sym.get(sym, 0.0)
+    now = time.monotonic()
+    if now - last_ts < _CANDIDATE_COOLDOWN_S:
         return
     bar_key = str(
         row.get("bar_close_ts")
@@ -203,6 +217,7 @@ def maybe_append_candidate_ledger(
     record["lane"] = "candidate"
     append_ledger_event(record)
     _CANDIDATE_LEDGER_DEDUPE[f"{sym}:{direc}"] = dedupe
+    _last_candidate_by_sym[sym] = now
 
 
 def append_outcome_horizon(

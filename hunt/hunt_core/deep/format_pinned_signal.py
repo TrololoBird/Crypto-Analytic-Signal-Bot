@@ -8,7 +8,7 @@ from hunt_core.deep.verdict_v2.types import ScenarioVerdict, TradePlan
 
 _ACTION_RU = {"LONG": "ЛОНГ", "SHORT": "ШОРТ", "WAIT": "ЖДЁМ"}
 _STRENGTH_RU = {"strong": "сильный", "moderate": "средний", "weak": "слабый"}
-_FRAG_RU = {"low": "низкая", "medium": "средняя", "high": "высокая"}
+_FRAG_RU = {"low": "низкая", "medium": "средняя", "moderate": "умеренная", "high": "высокая"}
 _TRADE_RU = {"favorable": "благоприятная", "marginal": "слабая", "poor": "плохая"}
 _GATE_RU = {
     "timing_c": "нет подтверждения тайминга",
@@ -287,13 +287,17 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
             lines.extend(html.escape(line) for line in reasons)
 
     scenario_hdr = _hypothesis_header(action, dec.gates_failed)
-    if narr_str and narr_str != path_type_str:
-        lines.append(f"{scenario_hdr}: <b>{path_type_str}</b> · {narr_str}")
-    else:
-        lines.append(f"{scenario_hdr}: <b>{path_type_str}</b>")
+    _rejected = scenario_hdr == "Гипотеза (отклонена)"
+    if not _rejected:
+        if narr_str and narr_str != path_type_str:
+            lines.append(f"{scenario_hdr}: <b>{path_type_str}</b> · {narr_str}")
+        else:
+            lines.append(f"{scenario_hdr}: <b>{path_type_str}</b>")
 
     cat_label_ru = html.escape(_ru_catalyst(cat.label))
-    if action == "WAIT":
+    if action == "WAIT" and _rejected:
+        pass  # fully rejected: no scenario content, no catalyst
+    elif action == "WAIT":
         lines.append(f"Условие гипотезы: {cat_label_ru}" + (
             f" @ <code>{_px(cat.trigger_level)}</code>" if cat.trigger_level else ""
         ))
@@ -306,13 +310,21 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
         lo, hi = plan.entry_zone
         entry_type_ru = _ENTRY_TYPE_RU.get(plan.entry_type, plan.entry_type)
         rr_label = plan.rr_base_label if plan.plan_lifecycle != "active" else "R:R (от входа)"
+        rr_cons1 = plan.rr_conservative_tp1
+        rr_cons2 = plan.rr_conservative_tp2
+        rr_cons3 = plan.rr_conservative_tp3
+        zone_wide = hi > 0 and lo > 0 and (hi - lo) / lo > 0.003
+        def _rr_fmt(rr_mid: float, rr_worst: float) -> str:
+            if zone_wide and rr_worst > 0 and abs(rr_mid - rr_worst) >= 0.15:
+                return f"{rr_worst:.1f}–{rr_mid:.1f}R"
+            return f"{rr_mid:.1f}R"
         lines.extend(
             [
                 f"Зона входа: <code>{_px(lo)}</code> – <code>{_px(hi)}</code> ({entry_type_ru})",
                 f"Stop-loss: <code>{_px(plan.stop_loss)}</code>",
-                f"TP1: <code>{_px(plan.take_profit_1)}</code> ({plan.rr_tp1:.1f}R · {rr_label})",
-                f"TP2: <code>{_px(plan.take_profit_2)}</code> ({plan.rr_tp2:.1f}R)",
-                f"TP3: <code>{_px(plan.take_profit_3)}</code> ({plan.rr_tp3:.1f}R)",
+                f"TP1: <code>{_px(plan.take_profit_1)}</code> ({_rr_fmt(plan.rr_tp1, rr_cons1)} · {rr_label})",
+                f"TP2: <code>{_px(plan.take_profit_2)}</code> ({_rr_fmt(plan.rr_tp2, rr_cons2)})",
+                f"TP3: <code>{_px(plan.take_profit_3)}</code> ({_rr_fmt(plan.rr_tp3, rr_cons3)})",
             ]
         )
     elif plan and tq.verdict == "favorable":
@@ -375,15 +387,32 @@ def format_pinned_signal(row: dict[str, Any], verdict: ScenarioVerdict | None = 
                 f"TP3 {float(evt.get('rr_tp3') or 0):.1f}R · <i>{html.escape(rr_base)}</i>"
             )
 
-    # Alt paths: only show if different from main path type
+    # Alt scenario: show opposite-direction path as invalidation scenario
     alt_paths = summary.get("secondary_paths") or []
-    main_path_key = path.type.lower().replace("_", " ")
-    unique_alts = [
-        p for p in alt_paths[:2]
-        if str(p).lower().replace("_", " ") != main_path_key
+    main_dir = path.direction
+    _OPPOSITE_HINTS = {
+        "long": {"short", "weak_short"},
+        "short": {"long", "weak_long"},
+        "weak_long": {"short", "weak_short"},
+        "weak_short": {"long", "weak_long"},
+    }
+    opposite_dirs = _OPPOSITE_HINTS.get(main_dir, set())
+    pc_alts = v2.pattern_confidence.alternatives if v2 else ()
+    dir_by_id = {a.id: a.direction_hint for a in pc_alts}
+    opposite_alts = [
+        p for p in alt_paths[:4]
+        if dir_by_id.get(str(p), "") in opposite_dirs
     ]
-    if unique_alts:
-        alt_ru = ", ".join(_ru_path(str(p), soft=soft_narr) for p in unique_alts)
+    same_dir_alts = [
+        p for p in alt_paths[:2]
+        if str(p).lower().replace("_", " ") != path.type.lower().replace("_", " ")
+        and dir_by_id.get(str(p), "") not in opposite_dirs
+    ]
+    if opposite_alts:
+        alt_ru = ", ".join(_ru_path(str(p), soft=False) for p in opposite_alts[:2])
+        lines.append(f"<i>Альт. сценарий (отмена): {html.escape(alt_ru)}</i>")
+    elif same_dir_alts:
+        alt_ru = ", ".join(_ru_path(str(p), soft=soft_narr) for p in same_dir_alts[:2])
         lines.append(f"<i>Альт. сценарий: {html.escape(alt_ru)}</i>")
 
     if cfg.tg_verbose:

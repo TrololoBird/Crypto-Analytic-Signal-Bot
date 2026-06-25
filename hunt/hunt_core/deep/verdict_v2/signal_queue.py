@@ -102,6 +102,7 @@ def compute_opportunity_score(summary: dict[str, Any], *, activation_state: str 
         score = clamp01(score + 0.08)
     elif activation_state in {"near_entry", "near_catalyst"}:
         score = clamp01(score + 0.04)
+    score = min(score, clamp01(strength + 0.20))
     return round(clamp01(score), 3)
 
 
@@ -343,13 +344,14 @@ def format_queue_telegram(queue: dict[str, Any] | None = None) -> str:
         act = str(item.get("activation") or "idle")
         act_ru = _ACT_RU.get(act, act.replace("_", " "))
         rank = int(item.get("rank") or 0)
-        promo = " · ⬆" if item.get("promoted") else ""
+        promo = " · 🆕" if item.get("promoted") else ""
         act_bit = f" · {html.escape(act_ru)}" if act_ru else ""
         tag = ""
         if item.get("correlation_tag"):
             tag = f" · <i>{html.escape(str(item['correlation_tag']))}</i>"
         if item.get("equivalence") == "gold":
-            tag = " · <i>золото</i>"
+            gold_dir = "↓" if action_raw == "SHORT" else ("↑" if action_raw == "LONG" else "")
+            tag = f" · <i>корр. золото {gold_dir}</i>"
         lines.append(
             f"{rank}. <b>{sym}</b> {action_ru} · {life_ru} · "
             f"приоритет <code>{score:.2f}</code> · {path}{act_bit}{promo}{tag}"

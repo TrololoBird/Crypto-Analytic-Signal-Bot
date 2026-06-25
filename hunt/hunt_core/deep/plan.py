@@ -3,7 +3,11 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+import structlog
+
 from hunt_core.shared.primitives import atr_pad, forecast_band
+
+_LOG = structlog.get_logger(__name__)
 
 _MAX_RR = 10.0
 _MIN_RR = 0.3
@@ -153,6 +157,26 @@ def finalize_plan_geometry(
     entry_ref_mid = _zone_midpoint((ez_lo, ez_hi))
     p["entry_zone"] = [ez_lo, ez_hi]
 
+    # Zone clamping may have moved entry_ref_mid — re-enforce _MIN_RR with updated midpoint.
+    _stale_rr1 = _rr(entry_ref_mid, tps[0], sl, direction) if tps else 0.0
+    _replaced = False
+    for i, tp in enumerate(tps):
+        if _rr(entry_ref_mid, tp, sl, direction) < _MIN_RR:
+            mult = (i + 2) * 1.5
+            tps[i] = (entry_ref_mid + atr * mult) if direction == "long" else (entry_ref_mid - atr * mult)
+            _replaced = True
+    if _replaced:
+        _LOG.warning(
+            "plan_rr_clamp_repair",
+            stale_rr1=round(_stale_rr1, 3),
+            repaired_rr1=round(_rr(entry_ref_mid, tps[0], sl, direction), 3),
+            direction=direction,
+        )
+    if direction == "long":
+        tps = sorted(tps)
+    else:
+        tps = sorted(tps, reverse=True)
+
     p["tp1"] = round(tps[0], 6)
     p["tp2"] = round(tps[1], 6)
     p["tp3"] = round(tps[2], 6)
@@ -162,6 +186,8 @@ def finalize_plan_geometry(
     p["rr_tp2"] = round(_rr(entry_ref_mid, tps[1], sl, direction), 2)
     p["rr_tp3"] = round(_rr(entry_ref_mid, tps[2], sl, direction), 2)
     p["rr_conservative_tp1"] = round(_rr(entry_ref_worst, tps[0], sl, direction), 2)
+    p["rr_conservative_tp2"] = round(_rr(entry_ref_worst, tps[1], sl, direction), 2)
+    p["rr_conservative_tp3"] = round(_rr(entry_ref_worst, tps[2], sl, direction), 2)
     p["rr_base_label"] = "≈R:R (от середины зоны)"
     p["geometry_valid"] = plan_geometry_valid(p, direction=direction)
     return p

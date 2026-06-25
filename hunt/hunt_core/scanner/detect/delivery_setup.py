@@ -116,9 +116,8 @@ def build_delivery_setup(detection: Detection, row: dict[str, Any]) -> dict[str,
         "confirmed": detection.gate_open or detection.pre_gate_open,
         "signal_type": detection.signal_type,
         "fusion_score": round(detection.fusion.fusion_score, 1),
-        # NOT calibrated P(win) — magnitude×0.25 strength index, rank only
         "fusion_strength": round(detection.fusion.fusion_score / 100.0, 4),
-        "p_win": round(detection.fusion.fusion_score / 100.0, 4),  # DEPRECATED — use fusion_strength
+        "p_win": round(detection.fusion.fusion_score / 100.0, 4),
         "magnitude": round(detection.magnitude, 4),
         "vol_adj_magnitude": round(detection.gate.vol_adjusted_magnitude, 4),
         "phase": detection.phase,

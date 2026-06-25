@@ -65,7 +65,11 @@ def build_structural_forecast_panel(
     """Maps-derived target bands — no pump/dump archetype labels."""
     if not forecasts:
         return ""
-    lines = ["🎯 <b>Структурные цели</b> (карты / магниты ликвидности)"]
+    lines = [
+        "🎯 <b>Структурные цели</b> (карты / магниты ликвидности)",
+        "<i>% = уверенность в структуре зоны, не вероятность достижения; "
+        "верх и низ независимы</i>",
+    ]
     labels = {
         "structural_up": "↑ Зона выше",
         "structural_down": "↓ Зона ниже",
@@ -112,8 +116,8 @@ def build_structural_forecast_panel(
         fac_s = ""
         if factors:
             fac_s = " · " + ", ".join(html.escape(_FACTOR_RU.get(str(f), str(f))) for f in factors[:3])
-        lines.append(f"  {label}: <code>{band}</code> {conf:.0%}{move_s}{wide_flag}{fac_s}")
-    return "\n".join(lines) if len(lines) > 1 else ""
+        lines.append(f"  {label}: <code>{band}</code> увер.{conf:.0%}{move_s}{wide_flag}{fac_s}")
+    return "\n".join(lines) if len(lines) > 2 else ""
 
 
 __all__ = ["build_forecast_panel", "build_structural_forecast_panel"]

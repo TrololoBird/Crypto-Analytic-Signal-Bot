@@ -251,6 +251,23 @@ def _decl_check_rr_floor(
     return None
 
 
+# Per-hour rate limiter for pre_phase deliveries (safety net, remove after validation).
+_MAX_PRE_PHASE_PER_HOUR = 10
+_pre_phase_hits: list[float] = []
+
+
+def _pre_phase_rate_ok() -> bool:
+    now = __import__("time").time()
+    cutoff = now - 3600.0
+    while _pre_phase_hits and _pre_phase_hits[0] < cutoff:
+        _pre_phase_hits.pop(0)
+    return len(_pre_phase_hits) < _MAX_PRE_PHASE_PER_HOUR
+
+
+def _bump_pre_phase() -> None:
+    _pre_phase_hits.append(__import__("time").time())
+
+
 def _decl_check_playbook(
     *,
     row: dict[str, Any],
@@ -267,6 +284,12 @@ def _decl_check_playbook(
     _ = lifecycle, delivery_tier, symbol
     if legacy_fuel_delivery_enabled():
         return None
+    # Pre-phase signals use Dual-Gate as authority — skip playbook
+    if setup.get("signal_type") == "pre_phase":
+        if _pre_phase_rate_ok():
+            _bump_pre_phase()
+            return None
+        return GateResult(False, "pre_phase_rate_limit", "pre_phase rate limit hit")
     dir_lit = "short" if direction == "short" else "long"
     if setup_meets_playbook(setup, row=row, direction=dir_lit):  # type: ignore[arg-type]
         return None

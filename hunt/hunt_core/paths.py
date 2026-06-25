@@ -57,6 +57,7 @@ DELIVERY_STATE = DATA / "hunt_delivery_state.json"
 DATA_PLANE_AUDIT_JSONL = DATA / "data_plane_audit.jsonl"
 UNIVERSE_AUDIT_JSONL = DATA / "universe_audit.jsonl"
 RR_GEOMETRY_AUDIT_JSONL = DATA / "rr_geometry_audit.jsonl"
+EVIDENCE_TRACE_JSONL = DATA / "evidence_trace.jsonl"
 RECONCILE_PATH_SHADOW_JSONL = DATA / "reconcile_path_shadow.jsonl"
 
 __all__ = [
@@ -94,6 +95,7 @@ __all__ = [
     "RECONCILE_PATH_SHADOW_JSONL",
     "ROOT",
     "RR_GEOMETRY_AUDIT_JSONL",
+    "EVIDENCE_TRACE_JSONL",
     "SESSION_DIR",
     "SETUP_CANDIDATES_EVENTS",
     "SETUP_CANDIDATES_STATE",

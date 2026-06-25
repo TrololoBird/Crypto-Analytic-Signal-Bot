@@ -60,17 +60,25 @@ def _overlay_ws_tickers(
     symbols: tuple[str, ...] | list[str],
     ws_feed: HuntCcxtStreams | None,
 ) -> None:
-    """Prefer WS last over batch REST ticker for snapshot price seed."""
+    """Prefer WS last over batch REST ticker for snapshot price seed.
+
+    Only updates symbols already present from the REST ticker batch — never
+    creates new partial entries (which would lack quote_volume and trigger
+    ticker_field_missing downstream).
+    """
     if ws_feed is None:
         return
     for sym in symbols:
+        base = ticker_by_sym.get(sym)
+        if base is None:
+            continue  # no REST ticker — don't synthesise an incomplete entry
         lt = ws_feed.live_ticker(sym)
         if not lt:
             continue
         last = float(lt.get("last") or 0)
         if last <= 0:
             continue
-        base = dict(ticker_by_sym.get(sym) or {"symbol": sym})
+        base = dict(base)
         base["last_price"] = last
         ticker_by_sym[sym] = base
 

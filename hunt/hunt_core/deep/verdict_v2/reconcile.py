@@ -200,8 +200,8 @@ def _caveats_for(conflicts: tuple[str, ...]) -> tuple[str, ...]:
     _RU = {
         "dom_buyers_vs_short": "стакан в пользу покупателей против шорта",
         "dom_sellers_vs_long": "стакан в пользу продавцов против лонга",
-        "upside_band_vs_short": "апсайд-зона увереннее даунсайда при шорте",
-        "downside_band_vs_long": "даунсайд-зона увереннее апсайда при лонге",
+        "upside_band_vs_short": "апсайд-зона преобладает в структуре целей при шорте",
+        "downside_band_vs_long": "даунсайд-зона преобладает в структуре целей при лонге",
         "liq_magnet_above_stop": "магнит ликвидаций за стопом (вверх)",
         "liq_magnet_below_stop": "магнит ликвидаций за стопом (вниз)",
         "poc_cite_mismatch": "POC не согласуется с фактором сценария",
@@ -251,7 +251,10 @@ def reconcile_context(
     if level == "mild_conflict":
         mult = 0.78
     elif level == "strong_conflict":
-        mult = 0.0
+        # strong_conflict is vetoed by decide_signal's context_conflict early-exit;
+        # strength stays an intrinsic-rank axis — downgrade, don't collapse to a
+        # misleading 0.00 that double-presents the same context veto.
+        mult = 0.50
     return ReconciliationResult(
         level=level,
         conflicts=tuple(conflicts),

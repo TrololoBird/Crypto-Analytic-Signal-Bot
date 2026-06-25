@@ -89,6 +89,20 @@ async def safe_fetch(
         if client is not None:
             await client.await_rate_limit_pause()
         return await _invoke()
+    except ccxt.BadSymbol as exc:
+        from hunt_core.runtime.state import blacklist_symbol
+        sym = _extract_symbol_from_context(context)
+        if sym:
+            blacklist_symbol(sym)
+            LOG.warning(
+                "safe_fetch_bad_symbol_blacklisted | symbol=%s context=%s error=%s",
+                sym, context or type(target).__name__, exc,
+            )
+        LOG.warning(
+            "safe_fetch_bad_symbol | context=%s error=%s",
+            context or type(target).__name__, exc,
+        )
+        return None
     except ccxt.BaseError as exc:
         if client is not None:
             client.rest_gate.record_error(exc, context=context or "safe_fetch")
@@ -112,6 +126,18 @@ async def safe_fetch(
             exc,
         )
         return None
+
+
+def _extract_symbol_from_context(context: str) -> str | None:
+    """Try to extract symbol from a safe_fetch context string like 'klines.BTCUSDT.1m'."""
+    if not context:
+        return None
+    parts = str(context).replace("klines.", "").replace(".", " ").split()
+    for part in parts:
+        p = part.strip().upper()
+        if p.endswith("USDT") or p.endswith("USD") or p.endswith("BTC") or p.endswith("ETH"):
+            return p
+    return None
 
 
 

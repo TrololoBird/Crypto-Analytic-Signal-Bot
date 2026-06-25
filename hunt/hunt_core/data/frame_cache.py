@@ -16,6 +16,19 @@ _ENRICHMENT_TTL_S = 180.0
 _PREPARED_TTL_S = 900.0
 _ROW_CARRY_TTL_S = 90.0
 
+# Max age (seconds) for seeded kline frames before get_kline_frame treats them as
+# expired and returns None (forcing a fresh REST fetch on the next tick).
+_KLINE_FRAME_MAX_AGE_S: dict[str, float] = {
+    "1m": 120.0,
+    "5m": 600.0,
+    "15m": 1800.0,   # 30 min — half a 4h bar, still usable as short bridge
+    "1h": 7200.0,    # 2 h
+    "4h": 28800.0,   # 8 h  (2 × TF interval)
+    "1d": 172800.0,  # 48 h
+    "1w": 604800.0,  # 1 w
+}
+_DEFAULT_KLINE_FRAME_MAX_AGE_S = 3600.0
+
 
 @dataclass(slots=True)
 class EnrichmentSnapshot:
@@ -49,6 +62,7 @@ class SymbolFrameCache:
 
     def __init__(self) -> None:
         self._frames: dict[str, dict[str, pl.DataFrame]] = {}
+        self._frame_ts: dict[str, dict[str, float]] = {}  # symbol → TF → monotonic seed time
         self._bootstrapped: set[str] = set()
         self._enrichment: dict[str, EnrichmentSnapshot] = {}
         self._prepared: dict[str, PreparedSnapshot] = {}
@@ -84,21 +98,41 @@ class SymbolFrameCache:
         return dict(snap.row)
 
     def get_kline_frame(self, symbol: str, interval: str) -> Any | None:
-        """WS/bootstrap OHLCV fallback when REST fetch fails on hot path."""
-        return (self._frames.get(symbol.upper()) or {}).get(str(interval))
+        """WS/bootstrap OHLCV fallback when REST fetch fails on hot path.
+
+        Returns None when the seeded frame is older than _KLINE_FRAME_MAX_AGE_S
+        so callers are forced to do a fresh REST fetch rather than using stale
+        bootstrap data indefinitely.
+        """
+        sym = symbol.upper()
+        tf = str(interval)
+        frame = (self._frames.get(sym) or {}).get(tf)
+        if frame is None:
+            return None
+        seed_at = (self._frame_ts.get(sym) or {}).get(tf)
+        if seed_at is None:
+            return frame  # legacy seeded without timestamp — allow once
+        max_age = _KLINE_FRAME_MAX_AGE_S.get(tf, _DEFAULT_KLINE_FRAME_MAX_AGE_S)
+        if time.monotonic() - seed_at > max_age:
+            return None
+        return frame
 
     def has_carry_ready(self, symbol: str) -> bool:
         return self.has_delta_ready(symbol) and self.get_carry_row(symbol) is not None
 
     def seed_klines(self, symbol: str, kline_map: dict[str, Any]) -> None:
         sym = symbol.upper()
+        now = time.monotonic()
         bucket: dict[str, pl.DataFrame] = {}
+        ts_bucket: dict[str, float] = {}
         for tf, df in kline_map.items():
             if isinstance(df, pl.DataFrame) and not df.is_empty():
                 bucket[str(tf)] = df
+                ts_bucket[str(tf)] = now
         if not bucket:
             return
         self._frames.setdefault(sym, {}).update(bucket)
+        self._frame_ts.setdefault(sym, {}).update(ts_bucket)
         self._bootstrapped.add(sym)
 
     def seed_enrichment(self, symbol: str, pack: dict[str, Any]) -> None:

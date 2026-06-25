@@ -327,7 +327,9 @@ def format_query_telegram(q: QueryResult, *, added_watch: bool = False) -> str:
                 f"{html.escape(phase)} · watch-фаза · отдельный контур</i>"
             )
     else:
-        watch_lines.append("<i>Сканер: нет тика по символу (динамический скан)</i>")
+        watch_lines.append(
+            "<i>Сканер: нет отдельного тика (Deep-анализ выполнен, данные сканера отсутствуют)</i>"
+        )
     if watch_lines:
         parts.extend(["", "—", "<b>Сканер</b> (Модуль 2, справочно)", *watch_lines])
 
