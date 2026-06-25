@@ -45,7 +45,14 @@ from hunt_core.shared.market import (
 )
 from hunt_core.params.store import migrate_calibration_split, prescan_thresholds
 from hunt_core.runtime.cycle._cycle_tick import run_tick
-from hunt_core.runtime.state import LOG, OUT_PATH, SYMBOL_WATCH_MODES, new_session_state, should_stop
+from hunt_core.runtime.state import (
+    LOG,
+    OUT_PATH,
+    SYMBOL_WATCH_MODES,
+    is_blacklisted,
+    new_session_state,
+    should_stop,
+)
 from hunt_core.runtime.telegram_commands import build_hunt_telegram_commands
 from hunt_core.runtime.tick_io import rotate_hunt_ticks, rotate_telemetry_jsonl
 from hunt_core.track.events import record_funnel_stage
@@ -590,6 +597,7 @@ async def run_loop(
                         await ensure_lake_warm(client, _really_cold, writer=_warmup_writer)
                         _warmup_writer.close()
                     _lake_warmed_syms.update(_cold)
+                active = tuple(s for s in active if not is_blacklisted(s))
                 hunt_active = tuple(
                     s
                     for s in active
@@ -829,7 +837,6 @@ async def run_loop(
                 LOG.exception("expansion_fsm_save_failed")
         if tg_cmds is not None:
             await tg_cmds.close()
-        await hot_kline_loop.stop()
         try:
             await plane.aclose()
         except Exception:
