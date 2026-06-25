@@ -162,30 +162,8 @@ def _summarize_replay_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "ev_shadow_negative": sum(1 for v in ev_vals if v < 0),
         "block_codes": _count_codes(reports, "gate_code"),
         "blocker_codes": _count_codes(reports, "blocker_codes"),
-        "per_setup_wr": per_setup_wr_stub(reports),
         "reports": reports,
     }
-
-
-def per_setup_wr_stub(reports: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Stub WR bucket by lifecycle phase — calibration placeholder."""
-    buckets: dict[str, dict[str, int]] = {}
-    for rep in reports:
-        phase = str(rep.get("lc_phase") or rep.get("phase") or "unknown")
-        b = buckets.setdefault(phase, {"n": 0, "delivery_ok": 0})
-        b["n"] += 1
-        if rep.get("delivery_ok"):
-            b["delivery_ok"] += 1
-    out: dict[str, dict[str, Any]] = {}
-    for phase, counts in buckets.items():
-        n = counts["n"]
-        ok = counts["delivery_ok"]
-        out[phase] = {
-            "n": n,
-            "delivery_ok": ok,
-            "wr_stub": round(ok / n, 3) if n else None,
-        }
-    return out
 
 
 def compare_shadow_live(
@@ -259,7 +237,6 @@ __all__ = [
     "delivery_replay_report",
     "find_tick_row",
     "load_replay_rows",
-    "per_setup_wr_stub",
     "recompute_tick_row",
     "vectorized_replay",
 ]
