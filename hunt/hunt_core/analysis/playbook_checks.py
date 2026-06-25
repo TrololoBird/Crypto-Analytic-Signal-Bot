@@ -21,8 +21,6 @@ PLAYBOOK_REQUIRED: dict[str, frozenset[str]] = {
             "va_contraction",
             "bid_absorption",
             "bull_cvd_div",
-            "vah_break_5m",
-            "vol_above_median_5m",
         }
     ),
     "ignition_long": frozenset(
@@ -38,12 +36,10 @@ PLAYBOOK_REQUIRED: dict[str, frozenset[str]] = {
 
 PLAYBOOK_N_OF_M: dict[str, tuple[int, int]] = {
     "predump_short": (4, 6),
-    "prepump_long": (5, 7),
+    "prepump_long": (4, 5),
+    # was (5,7) before removing lagging vah_break_5m/vol_above_median_5m
     "ignition_long": (5, 5),
 }
-
-# Display-only smart-money context (not in N-of-M required sets).
-SMART_MONEY_DISPLAY_CHECKS = frozenset({"vol_oi_sane", "flow_aligned"})
 
 
 def playbook_pass_count(
@@ -110,7 +106,6 @@ def best_archetype_by_ratio(checks: dict[str, bool]) -> tuple[str, float, int, i
 __all__ = [
     "PLAYBOOK_N_OF_M",
     "PLAYBOOK_REQUIRED",
-    "SMART_MONEY_DISPLAY_CHECKS",
     "best_archetype_by_ratio",
     "playbook_pass_count",
     "playbook_pass_ratio",

@@ -286,18 +286,6 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
         ignition += 1.0
         factors.append(FactorHit("D1", "obi_bid", obi, 1.0, "microstructure"))
 
-    # Smart-money display checks (not in N-of-M required sets).
-    wash = float(market.get("wash_trading_index") or market.get("wash_index") or 0)
-    _apply_check(checks, check_sources, "vol_oi_sane", wash < 0.85 or wash <= 0, "wash")
-    taker = _f(row, "market.taker_buy_sell_ratio", default=1.0)
-    _apply_check(
-        checks,
-        check_sources,
-        "flow_aligned",
-        (taker >= 1.02 and cvd == "bullish_div") or (taker <= 0.98 and cvd == "bearish_div"),
-        "smart_money",
-    )
-
     score_predump = round(min(100.0, max(0.0, predump * (100.0 / _MAX_PREDUMP))), 1)
     score_coil = round(min(100.0, max(0.0, coil * (100.0 / _MAX_COIL))), 1)
     score_ignition = round(min(100.0, max(0.0, ignition * (100.0 / _MAX_IGNITION))), 1)
