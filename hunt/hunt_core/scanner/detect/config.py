@@ -36,6 +36,10 @@ class FusionParams:
     phase_mid_exit_bars: int = 2
     # Funding is step-wise; needs longer history than generic min_n.
     funding_min_n: int = 48
+    # Pre-phase gate constants (per-symbol quantile calibration TBD).
+    pre_gate_min_energy: int = 3
+    pre_gate_min_structure: float = 0.18
+    pre_gate_min_magnitude: float = 0.15
     # MAD scale floor + robust-z clip (winsorization).
     mad_epsilon: float = 1e-6
     robust_z_clip: float = 12.0

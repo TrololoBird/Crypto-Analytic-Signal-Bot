@@ -80,6 +80,40 @@ class GateDecision:
     vol_adjusted_magnitude: float = 0.0
 
 
+@dataclass(frozen=True)
+class PreGateDecision:
+    """Pre-phase gate decision — structure-based, not momentum-based.
+
+    For pre_pump/pre_dump/coil phases where magnitude is inherently low,
+    this gate uses market structure signals (OI, book, absorption) instead
+    of the momentum-based ``GateDecision``.
+    """
+    pre_gate_open: bool
+    energy_hits: int
+    structure_score: float
+    reason: str
+
+
+def pre_phase_gate(
+    *,
+    energy_hits: int,
+    structure_score: float,
+    magnitude: float,
+) -> PreGateDecision:
+    """Structure-based gate for pre-phase signals (low magnitude expected).
+
+    Thresholds from FusionParams (configurable, not hardcoded).
+    """
+    fp = _fp()
+    if energy_hits < fp.pre_gate_min_energy:
+        return PreGateDecision(False, energy_hits, structure_score, f"low_energy:{energy_hits}/{fp.pre_gate_min_energy}")
+    if structure_score < fp.pre_gate_min_structure:
+        return PreGateDecision(False, energy_hits, structure_score, f"low_structure:{structure_score:.2f}/{fp.pre_gate_min_structure}")
+    if magnitude < fp.pre_gate_min_magnitude:
+        return PreGateDecision(False, energy_hits, structure_score, f"low_magnitude:{magnitude:.2f}/{fp.pre_gate_min_magnitude}")
+    return PreGateDecision(True, energy_hits, structure_score, "pre_gate_open")
+
+
 def fuse(factors: list[FactorScore]) -> FusionScore:
     """Combine factor scores into a directional magnitude (pure, no gate)."""
     directional = [f for f in factors if f.kind == DIRECTIONAL and f.active]
@@ -156,10 +190,12 @@ __all__ = [
     "FusionScore",
     "GateDecision",
     "MIN_ACTIVE_DIRECTIONAL",
+    "PreGateDecision",
     "VOL_FLOOR_PCT",
     "bar_vol_adjusted_magnitude",
     "fuse",
     "gate",
     "magnitude_to_fusion_score",
+    "pre_phase_gate",
     "vol_adjusted_magnitude",
 ]
