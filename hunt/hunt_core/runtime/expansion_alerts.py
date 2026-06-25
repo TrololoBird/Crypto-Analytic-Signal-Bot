@@ -194,7 +194,7 @@ async def send_expansion_change_telegram(
 ) -> bool:
     """Send Expansion card to lab channel (E1 — not production TG)."""
     from hunt_core._dev.expansion_lab.format import format_expansion_card
-    from hunt_core.scanner.delivery.lab import send_lane_html
+    from hunt_core.deliver.lab import send_lane_html
 
     sym = str(row.get("symbol") or "").upper()
     exp = _expansion_dict(row)

@@ -10,7 +10,7 @@ from hunt_core.deep.verdict_v2.config import VerdictV2Config, load_verdict_v2_co
 from hunt_core.deep.verdict_v2.context import classify_market_context
 from hunt_core.deep.verdict_v2.disagreement import classify_disagreement
 from hunt_core.deep.verdict_v2.engines import run_all_engines, run_data_quality
-from hunt_core.deep.verdict_v2.features.maturity import extract_maturity
+from hunt_core.deep.verdict_v2.maturity import extract_maturity
 from hunt_core.deep.verdict_v2.fragility import compute_fragility
 from hunt_core.deep.verdict_v2.horizon_topology import classify_topology
 from hunt_core.deep.verdict_v2.market_driver import infer_driver

@@ -597,7 +597,7 @@ def main() -> int:
     if exhaust_rr < 2.0:
         issues.append(f"exhaustion_at_high delivery min RR must be >=2.0 got {exhaust_rr}")
 
-    from hunt_core.shared.facts.order_flow import cvd_from_row as _cvd_from_row
+    from hunt_core.analysis.order_flow import cvd_from_row as _cvd_from_row
 
     kline_row = {
         "timeframes": {

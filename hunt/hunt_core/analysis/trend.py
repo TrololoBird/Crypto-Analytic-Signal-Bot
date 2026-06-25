@@ -6,7 +6,7 @@ from __future__ import annotations
 import math
 from typing import Any, Literal
 
-from hunt_core.shared.facts.adx_thresholds import (
+from hunt_core.analysis.adx_thresholds import (
     ADX_BIAS_MIN,
     ADX_PANEL_NEUTRAL,
     ADX_STRONG_MIN,

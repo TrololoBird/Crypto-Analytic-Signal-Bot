@@ -169,7 +169,7 @@ def late_dump_depth_chase_block(
 
 
 def order_flow_demotes_triggered(row: dict[str, Any], *, direction: str) -> bool:
-    from hunt_core.shared.facts.order_flow import synthesize_order_flow
+    from hunt_core.analysis.order_flow import synthesize_order_flow
 
     market = row.get("market") or {}
     taker = market.get("taker_5m")

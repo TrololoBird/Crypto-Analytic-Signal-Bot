@@ -10,8 +10,8 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
-from hunt_core.shared.contract import validate_signal_contract
-from hunt_core.shared.geometry import (
+from hunt_core.contract import validate_signal_contract
+from hunt_core.deliver.geometry import (
     DEFAULT_MIN_RR as _DEFAULT_MIN_RR,
     geometry_block_reason,
     resolve_min_rr as _resolve_min_rr,
@@ -61,7 +61,7 @@ def unified_cooldown_ok(
     sym = symbol.upper()
     direc = direction.lower()
     try:
-        from hunt_core.scanner.delivery.delivery_state import production_cooldown_ok
+        from hunt_core.deliver.delivery_state import production_cooldown_ok
 
         if not production_cooldown_ok(state, symbol=sym, direction=direc, now=now, minutes=minutes):
             return False
@@ -108,7 +108,7 @@ def mark_unified_sent(
 ) -> None:
     state[_unified_key(symbol, direction, stage)] = now.isoformat()
     try:
-        from hunt_core.scanner.delivery.delivery_state import mark_cross_channel_sent
+        from hunt_core.deliver.delivery_state import mark_cross_channel_sent
 
         mark_cross_channel_sent(state, symbol=symbol, direction=direction, now=now)
     except Exception:
@@ -222,11 +222,11 @@ def evaluate_delivery(
     ws_feed: Any | None = None,
 ) -> tuple[GateResult, str | None]:
     """Deliver a confirmed fusion setup: authorities → gate pipeline → geometry contract."""
-    from hunt_core.scanner.delivery.arbiter import evaluate_confirm_authorities
-    from hunt_core.scanner.delivery.lab import route_delivery_lane
+    from hunt_core.deliver.arbiter import evaluate_confirm_authorities
+    from hunt_core.deliver.lab import route_delivery_lane
     from hunt_core.scanner.gate.delivery import run_gate_pipeline
     from hunt_core.levels.levels import reanchor_setup_levels
-    from hunt_core.shared.market import apply_live_price_to_row
+    from hunt_core.market import apply_live_price_to_row
 
     sym = symbol or str(row.get("symbol") or "")
     if refresh_live_price:

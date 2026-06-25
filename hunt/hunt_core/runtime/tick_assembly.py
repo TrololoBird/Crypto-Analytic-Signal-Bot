@@ -67,7 +67,7 @@ _CONFIRM_STICKY_MAX_TICKS = 6
 
 def _stamp_setup_risk_reward(setup: dict[str, Any], *, direction: str) -> None:
     """Worst-edge R:R on the tick row so gates/cards never see risk_reward=None (G3)."""
-    from hunt_core.shared.contract import compute_setup_risk_reward
+    from hunt_core.contract import compute_setup_risk_reward
 
     ez = setup.get("entry_zone") or []
     if len(ez) < 2 or setup.get("stop_loss") is None or setup.get("tp1") is None:
@@ -121,7 +121,7 @@ from hunt_core.data_readiness import assess_symbol_data_readiness
 from hunt_core.domain.market_regime import symbol_regime_features
 from hunt_core.domain.schemas import SymbolFrames, UniverseSymbol
 from hunt_core.features.fib import leg_fib_levels
-from hunt_core.shared.market import (
+from hunt_core.market import (
     HuntCcxtClient,
     HuntCcxtSpotCompanion,
     HuntCcxtStreams,
@@ -930,7 +930,7 @@ async def snapshot_symbol(
                 exc,
             )
         try:
-            from hunt_core.shared.market import attach_cross_microstructure
+            from hunt_core.market import attach_cross_microstructure
 
             await attach_cross_microstructure(client, result)
             cx_walls = (result.get("cross_microstructure") or {}).get("book_walls")
@@ -1133,7 +1133,7 @@ async def snapshot_symbol(
         from hunt_core.maps.forecast import stamp_forecasts_on_row
 
         if ws_feed is not None:
-            from hunt_core.shared.market import apply_live_price_to_row
+            from hunt_core.market import apply_live_price_to_row
 
             apply_live_price_to_row(result, ws_feed=ws_feed)
         stamp_forecasts_on_row(result)

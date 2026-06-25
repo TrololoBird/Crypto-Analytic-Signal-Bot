@@ -8,7 +8,7 @@ from hunt_core import clock
 from hunt_core.data.collect import safe_fetch
 from hunt_core.data.lake import buffer_tracker_state
 from hunt_core.deliver.telegram import TelegramBroadcaster
-from hunt_core.shared.market import HuntCcxtClient
+from hunt_core.market import HuntCcxtClient
 from hunt_core.runtime.state import LOG
 from hunt_core.track.events import append_signal_event
 from hunt_core.track.pump_history import record_signal_outcome

@@ -6,7 +6,7 @@ stable import surface for gate/cycle consumers.
 """
 from __future__ import annotations
 
-from hunt_core.shared.facts.adx_thresholds import (
+from hunt_core.analysis.adx_thresholds import (
     ADX_RANGE_MAX,
     ADX_STRONG_MIN,
     ADX_TREND_MIN,

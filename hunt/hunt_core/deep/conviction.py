@@ -1,7 +1,7 @@
 """Deep conviction scoring via shared primitives."""
 from __future__ import annotations
 
-from hunt_core.shared.primitives import conviction_from_z
+from hunt_core.analysis.primitives import conviction_from_z
 
 
 def scenario_conviction(*z_scores: float | None) -> float:

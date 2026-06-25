@@ -17,8 +17,8 @@ from typing import Any, cast
 import polars as pl
 import structlog
 
-from hunt_core.shared.facts.adx_thresholds import ADX_RANGE_MAX, ADX_TREND_MIN
-from hunt_core.shared.facts.trend import bias_from_ema_row
+from hunt_core.analysis.adx_thresholds import ADX_RANGE_MAX, ADX_TREND_MIN
+from hunt_core.analysis.trend import bias_from_ema_row
 from hunt_core.features.pivots import _swing_points
 
 from ..domain.schemas import PreparedSymbol, SymbolFrames, UniverseSymbol

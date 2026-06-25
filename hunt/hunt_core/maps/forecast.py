@@ -13,7 +13,7 @@ def _factor_confidence(factors: list[str], max_factors: int) -> float:
     return round(min(1.0, len(factors) / max_factors), 3)
 
 
-from hunt_core.shared.primitives.targets import (
+from hunt_core.analysis.targets import (
     collect_downward_targets as _collect_downward_base,
     collect_upward_targets as _collect_upward_targets,
 )

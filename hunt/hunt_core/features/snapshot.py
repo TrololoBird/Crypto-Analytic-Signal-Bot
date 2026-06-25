@@ -27,7 +27,7 @@ from hunt_core.features.polars_ta_bridge import rsi_series as _rsi_series
 from hunt_core.features.prepare_columns import patch_work_4h, resolve_prepare_groups_for_symbol
 from hunt_core.features.prepare_frame import _prepare_frame
 from hunt_core.features.research_plugins import enrich_research_columns, research_snapshot_fields
-from hunt_core.shared.facts.trend import legacy_trend_label, trend_from_snapshot
+from hunt_core.analysis.trend import legacy_trend_label, trend_from_snapshot
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.features.structure import detect_pp
 from hunt_core.market.client import depth_imbalance_from_book, microprice_bias_from_book
@@ -190,7 +190,7 @@ def _series_ols_slope(values: Any, *, min_n: int = 8) -> float | None:
     try:
         import polars as pl
 
-        from hunt_core.shared.mathlib import ols_slope
+        from hunt_core.analysis.robust_stats import ols_slope
 
         return ols_slope(pl.Series([float(x) for x in values]), min_n=min_n)
     except (TypeError, ValueError):

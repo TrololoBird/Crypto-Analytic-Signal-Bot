@@ -55,7 +55,7 @@ def robust_z(
 ) -> float | None:
     """Robust z of the last value vs its trailing window (median / MAD)."""
     from hunt_core.scanner.detect.config import fusion_params
-    from hunt_core.shared.mathlib import robust_z as _shared_robust_z
+    from hunt_core.analysis.robust_stats import robust_z as _shared_robust_z
 
     fp = fusion_params()
     eps = mad_epsilon if mad_epsilon is not None else fp.mad_epsilon
@@ -105,7 +105,7 @@ def quantile_gate(
     min_n: int = MIN_N_DEFAULT,
 ) -> float | None:
     """The ``q``-quantile threshold of the window — a self-calibrated gate level."""
-    from hunt_core.shared.mathlib import quantile as _shared_quantile
+    from hunt_core.analysis.robust_stats import quantile as _shared_quantile
 
     return _shared_quantile(series, q, min_n=min_n)
 
@@ -117,7 +117,7 @@ def ols_slope(
     normalize: bool = True,
 ) -> float | None:
     """Per-bar OLS slope of the window vs bar index."""
-    from hunt_core.shared.mathlib import ols_slope as _shared_ols_slope
+    from hunt_core.analysis.robust_stats import ols_slope as _shared_ols_slope
 
     return _shared_ols_slope(series, min_n=min_n, normalize=normalize)
 

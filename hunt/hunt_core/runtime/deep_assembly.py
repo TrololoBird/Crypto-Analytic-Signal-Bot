@@ -8,7 +8,7 @@ from typing import Any
 import structlog
 
 from hunt_core.data.universe import PINNED_SYMBOLS, save_pinned_cache
-from hunt_core.shared.market import HuntCcxtClient
+from hunt_core.market import HuntCcxtClient
 from hunt_core.paths import DEEP_TICKS_JSONL
 from hunt_core.runtime.tick_jsonl import serialize_tick_row
 
@@ -118,7 +118,7 @@ async def assemble_deep_tick(
     )
     owned_plane = None
     if client is None:
-        from hunt_core.shared.market import create_hunt_market_plane_from_settings
+        from hunt_core.market import create_hunt_market_plane_from_settings
 
         owned_plane = await create_hunt_market_plane_from_settings(settings)
         client = owned_plane.client

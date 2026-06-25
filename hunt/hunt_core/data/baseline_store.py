@@ -14,7 +14,7 @@ import polars as pl
 
 from hunt_core import clock
 from hunt_core.paths import BASELINE_DIR
-from hunt_core.shared.mathlib import robust_z
+from hunt_core.analysis.robust_stats import robust_z
 
 _MAX_SAMPLES = 288
 _MIN_Z_N = 12

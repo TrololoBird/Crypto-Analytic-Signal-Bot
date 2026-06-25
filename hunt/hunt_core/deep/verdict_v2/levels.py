@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from hunt_core.deep.verdict_v2._helpers import atr_from_row, safe_float
-from hunt_core.shared.primitives.targets import (
+from hunt_core.analysis.targets import (
     collect_downward_targets as _collect_downward_targets,
     collect_upward_targets as _collect_upward_targets,
 )

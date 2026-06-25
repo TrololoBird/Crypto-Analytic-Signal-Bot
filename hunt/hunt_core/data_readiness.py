@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from hunt_core.domain.schemas import PreparedSymbol, UniverseSymbol
 
 
-from hunt_core.shared.contract import MARKET_FIELD_CCXT_SOURCE
+from hunt_core.contract import MARKET_FIELD_CCXT_SOURCE
 
 REQUIRED_DERIVATIVES_KEYS: tuple[str, ...] = (
     "oi_change_pct",

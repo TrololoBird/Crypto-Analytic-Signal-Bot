@@ -5,12 +5,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from hunt_core.params.store import basis_thresholds, confirm_thresholds
-from hunt_core.scanner.playbook import (
-    ADX_MEME_RANGE_MAX,
-    ADX_MEME_TREND_MIN,
-    normalize_rsi14,
-    trend_1h_bias,
-)
+from hunt_core.analysis.adx_thresholds import ADX_MEME_RANGE_MAX, ADX_MEME_TREND_MIN
+from hunt_core.analysis.trend import normalize_rsi14, trend_1h_bias
 from hunt_core.scanner.gate._policy_regime import (
     BASIS_AP_OVERHEAT_BPS,
     BASIS_AP_UNDERHEAT_BPS,

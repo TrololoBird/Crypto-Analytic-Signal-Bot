@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hunt_core.scanner.playbook import ADX_TREND_MIN
+from hunt_core.analysis.adx_thresholds import ADX_TREND_MIN
 from hunt_core.scanner.gate._rr import (
     DUMP_CONTINUATION_PHASES,
     FADE_PHASES_SHORT,

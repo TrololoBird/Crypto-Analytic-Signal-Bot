@@ -51,7 +51,7 @@ def evaluate_confirm_authorities(
     if not snap.get("mission_pass"):
         return GateResult(ok=False, code="mission_block", message="mission_block")
 
-    from hunt_core.shared.delivery.cross_module import cross_module_delivery_block
+    from hunt_core.deliver.cross_module import cross_module_delivery_block
 
     cross = cross_module_delivery_block(row, direction=direction)
     if cross:

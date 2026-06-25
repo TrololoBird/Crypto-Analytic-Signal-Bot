@@ -26,7 +26,7 @@ def score(ctx: BlockContext) -> BlockResult:
     if price <= 0:
         return abstain(NAME)
     try:
-        from hunt_core.shared.primitives.targets import (
+        from hunt_core.analysis.targets import (
             collect_downward_targets as _collect_downward_targets,
             collect_upward_targets as _collect_upward_targets,
         )

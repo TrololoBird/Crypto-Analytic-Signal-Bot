@@ -35,7 +35,7 @@ def log_strategic_shadow(
     message: str,
 ) -> None:
     from hunt_core.scanner.detect.calibrate import symbol_state_tier
-    from hunt_core.shared.ledger.shadow import append_shadow_reject, shadow_record_from_delivery
+    from hunt_core.track.shadow import append_shadow_reject, shadow_record_from_delivery
 
     n = int((row.get("feature_window_n") or row.get("lake_bars") or 0))
     append_shadow_reject(
@@ -63,7 +63,7 @@ def log_delivery_shadow(
     blockers: list[GateResult],
 ) -> None:
     from hunt_core.scanner.detect.calibrate import symbol_state_tier
-    from hunt_core.shared.ledger.shadow import append_shadow_reject, shadow_record_from_delivery
+    from hunt_core.track.shadow import append_shadow_reject, shadow_record_from_delivery
 
     if not blockers:
         return

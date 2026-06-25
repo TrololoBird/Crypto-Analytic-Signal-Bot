@@ -45,7 +45,7 @@ def _activation_level(ctx: BlockContext, direction: str) -> float | None:
 def _targets(ctx: BlockContext, direction: str, *, limit: int = 3) -> list[float]:
     price = ctx.price
     try:
-        from hunt_core.shared.primitives.targets import (
+        from hunt_core.analysis.targets import (
             collect_downward_targets as _collect_downward_targets,
             collect_upward_targets as _collect_upward_targets,
         )

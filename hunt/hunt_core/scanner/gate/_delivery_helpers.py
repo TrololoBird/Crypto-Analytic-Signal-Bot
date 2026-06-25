@@ -116,7 +116,7 @@ def long_resistance_chase_veto(resistance: float, price: float, r5_close: float)
 
 
 def _tf_closed_block(tf: dict[str, Any] | None, interval: str) -> dict[str, Any]:
-    from hunt_core.shared.facts.kline_flow import tf_closed_block as _block
+    from hunt_core.analysis.kline_flow import tf_closed_block as _block
 
     return _block(tf, interval)
 
@@ -125,7 +125,7 @@ def kline_bar_flow(
     tf: dict[str, Any] | None,
     interval: str,
 ) -> tuple[float | None, float | None]:
-    from hunt_core.shared.facts.kline_flow import kline_bar_flow as _flow
+    from hunt_core.analysis.kline_flow import kline_bar_flow as _flow
 
     return _flow(tf, interval)
 
@@ -136,7 +136,7 @@ def resolve_flow_cvd_px(
     *,
     interval: str,
 ) -> tuple[float | None, float | None, str]:
-    from hunt_core.shared.facts.kline_flow import resolve_flow_cvd_px as _resolve
+    from hunt_core.analysis.kline_flow import resolve_flow_cvd_px as _resolve
 
     return _resolve(market, tf, interval=interval)
 

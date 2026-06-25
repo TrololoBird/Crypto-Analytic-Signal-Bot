@@ -18,7 +18,7 @@ def record_outcome_ledger(
     blockers: list[str] | None = None,
     event: str = "blocked",
 ) -> None:
-    from hunt_core.scanner.delivery.lab import ledger_path_for_lane
+    from hunt_core.deliver.lab import ledger_path_for_lane
     from hunt_core.track.outcome_ledger import append_ledger_event, build_ledger_record
 
     try:
@@ -33,7 +33,7 @@ def record_outcome_ledger(
         )
         append_ledger_event(record, path=ledger_path_for_lane(setup=setup, row=row))
         if not delivered:
-            from hunt_core.shared.ledger.shadow import (
+            from hunt_core.track.shadow import (
                 append_shadow_reject,
                 shadow_record_from_delivery,
             )

@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from hunt_core.shared.facts.trend import trend_from_snapshot
+from hunt_core.analysis.trend import trend_from_snapshot
 
 
 def clamp01(v: float) -> float:

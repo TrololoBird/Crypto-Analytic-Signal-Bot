@@ -31,7 +31,7 @@ from hunt_core.errors import defensive_exc_types
 from hunt_core.features.prepare import _prepare_frame
 from hunt_core.features.feature_engine import FeatureExtractError, build_feature_vector
 from hunt_core.features.prepare_columns import book_walls_from_row, feature_vector_from_row
-from hunt_core.shared.market import (
+from hunt_core.market import (
     HuntCcxtClient,
     HuntCcxtSpotCompanion,
     HuntCcxtStreams,
@@ -127,7 +127,7 @@ async def _evaluate_auto_delivery(
     """
     from hunt_core.runtime.cycle._impl import _evaluate_delivery_row as _eval_row
     from hunt_core.deliver.templates import format_telegram_confirm
-    from hunt_core.scanner.delivery.lab import send_lane_html
+    from hunt_core.deliver.lab import send_lane_html
     from hunt_core.signals.lifecycle import build_scanner_signal
     from hunt_core.track.events import record_sent_delivery
     from hunt_core.track.candidates import promote_to_confirm
@@ -1155,7 +1155,7 @@ async def run_tick(
                                         reason=scan_transition.suppress_reason,
                                     )
                                     continue
-                                from hunt_core.scanner.delivery.lab import send_lane_html
+                                from hunt_core.deliver.lab import send_lane_html
                                 from hunt_core.deliver.templates import format_telegram_confirm
 
                                 msg = format_telegram_confirm(
@@ -1502,7 +1502,7 @@ async def run_tick(
                                 reason=scan_transition.suppress_reason,
                             )
                             continue
-                        from hunt_core.scanner.delivery.lab import send_lane_html
+                        from hunt_core.deliver.lab import send_lane_html
                         from hunt_core.deliver.templates import format_telegram_confirm
 
                         msg = format_telegram_confirm(

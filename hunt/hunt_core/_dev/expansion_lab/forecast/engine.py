@@ -22,7 +22,7 @@ def _liquidity_targets(ctx: BlockContext, direction: str) -> list[float]:
     if price <= 0:
         return []
     try:
-        from hunt_core.shared.primitives.targets import (
+        from hunt_core.analysis.targets import (
             collect_downward_targets as _collect_downward_targets,
             collect_upward_targets as _collect_upward_targets,
         )

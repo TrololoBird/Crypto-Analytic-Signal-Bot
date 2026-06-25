@@ -239,7 +239,7 @@ def ev_primary_delivery_qualified(
 ) -> bool:
     """EV-primary path: structure detectors + P(win)/EV floors replace fuel/phase stack."""
     if not pwin_gate_enabled():
-        from hunt_core.scanner.playbook import setup_meets_playbook
+        from hunt_core.analysis.playbook_eval import setup_meets_playbook
 
         if setup_meets_playbook(setup, row=row, direction=direction):  # type: ignore[arg-type]
             return True
@@ -307,7 +307,7 @@ def setup_meets_strength(
     imports ``setup_fields`` (fusion ``confirmed`` only). See docs/AUTHORITY_MODEL.md §1.
     """
     if not pwin_gate_enabled() and row is not None:
-        from hunt_core.scanner.playbook import setup_meets_playbook
+        from hunt_core.analysis.playbook_eval import setup_meets_playbook
 
         if tier == "confirm" and setup_meets_playbook(
             setup, row=row, direction=direction  # type: ignore[arg-type]
@@ -330,7 +330,7 @@ def setup_meets_strength(
             if p is not None and p >= min_p - slack_p:
                 return True
             if row is not None:
-                from hunt_core.scanner.playbook import setup_meets_playbook
+                from hunt_core.analysis.playbook_eval import setup_meets_playbook
 
                 if setup_meets_playbook(
                     setup, row=row, direction=direction  # type: ignore[arg-type]

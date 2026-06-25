@@ -161,7 +161,7 @@ def process_lifecycle_tick(
     if action not in {"long", "short"}:
         return LifecycleTransition(event="none", suppress_reason="wait_or_no_setup")
 
-    from hunt_core.shared.price_sanity import price_sanity_check
+    from hunt_core.signals.price_sanity import price_sanity_check
 
     ok_price, price_reason = price_sanity_check(row)
     if not ok_price:

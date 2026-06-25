@@ -34,7 +34,7 @@ from hunt_core.domain.market_regime import (
 )
 from hunt_core.errors import DEFENSIVE_EXC, defensive_exc_types
 from hunt_core.features.prepare import min_required_bars
-from hunt_core.shared.market import (
+from hunt_core.market import (
     CrossExchangeConfig,
     HuntLoadPlanner,
     apply_cross_exchange_env,
@@ -123,7 +123,7 @@ async def run_loop(
     def _hunt_loop_exc_handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
         exc = context.get("exception")
         if exc is not None:
-            from hunt_core.shared.market import HuntCcxtStreams
+            from hunt_core.market import HuntCcxtStreams
 
             if HuntCcxtStreams._ws_transport_fatal(exc):
                 LOG.debug("asyncio_orphan_ws | %s", exc)
@@ -387,7 +387,7 @@ async def run_loop(
                 ticker_by_sym = {str(t.get("symbol")): t for t in ticker_raw if t.get("symbol")}
                 ignition_by_sym: dict[str, Any] = {}
                 ex = client.exchange
-                from hunt_core.shared.market import gate_symbol_dict_keys, gate_symbol_list
+                from hunt_core.market import gate_symbol_dict_keys, gate_symbol_list
 
                 ignition_by_sym = gate_symbol_dict_keys(
                     ignition_by_sym, exchange=ex, label="ignition"

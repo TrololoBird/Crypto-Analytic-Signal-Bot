@@ -277,7 +277,7 @@ def _decl_check_playbook(
     delivery_tier: str,
     symbol: str,
 ) -> Any | None:
-    from hunt_core.scanner.playbook import setup_meets_playbook
+    from hunt_core.analysis.playbook_eval import setup_meets_playbook
     from hunt_core.scanner.gate._ev import legacy_fuel_delivery_enabled
     from hunt_core.scanner.gate.delivery import GateResult  # noqa: PLC0415
 

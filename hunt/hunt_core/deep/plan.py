@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 import structlog
 
-from hunt_core.shared.primitives import atr_pad, forecast_band
+from hunt_core.analysis.primitives import atr_pad, forecast_band
 
 _LOG = structlog.get_logger(__name__)
 

@@ -14,14 +14,12 @@ STALE_MODULES = frozenset({
     "hunt_core.detect",
     "hunt_core.setups",
     "hunt_core.analysis.trend_engine",
-    "hunt_core.analysis.adx_thresholds",
     "hunt_core.analysis.deep_signal",
 })
-STRICT_LOWER = frozenset({"market", "data", "shared"})
+STRICT_LOWER = frozenset({"market", "data"})
 FORBIDDEN_IN_STRICT = frozenset(
     {
         "scan",
-        "analysis",
         "gate",
         "deliver",
         "runtime",
@@ -38,8 +36,7 @@ UPWARD_IMPORT_ALLOWLIST: dict[str, frozenset[str]] = {
     "data/lake.py": frozenset({"runtime"}),
 }
 
-# scanner/playbook is the only scanner subtree allowed to import analysis (consolidation shim).
-SCANNER_ANALYSIS_SHIM_PREFIX = "scanner/playbook/"
+# analysis/ is a shared utility layer — scanner, deep, and other modules may import it freely.
 
 
 def _violations() -> list[str]:
@@ -75,16 +72,10 @@ def _violations() -> list[str]:
                 if rel_s in UPWARD_IMPORT_ALLOWLIST and sub_top in UPWARD_IMPORT_ALLOWLIST[rel_s]:
                     continue
                 out.append(f"{rel}: upward import {mod}")
-            if top == "shared" and sub_top in {"scanner", "deep", "analysis", "gate", "detect"}:
-                if rel.parts[:2] == ("shared", "mathlib"):
-                    continue
-                out.append(f"{rel}: shared imports decision module {mod}")
+            # shared/ eliminated — all utilities moved to analysis/.
             if top == "deep" and sub_top == "scanner":
                 out.append(f"{rel}: deep→scanner {mod}")
-            if top == "deep" and sub_top == "analysis":
-                out.append(f"{rel}: deep→analysis {mod}")
-            if top == "scanner" and sub_top == "analysis" and not rel_s.startswith(SCANNER_ANALYSIS_SHIM_PREFIX):
-                out.append(f"{rel}: scanner→analysis {mod} (use scanner.playbook shim)")
+            # analysis/ is a leaf utility layer — deep and scanner may import freely.
             if top == "analysis" and sub_top == "scanner":
                 out.append(f"{rel}: analysis→scanner {mod}")
             if mod in STALE_MODULES:

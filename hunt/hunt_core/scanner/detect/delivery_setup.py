@@ -156,7 +156,7 @@ def build_delivery_setup(detection: Detection, row: dict[str, Any]) -> dict[str,
 
     _apply_pre_phase_sl_guard(setup, side=detection.side)
 
-    from hunt_core.shared.contract import compute_setup_risk_reward
+    from hunt_core.contract import compute_setup_risk_reward
 
     rr = compute_setup_risk_reward(setup, direction=detection.side or "long")
     if rr is not None:

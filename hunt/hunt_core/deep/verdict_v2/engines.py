@@ -13,8 +13,8 @@ from hunt_core.deep.verdict_v2._helpers import (
     trend_scores_from_snap,
 )
 from hunt_core.deep.verdict_v2.types import DataQualityReport, EngineOutput
-from hunt_core.shared.facts.trend import trend_from_snapshot
-from hunt_core.shared.primitives.targets import (
+from hunt_core.analysis.trend import trend_from_snapshot
+from hunt_core.analysis.targets import (
     collect_downward_targets as _collect_downward_targets,
     collect_upward_targets as _collect_upward_targets,
 )

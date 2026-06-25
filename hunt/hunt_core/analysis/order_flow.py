@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from hunt_core.shared.facts.kline_flow import kline_bar_flow, resolve_flow_cvd_px
+from hunt_core.analysis.kline_flow import kline_bar_flow, resolve_flow_cvd_px
 
 TrendDir = Literal["bull", "bear", "flat"]
 AbsorptionKind = Literal["bid_absorption", "ask_absorption", "none"]

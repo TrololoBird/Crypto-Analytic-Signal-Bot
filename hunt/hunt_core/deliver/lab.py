@@ -39,7 +39,7 @@ def route_delivery_lane(
 
 
 def ledger_path_for_lane(*, setup: dict[str, Any] | None = None, row: dict[str, Any] | None = None):
-    from hunt_core.scanner.delivery.delivery_state import LAB_LEDGER_PATH
+    from hunt_core.deliver.delivery_state import LAB_LEDGER_PATH
     from hunt_core.track.outcome_ledger import LEDGER_PATH
 
     if route_delivery_lane(setup=setup or {}, row=row) == "lab":
