@@ -202,9 +202,7 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
         factors.append(FactorHit("D10", "sweep_reclaim", True, 12.0, "smc"))
     squeeze_block = _squeeze_blocks_predump(row)
     _apply_check(checks, check_sources, "anti_squeeze", not squeeze_block, "buildix")
-    if squeeze_block:
-        predump *= 0.35
-        factors.append(FactorHit("D8", "squeeze_block", True, -30.0, "buildix"))
+    # squeeze score penalty was here — removed: gate stack already blocks delivery
     if leg_gain >= 40.0:
         predump += 10.0
         factors.append(FactorHit("D3", "leg_gain", leg_gain, 10.0, "session"))
