@@ -145,7 +145,12 @@ def _coil_breakout_checks(row: dict[str, Any], market: dict[str, Any]) -> tuple[
 
 
 def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
-    """Score predump / coil / ignition domains and pick primary archetype."""
+    """Score predump / coil / ignition domains and pick primary archetype.
+
+    Domain scores are display-only (for deep panel). The actual delivery
+    decision uses unweighted pass_count via best_archetype_by_ratio.
+    Weights are omitted — each passing check counts 1.
+    """
     phase = _phase(row)
     pos = _pos_in_range(row)
     market = row.get("market") if isinstance(row.get("market"), dict) else {}
@@ -160,11 +165,15 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
     checks: dict[str, bool] = {}
     check_sources: dict[str, str] = {}
 
+    _MAX_PREDUMP = 6.0
+    _MAX_COIL = 7.0
+    _MAX_IGNITION = 5.0
+
     # --- predump domain ---
     predump = 0.0
     if _apply_check(checks, check_sources, "distribution_phase", phase in _PREDUMP_PHASES and phase not in _MID_PHASES, "wyckoff"):
-        predump += 22.0
-        factors.append(FactorHit("D3", "distribution_phase", phase, 22.0, "wyckoff"))
+        predump += 1.0
+        factors.append(FactorHit("D3", "distribution_phase", phase, 1.0, "wyckoff"))
     price = float(row.get("price") or 0)
     vah = market.get("map_vah") or market.get("vah")
     above_vah = False
@@ -175,8 +184,8 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
             pass
     near_top = pos >= 0.85 or above_vah
     if _apply_check(checks, check_sources, "pos_near_high", near_top, "vp_range"):
-        predump += 18.0
-        factors.append(FactorHit("D3", "pos_near_high", pos, 18.0, "vp_range"))
+        predump += 1.0
+        factors.append(FactorHit("D3", "pos_near_high", pos, 1.0, "vp_range"))
     if _apply_check(
         checks,
         check_sources,
@@ -184,12 +193,12 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
         oi_regime in {"new_money_short", "coiling"},
         "adler",
     ):
-        predump += 16.0
-        factors.append(FactorHit("D7", "oi_regime", oi_regime, 16.0, "adler"))
+        predump += 1.0
+        factors.append(FactorHit("D7", "oi_regime", oi_regime, 1.0, "adler"))
     cvd = str(market.get("map_cvd_divergence") or "")
     if _apply_check(checks, check_sources, "bear_cvd_div", cvd == "bearish_div", "markettrace"):
-        predump += 14.0
-        factors.append(FactorHit("D6", "bear_cvd_div", True, 14.0, "markettrace"))
+        predump += 1.0
+        factors.append(FactorHit("D6", "bear_cvd_div", True, 1.0, "markettrace"))
     struct = row.get("structure") if isinstance(row.get("structure"), dict) else {}
     if _apply_check(
         checks,
@@ -198,51 +207,50 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
         bool(struct.get("bsl_sweep") or struct.get("support_break")),
         "smc",
     ):
-        predump += 12.0
-        factors.append(FactorHit("D10", "sweep_reclaim", True, 12.0, "smc"))
+        predump += 1.0
+        factors.append(FactorHit("D10", "sweep_reclaim", True, 1.0, "smc"))
     squeeze_block = _squeeze_blocks_predump(row)
     _apply_check(checks, check_sources, "anti_squeeze", not squeeze_block, "buildix")
-    # squeeze score penalty was here — removed: gate stack already blocks delivery
     if leg_gain >= 40.0:
-        predump += 10.0
-        factors.append(FactorHit("D3", "leg_gain", leg_gain, 10.0, "session"))
+        predump += 1.0
+        factors.append(FactorHit("D3", "leg_gain", leg_gain, 1.0, "session"))
 
     # --- coil domain ---
     coil = 0.0
     acc = float(market.get("map_vp_accumulation") or 0)
     if _apply_check(checks, check_sources, "vp_accumulation", acc >= 0.55, "coinxsight"):
-        coil += 20.0
-        factors.append(FactorHit("D4", "vp_accumulation", acc, 20.0, "coinxsight"))
+        coil += 1.0
+        factors.append(FactorHit("D4", "vp_accumulation", acc, 1.0, "coinxsight"))
     if _apply_check(checks, check_sources, "coil_phase", phase in _COIL_PHASES and phase not in _MID_PHASES, "wyckoff"):
-        coil += 18.0
-        factors.append(FactorHit("D4", "coil_phase", phase, 18.0, "wyckoff"))
+        coil += 1.0
+        factors.append(FactorHit("D4", "coil_phase", phase, 1.0, "wyckoff"))
     contraction = market.get("map_vp_va_contraction")
     va_ok = contraction is not None and float(contraction) < 0.85
     if _apply_check(checks, check_sources, "va_contraction", va_ok, "vp"):
-        coil += 12.0
-        factors.append(FactorHit("D4", "va_contraction", float(contraction or 0), 12.0, "vp"))
+        coil += 1.0
+        factors.append(FactorHit("D4", "va_contraction", float(contraction or 0), 1.0, "vp"))
     if _apply_check(
         checks, check_sources, "bid_absorption", _bool_market(row, "map_accum_bid_absorption"), "orderbook"
     ):
-        coil += 10.0
-        factors.append(FactorHit("D4", "bid_absorption", True, 10.0, "orderbook"))
+        coil += 1.0
+        factors.append(FactorHit("D4", "bid_absorption", True, 1.0, "orderbook"))
     if _apply_check(checks, check_sources, "bull_cvd_div", cvd == "bullish_div", "markettrace"):
-        coil += 10.0
-        factors.append(FactorHit("D6", "bull_cvd_div", True, 10.0, "markettrace"))
+        coil += 1.0
+        factors.append(FactorHit("D6", "bull_cvd_div", True, 1.0, "markettrace"))
     vah_break, vol_relative = _coil_breakout_checks(row, market)
     if _apply_check(checks, check_sources, "vah_break_5m", vah_break, "coinxsight"):
-        coil += 8.0
-        factors.append(FactorHit("D5", "vah_break_5m", True, 8.0, "coinxsight"))
+        coil += 1.0
+        factors.append(FactorHit("D5", "vah_break_5m", True, 1.0, "coinxsight"))
     if _apply_check(checks, check_sources, "vol_above_median_5m", vol_relative, "coinxsight"):
-        coil += 8.0
-        factors.append(FactorHit("D5", "vol_breakout", True, 8.0, "coinxsight"))
+        coil += 1.0
+        factors.append(FactorHit("D5", "vol_breakout", True, 1.0, "coinxsight"))
 
     # --- ignition domain ---
     ignition = 0.0
     funding = _f(row, "market.funding_rate", "market.live_funding_rate")
     if _apply_check(checks, check_sources, "neg_funding", funding < -0.0001, "buildix"):
-        ignition += 18.0
-        factors.append(FactorHit("D8", "neg_funding", funding, 18.0, "buildix"))
+        ignition += 1.0
+        factors.append(FactorHit("D8", "neg_funding", funding, 1.0, "buildix"))
     short_liq = market.get("liq_heatmap_nearest_short")
     if short_liq is not None and price > 0:
         try:
@@ -253,8 +261,8 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
     else:
         liq_above = False
     if _apply_check(checks, check_sources, "short_liq_above", liq_above, "leionion") and liq_above:
-        ignition += 16.0
-        factors.append(FactorHit("D9", "short_liq_magnet", float(short_liq), 16.0, "leionion"))
+        ignition += 1.0
+        factors.append(FactorHit("D9", "short_liq_magnet", float(short_liq), 1.0, "leionion"))
     if _apply_check(
         checks,
         check_sources,
@@ -262,8 +270,8 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
         oi_regime in {"squeeze", "new_money_long"},
         "adler",
     ):
-        ignition += 14.0
-        factors.append(FactorHit("D7", "squeeze_regime", oi_regime, 14.0, "adler"))
+        ignition += 1.0
+        factors.append(FactorHit("D7", "squeeze_regime", oi_regime, 1.0, "adler"))
     if _apply_check(
         checks,
         check_sources,
@@ -271,12 +279,12 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
         cvd == "bullish_div" and phase in _IGNITION_PHASES,
         "markettrace",
     ):
-        ignition += 12.0
-        factors.append(FactorHit("D6", "cvd_absorption", True, 12.0, "markettrace"))
+        ignition += 1.0
+        factors.append(FactorHit("D6", "cvd_absorption", True, 1.0, "markettrace"))
     obi = _f(row, "market.orderbook_imbalance", default=0.0)
     if _apply_check(checks, check_sources, "obi_bid", obi > 0.08, "microstructure") and obi > 0.08:
-        ignition += 10.0
-        factors.append(FactorHit("D1", "obi_bid", obi, 10.0, "microstructure"))
+        ignition += 1.0
+        factors.append(FactorHit("D1", "obi_bid", obi, 1.0, "microstructure"))
 
     # Smart-money display checks (not in N-of-M required sets).
     wash = float(market.get("wash_trading_index") or market.get("wash_index") or 0)
@@ -290,9 +298,9 @@ def evaluate_manipulation_fusion(row: dict[str, Any]) -> ManipulationAssessment:
         "smart_money",
     )
 
-    score_predump = round(min(100.0, max(0.0, predump)), 1)
-    score_coil = round(min(100.0, max(0.0, coil)), 1)
-    score_ignition = round(min(100.0, max(0.0, ignition)), 1)
+    score_predump = round(min(100.0, max(0.0, predump * (100.0 / _MAX_PREDUMP))), 1)
+    score_coil = round(min(100.0, max(0.0, coil * (100.0 / _MAX_COIL))), 1)
+    score_ignition = round(min(100.0, max(0.0, ignition * (100.0 / _MAX_IGNITION))), 1)
 
     from hunt_core.analysis.playbook_checks import best_archetype_by_ratio
 
