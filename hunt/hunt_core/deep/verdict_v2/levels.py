@@ -75,9 +75,43 @@ def canonical_levels(row: dict[str, Any], direction: str) -> dict[str, float]:
     return out
 
 
-def pick_catalyst_level(row: dict[str, Any], direction: str) -> tuple[float, str]:
-    """Sweep/reject level — same canonical set as stop, but not the stop itself."""
+def pick_catalyst_level(
+    row: dict[str, Any],
+    direction: str,
+    *,
+    entry_zone: tuple[float, float] | None = None,
+    atr: float | None = None,
+) -> tuple[float, str]:
+    """Sweep/reject level — same canonical set as stop, but not the stop itself.
+
+    When ``entry_zone`` and ``atr`` are provided the function filters
+    micro-levels (pool_above / pool_below) that sit within 0.5 ATR of the
+    current price while the entry zone sits more than 2 ATR away – a situation
+    where the near-term pool does not represent the structural catalyst
+    anchored to the entry zone.
+    """
     levels = canonical_levels(row, direction)
+    price = safe_float(row.get("price"))
+
+    if entry_zone is not None and atr is not None and atr > 0 and price > 0:
+        zone_mid = (entry_zone[0] + entry_zone[1]) / 2.0
+        if abs(zone_mid - price) > 2.0 * atr:
+            pool_key = "pool_below" if direction == "long" else "pool_above"
+            pool_lvl = levels.get(pool_key, 0.0)
+            if pool_lvl > 0 and abs(pool_lvl - price) < 0.5 * atr:
+                order = (
+                    ("support", "val", "poc", "pool_below")
+                    if direction == "long"
+                    else ("resistance", "vah", "poc", "pool_above")
+                )
+                for key in order:
+                    v = levels.get(key, 0.0)
+                    if v > 0 and key != pool_key:
+                        if key == pool_key:
+                            continue
+                        return v, key
+                return pool_lvl, pool_key
+
     if direction == "long":
         for key in ("pool_below", "support", "val", "poc"):
             v = levels.get(key, 0)

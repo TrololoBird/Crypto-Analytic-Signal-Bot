@@ -8,7 +8,13 @@ from hunt_core.deep.verdict_v2.levels import pick_catalyst_level
 from hunt_core.deep.verdict_v2.types import CatalystKind, ExpectedPath, ScenarioCatalyst
 
 
-def build_catalyst(row: dict[str, Any], path: ExpectedPath) -> ScenarioCatalyst:
+def build_catalyst(
+    row: dict[str, Any],
+    path: ExpectedPath,
+    *,
+    entry_zone: tuple[float, float] | None = None,
+    atr: float | None = None,
+) -> ScenarioCatalyst:
     if path.direction not in {"long", "short"}:
         return ScenarioCatalyst(
             primary="flow_confirmation",
@@ -22,7 +28,7 @@ def build_catalyst(row: dict[str, Any], path: ExpectedPath) -> ScenarioCatalyst:
     structure = row.get("structure") if isinstance(row.get("structure"), dict) else {}
     market = row.get("market") if isinstance(row.get("market"), dict) else {}
     price = safe_float(row.get("price"))
-    trigger, src = pick_catalyst_level(row, path.direction)
+    trigger, src = pick_catalyst_level(row, path.direction, entry_zone=entry_zone, atr=atr)
     evidence: list[str] = [src] if src != "none" else []
     primary: CatalystKind = "level_break"
     label = "Key level break"

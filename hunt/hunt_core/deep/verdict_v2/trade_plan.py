@@ -26,7 +26,7 @@ def build_trade_plan(
     entry_type = "pullback_limit" if price > 0 and abs(price - zone_mid) > atr * 0.12 else "market"
     from hunt_core.deep.verdict_v2.levels import pick_catalyst_level
 
-    cat_level, _ = pick_catalyst_level(row, direction)
+    cat_level, _ = pick_catalyst_level(row, direction, entry_zone=zone, atr=atr)
     stop, stop_src = pick_stop(row, direction, zone_mid, catalyst_level=cat_level)
     targets, tgt_factors = pick_targets(row, direction)
 
@@ -64,7 +64,9 @@ def build_trade_plan(
     tp1 = float(geom.get("tp1") or targets[0])
     tp2 = float(geom.get("tp2") or targets[1])
     tp3 = float(geom.get("tp3") or targets[2])
-    entry_ref = float(geom.get("entry_reference") or zone[0] if direction == "long" else zone[1])
+    # entry_reference from geometry is the zone midpoint — use it for both directions.
+    _geom_entry_ref = geom.get("entry_reference")
+    entry_ref = float(_geom_entry_ref if _geom_entry_ref else (zone[0] if direction == "long" else zone[1]))
     rr1 = float(geom.get("rr_tp1") or 0)
     rr2 = float(geom.get("rr_tp2") or 0)
     rr3 = float(geom.get("rr_tp3") or 0)

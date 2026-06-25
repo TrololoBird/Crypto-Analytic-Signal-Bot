@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from hunt_core.deep.verdict_v2.blender import blend_horizons, build_conflict_matrix
+from hunt_core.deep.verdict_v2._helpers import atr_from_row
 from hunt_core.deep.verdict_v2.catalyst import build_catalyst
 from hunt_core.deep.verdict_v2.config import VerdictV2Config, load_verdict_v2_config
 from hunt_core.deep.verdict_v2.context import classify_market_context
@@ -49,8 +50,12 @@ def build_scenario_verdict(
     patterns = generate_patterns(row, topology, maturity, market_context, driver, cfg)
     driver = infer_driver(engine_evidence, patterns.primary.id)
     path = map_to_expected_path(row, patterns, topology)
-    catalyst = build_catalyst(row, path)
     plan = build_trade_plan(row, path, cfg.trade_plan)
+    catalyst = build_catalyst(
+        row, path,
+        entry_zone=plan.entry_zone if plan else None,
+        atr=atr_from_row(row),
+    )
     path = adjust_expected_move_from_plan(path, plan)
     fragility = compute_fragility(
         path, topology, disagreement, patterns, cfg, plan=plan, row=row
@@ -155,6 +160,12 @@ def build_scenario_verdict(
         from hunt_core.deep.verdict_v2.rr_audit import append_rr_geometry_audit
 
         append_rr_geometry_audit(row, plan=plan, verdict=verdict)
+    except Exception:
+        pass
+    try:
+        from hunt_core.deep.verdict_v2.evidence_trace import append_evidence_trace
+
+        append_evidence_trace(row, verdict=verdict)
     except Exception:
         pass
     try:
