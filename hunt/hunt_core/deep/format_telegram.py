@@ -14,7 +14,7 @@ def _expansion_text(row: dict[str, Any]) -> str:
     if not isinstance(exp, dict) or not exp:
         return ""
     try:
-        from hunt_core._dev.expansion_lab.format import format_expansion_section_from_dict
+        from hunt_core.expansion.format import format_expansion_section_from_dict
 
         return format_expansion_section_from_dict(exp)
     except Exception:

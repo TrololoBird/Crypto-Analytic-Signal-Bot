@@ -40,7 +40,7 @@ def stamp_expansion_on_row(row: dict[str, Any]) -> None:
     never sink the deep tick.
     """
     try:
-        from hunt_core._dev.expansion_lab import (
+        from hunt_core.expansion import (
             build_expansion_opportunity,
             load_expansion_config,
         )
@@ -407,7 +407,7 @@ async def deep_pinned_loop(
                 transition = emitter.preview_deep_row(row)
                 if transition.event != "none":
                     lifecycle_candidates.append((row, transition))
-                from hunt_core._dev.expansion_lab.config import load_expansion_config
+                from hunt_core.expansion.config import load_expansion_config
                 from hunt_core.runtime.expansion_alerts import (
                     expansion_change_fingerprint,
                     expansion_cooldown_ok,
@@ -432,8 +432,8 @@ async def deep_pinned_loop(
                             fingerprint=expansion_change_fingerprint(exp_dict) if exp_dict else None,
                         )
                         try:
-                            from hunt_core._dev.expansion_lab import build_expansion_opportunity
-                            from hunt_core._dev.expansion_lab.learning import (
+                            from hunt_core.expansion import build_expansion_opportunity
+                            from hunt_core.expansion.learning import (
                                 record_expansion_signal,
                             )
 
@@ -473,7 +473,7 @@ async def deep_pinned_loop(
 
 
 def expansion_review_interval_s() -> float:
-    from hunt_core._dev.expansion_lab.config import load_expansion_config
+    from hunt_core.expansion.config import load_expansion_config
 
     return load_expansion_config().review_interval_s
 
@@ -484,8 +484,8 @@ async def expansion_outcome_review_loop(
     interval_s: float | None = None,
 ) -> None:
     """Background task — grade expansion outcome ledger at 24h/48h/72h/7d."""
-    from hunt_core._dev.expansion_lab.config import load_expansion_config
-    from hunt_core._dev.expansion_lab.learning.review import review_expansion_outcomes
+    from hunt_core.expansion.config import load_expansion_config
+    from hunt_core.expansion.learning.review import review_expansion_outcomes
     from hunt_core.runtime.state import should_stop
 
     import asyncio

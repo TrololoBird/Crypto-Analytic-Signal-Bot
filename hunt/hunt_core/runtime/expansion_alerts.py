@@ -7,7 +7,7 @@ from typing import Any
 
 import structlog
 
-from hunt_core._dev.expansion_lab.config import ExpansionConfig, load_expansion_config
+from hunt_core.expansion.config import ExpansionConfig, load_expansion_config
 from hunt_core.paths import EXPANSION_ALERT_STATE
 
 LOG = structlog.get_logger("hunt.expansion_alerts")
@@ -193,7 +193,7 @@ async def send_expansion_change_telegram(
     row: dict[str, Any],
 ) -> bool:
     """Send Expansion card to lab channel (E1 — not production TG)."""
-    from hunt_core._dev.expansion_lab.format import format_expansion_card
+    from hunt_core.expansion.format import format_expansion_card
     from hunt_core.deliver.lab import send_lane_html
 
     sym = str(row.get("symbol") or "").upper()

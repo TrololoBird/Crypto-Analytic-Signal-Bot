@@ -65,8 +65,8 @@ async def probe_symbol_expansion(
         quality = float(meta.get("expansion_quality") or 0.0)
         if dominant != "neutral" and quality >= 0.45:
             try:
-                from hunt_core._dev.expansion_lab import build_expansion_opportunity
-                from hunt_core._dev.expansion_lab.learning import record_expansion_signal
+                from hunt_core.expansion import build_expansion_opportunity
+                from hunt_core.expansion.learning import record_expansion_signal
 
                 record_expansion_signal(
                     build_expansion_opportunity(row),

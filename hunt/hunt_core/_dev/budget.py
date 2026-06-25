@@ -10,7 +10,7 @@ from pathlib import Path
 CORE_ROOT = Path(__file__).resolve().parents[1]
 ENTRY = CORE_ROOT / "__main__.py"
 # Hot-path only — _dev/ and legacy gate/ (_dev/check_logic compat; fusion runtime bypasses gate).
-LOC_BUDGET = 61_200  # +signals spine (P0 redesign); hot-path total
+LOC_BUDGET = 65_600  # +signals spine (P0) +expansion (promoted from _dev)
 LOC_SKIP_DIRS = frozenset({"_dev", "gate"})
 LOC_SKIP_PREFIXES: tuple[str, ...] = ()
 

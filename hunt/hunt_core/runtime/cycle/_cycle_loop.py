@@ -298,12 +298,12 @@ async def run_loop(
         LOG.info("deep_pinned_loop_scheduled")
 
     expansion_review_task: asyncio.Task[None] | None = None
-    from hunt_core._dev.expansion_lab.config import load_expansion_config
+    from hunt_core.expansion.config import load_expansion_config
 
     exp_cfg = load_expansion_config()
     if exp_cfg.enabled and exp_cfg.lab_runtime:
         try:
-            from hunt_core._dev.expansion_lab.runtime_state import load_expansion_runtime_state
+            from hunt_core.expansion.runtime_state import load_expansion_runtime_state
 
             load_expansion_runtime_state()
         except Exception:
@@ -746,7 +746,7 @@ async def run_loop(
                 buffer_tick_rows(rows)
                 try:
                     if exp_cfg.lab_runtime:
-                        from hunt_core._dev.expansion_lab.runtime_state import (
+                        from hunt_core.expansion.runtime_state import (
                             maybe_save_expansion_runtime_state,
                         )
 
@@ -830,7 +830,7 @@ async def run_loop(
                 pass
         if exp_cfg.lab_runtime:
             try:
-                from hunt_core._dev.expansion_lab.runtime_state import save_expansion_runtime_state
+                from hunt_core.expansion.runtime_state import save_expansion_runtime_state
 
                 save_expansion_runtime_state()
             except Exception:
