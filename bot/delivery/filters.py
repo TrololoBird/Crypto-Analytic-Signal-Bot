@@ -230,14 +230,6 @@ def _resolve_adx_policy(signal: Signal) -> str:
     return _ADX_POLICY_PENALTY
 
 
-def _uses_soft_trend_conflict(signal: Signal, settings: BotSettings | None = None) -> bool:
-    """Penalize 1h trend conflict instead of hard-blocking unless config says hard."""
-    if settings is not None and not getattr(settings.filters, "trend_conflict_soft", True):
-        return False
-    _ = signal
-    return True
-
-
 def _resolve_symbol_filter(
     settings: BotSettings,
     symbol: str,
@@ -1411,15 +1403,13 @@ def _run_filter_pipeline(
             "strategy_family": signal.strategy_family,
             "confirmation_profile": signal.confirmation_profile,
         }
-        if not _uses_soft_trend_conflict(signal, settings):
-            return _reject("trend_conflict_1h", base, details=trend_details)
         trend_conflict_penalty_applied = True
         passed.append("trend_conflict_1h_penalized")
     else:
         passed.append("trend_context_ok")
 
     if (
-        _uses_soft_trend_conflict(signal, settings)
+        getattr(settings.filters, "trend_conflict_soft", True)
         and signal.direction == "long"
         and btc_phase in {"decline", "distribution"}
     ):

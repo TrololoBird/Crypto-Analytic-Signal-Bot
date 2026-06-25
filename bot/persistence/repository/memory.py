@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -438,9 +439,38 @@ class MemoryRepository(_MemoryRepositoryBases):
         record.validate()
 
     async def save_outcome(self, record: OutcomeRecord, *, commit: bool = True) -> None:
-        """Legacy API - no longer writes to ``outcomes`` (Phase E). Use ``signal_outcomes`` path."""
+        """Bridge legacy OutcomeRecord to modern ``signal_outcomes`` path."""
         record.validate()
         del commit
+
+        tracking_id = record.signal_id
+        signal = await self.get_signal(tracking_id)
+        tracking_ref = (
+            signal.signal_id[:8].upper()
+            if signal and signal.signal_id
+            else hashlib.sha256(tracking_id.encode()).hexdigest()[:8].upper()
+        )
+        pnl_pct = record.pnl_24h or record.pnl_4h or record.pnl_1h
+        outcome_dict: dict[str, Any] = {
+            "tracking_id": tracking_id,
+            "signal_id": tracking_id,
+            "tracking_ref": tracking_ref,
+            "symbol": record.symbol,
+            "setup_id": signal.strategy_id if signal else "unknown",
+            "direction": signal.direction if signal else "unknown",
+            "timeframe": signal.timeframe if signal else "15m",
+            "created_at": (signal.created_at.isoformat() if signal and signal.created_at else ""),
+            "closed_at": record.closed_at.isoformat() if record.closed_at else None,
+            "result": record.result or "diagnostic",
+            "max_profit_pct": record.max_profit_pct,
+            "max_loss_pct": record.max_loss_pct,
+            "mae": record.mae,
+            "mfe": record.mfe,
+            "pnl_pct": pnl_pct,
+            "time_to_entry_min": record.time_to_sl_min or record.time_to_tp1_min,
+            "was_profitable": record.mfe > abs(record.mae) if (record.mfe or record.mae) else None,
+        }
+        await self.save_signal_outcome(outcome_dict)
 
     async def get_signal(self, signal_id: str) -> SignalRecord | None:
         """Legacy API shim — reads from ``active_signals`` by tracking_id."""
