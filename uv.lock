@@ -434,6 +434,7 @@ test = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "syrupy" },
 ]
 
 [package.metadata]
@@ -464,6 +465,7 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'regime'", specifier = ">=1.8.0" },
     { name = "statsmodels", marker = "extra == 'regime'", specifier = ">=0.14.6" },
     { name = "structlog", specifier = ">=25.5.0" },
+    { name = "syrupy", marker = "extra == 'test'", specifier = ">=5.3.3" },
     { name = "tenacity", specifier = ">=9.1.4" },
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'live'", specifier = ">=0.48.0" },
@@ -1525,6 +1527,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5e/89/b4a0bcfdf4f71a3dea31379f095929613d7e4528a0996bca6aa964cd0dca/structlog-26.1.0.tar.gz", hash = "sha256:f63a716cbd1b1291cf7661de7794b455acfa4c43c5bcf1630e6ad5ddc1adb3b7", size = 1459881, upload-time = "2026-06-06T07:33:39.348Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a9/18/489c97b834dfff9cf2fc2507cede4bcd4b11e67f84bc462acd1992496f86/structlog-26.1.0-py3-none-any.whl", hash = "sha256:e081a26d6c373e6d201eca24eede26d8ffab07f88f477822e679183428d3d91e", size = 73764, upload-time = "2026-06-06T07:33:38.046Z" },
+]
+
+[[package]]
+name = "syrupy"
+version = "5.3.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/de/90/34f8d7b20dfb6b9d95f353cde255f3be5c149db2f000be3c67428a2fc298/syrupy-5.3.3.tar.gz", hash = "sha256:6c065cd1ba9374e810ad3826feb466f4d43e6f1a7168703178e56b47902c736f", size = 86068, upload-time = "2026-06-25T11:32:03.89Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7f/19/17c3f86af63d68f206678cb25d92b631286f0345632eb424719e2cc69ef4/syrupy-5.3.3-py3-none-any.whl", hash = "sha256:94b7c41192295fa03ec6de281d8075900e03739f45943935f7854d61824670d7", size = 52705, upload-time = "2026-06-25T11:32:02.615Z" },
 ]
 
 [[package]]

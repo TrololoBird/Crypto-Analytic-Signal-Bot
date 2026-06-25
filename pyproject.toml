@@ -45,7 +45,7 @@ live = [
     "prometheus-client>=0.25.0",
     "orjson>=3.11.9",
 ]
-test = ["pytest>=9.0.3", "pytest-asyncio>=1.4.0", "pytest-cov>=7.1.0"]
+test = ["pytest>=9.0.3", "pytest-asyncio>=1.4.0", "pytest-cov>=7.1.0", "syrupy>=5.3.3"]
 regime = ["hmmlearn>=0.3.3", "scikit-learn>=1.8.0", "statsmodels>=0.14.6"]
 
 [tool.setuptools]
