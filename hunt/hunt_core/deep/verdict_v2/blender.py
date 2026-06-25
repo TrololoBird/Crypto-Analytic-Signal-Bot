@@ -1,21 +1,36 @@
-"""Quality-weighted horizon blends."""
+"""Quality-weighted horizon blends with temporal decay.
+
+Longer horizons receive the same engine values but with decayed
+coverage quality, reflecting that indicators computed from recent
+data are less predictive for longer-range forecasts.
+"""
 from __future__ import annotations
 
 from hunt_core.deep.verdict_v2._helpers import clamp01, conviction, dominant_side
 from hunt_core.deep.verdict_v2.config import VerdictV2Config
 from hunt_core.deep.verdict_v2.types import EngineOutput, HorizonForecast, HorizonKey
 
+# Temporal decay per horizon: reduces effective coverage_quality
+# for longer-range forecasts, pulling blended values toward 0.5/0.5
+# (lower conviction) as horizon lengthens.
+_HORIZON_DECAY: dict[str, float] = {
+    "A": 1.0,   # short-term (~8h)  — full confidence
+    "B": 0.85,  # medium-term (~18h) — mild decay
+    "C": 0.70,  # long-term (~36h)  — stronger decay
+}
+
 
 def _blend(
     engines: dict[str, EngineOutput],
     priorities: dict[str, float],
+    decay: float = 1.0,
 ) -> tuple[float, float]:
     long_num = short_num = w_sum = 0.0
     for name, base_w in priorities.items():
         eng = engines.get(name)
         if eng is None or base_w <= 0:
             continue
-        eff = base_w * max(eng.coverage_quality, 0.05)
+        eff = base_w * max(eng.coverage_quality * decay, 0.05)
         long_num += eng.long * eff
         short_num += eng.short * eff
         w_sum += eff
@@ -35,7 +50,8 @@ def blend_horizons(
     ]
     out: dict[str, HorizonForecast] = {}
     for key, pri in specs:
-        lg, sh = _blend(engines, pri)
+        decay = _HORIZON_DECAY.get(key, 1.0)
+        lg, sh = _blend(engines, pri, decay=decay)
         dom = dominant_side(lg, sh)
         conv = conviction(lg, sh)
         range_p = clamp01(1.0 - conv) if dom == "neutral" else clamp01(max(0.0, 0.5 - conv))
