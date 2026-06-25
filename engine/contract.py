@@ -1,28 +1,30 @@
-"""Signal trade-plan contract helpers.
+"""Signal trade-plan contract helpers (re-exports types from contract_base.py).
 
 The bot is signal-only: each emitted setup must be directly usable as a
 manual limit-order plan. This module keeps the plan math centralized so
 individual detectors do not drift into point entries or partial target gaps.
+
+Canonical types and constants live in ``_contract_base.py`` — this module
+re-exports them for backward compatibility and adds function implementations.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-DEFAULT_SCALE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
-DEFAULT_TARGET_RR: tuple[float, float, float] = (1.9, 3.0, 5.0)
-DEFAULT_MIN_RISK_REWARD = 1.9
-RISK_REWARD_EPSILON = 1e-9
-
-# Single source of truth for entry-zone width.
-# ALL callers (_build_signal, detectors, contract validation) must use this.
-# 0.35×ATR gives a realistic limit-order fill window while keeping stop
-# geometrically outside the zone in _build_atr_signal (min_risk clamp uses
-# entry_pad + 0.06×ATR buffer).
-SIGNAL_ENTRY_PAD_ATR: float = 0.35
+from engine.contract_base import (
+    DEFAULT_MAX_RISK_REWARD,  # noqa: F401 — re-exported for backward compat
+    DEFAULT_MIN_RISK_REWARD,
+    DEFAULT_SCALE_WEIGHTS,
+    DEFAULT_TARGET_RR,
+    RISK_REWARD_EPSILON,
+    SIGNAL_ENTRY_PAD_ATR,
+    TIMEFRAME_MINUTES,
+    SignalContractIssue,
+    TradePlan,
+)
 
 
 def resolve_target_rr(settings: Any | None = None) -> tuple[float, float, float]:
@@ -41,18 +43,6 @@ def resolve_target_rr(settings: Any | None = None) -> tuple[float, float, float]
         return DEFAULT_TARGET_RR
     return (values[0], values[1], values[2])
 
-
-_TIMEFRAME_MINUTES: dict[str, int] = {
-    "1m": 1,
-    "3m": 3,
-    "5m": 5,
-    "15m": 15,
-    "30m": 30,
-    "1h": 60,
-    "2h": 120,
-    "4h": 240,
-    "1d": 1440,
-}
 
 _FAMILY_TTL_BARS: dict[str, int] = {
     "breakout": 10,
@@ -142,49 +132,6 @@ _SETUP_TTL_BARS: dict[str, int] = {
     "pinbar_reversal": 8,  # 1h × 8 = 120min
 }
 
-
-@dataclass(frozen=True, slots=True)
-class TradePlan:
-    direction: str
-    entry_low: float
-    entry_high: float
-    stop_loss: float
-    tp1: float
-    tp2: float
-    tp3: float
-    valid_until: datetime
-    scale_weights: tuple[float, float, float]
-    ttl_bars: int
-    entry_zone_width_pct: float
-    risk_reward_tp1: float
-    risk_reward_tp2: float
-    risk_reward_tp3: float
-    single_target_mode: bool
-    integrity_status: str
-
-    @property
-    def entry_mid(self) -> float:
-        return (self.entry_low + self.entry_high) / 2.0
-
-    @property
-    def entry_zone(self) -> tuple[float, float]:
-        return (self.entry_low, self.entry_high)
-
-
-@dataclass(frozen=True, slots=True)
-class SignalContractIssue:
-    field: str
-    reason: str
-    value: object = None
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "field": self.field,
-            "reason": self.reason,
-            "value": self.value,
-        }
-
-
 def finite_float(value: object, default: float | None = None) -> float | None:
     if isinstance(value, bool):
         return float(value)
@@ -213,8 +160,8 @@ def normalize_direction(direction: str) -> str | None:
 def timeframe_minutes(timeframe: str | None) -> int:
     raw = str(timeframe or "15m").lower().strip()
     primary = raw.split("+", 1)[0].strip()
-    if primary in _TIMEFRAME_MINUTES:
-        return _TIMEFRAME_MINUTES[primary]
+    if primary in TIMEFRAME_MINUTES:
+        return TIMEFRAME_MINUTES[primary]
     if primary.endswith("m"):
         numeric = positive_float(primary[:-1])
         return int(numeric) if numeric else 15

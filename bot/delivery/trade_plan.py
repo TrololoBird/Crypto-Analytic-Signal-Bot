@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from engine.contract import (
     DEFAULT_SCALE_WEIGHTS,
     DEFAULT_TARGET_RR,
+    SIGNAL_ENTRY_PAD_ATR,
     TradePlan,
     build_trade_plan,
     default_ttl_bars,
@@ -48,7 +49,7 @@ class TradePlanBuilder:
         tp1: float,
         tp2: float,
         tp3: float | None = None,
-        entry_pad_atr_mult: float = 0.08,
+        entry_pad_atr_mult: float = SIGNAL_ENTRY_PAD_ATR,
         created_at: datetime | None = None,
         ttl_bars: int | None = None,
         scale_weights: tuple[float, float, float] | list[float] | None = None,
