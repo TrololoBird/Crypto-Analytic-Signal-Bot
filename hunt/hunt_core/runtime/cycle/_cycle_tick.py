@@ -68,6 +68,7 @@ from hunt_core.track.pump_history import (
     record_signal_open as record_pump_signal_open,
 )
 from hunt_core.track.tracker import (
+    auto_resolve_active_signals,
     evaluate_followups,
     global_confirm_burst_cap_reached,
     iter_active_tracker_symbols,
@@ -102,6 +103,141 @@ def _closed_bar_ts(prepared: Any) -> str | None:
         return str(work.item(-2, "close_time"))
     except Exception:
         return None
+
+
+async def _evaluate_auto_delivery(
+    *,
+    symbol: str,
+    direction: str,
+    setup: dict,
+    row: dict,
+    lifecycle_raw: Any,
+    broadcaster: Any,
+    tracker_state: dict,
+    setup_candidates_state: dict,
+    state: dict,
+    pump_store: Any | None,
+    now: datetime,
+    ws_feed: Any,
+) -> bool:
+    """Direct delivery for Scanner auto-detect confirmed signals.
+
+    Bypasses notify_pending and complex gating. Returns True if delivered.
+    Uses existing gate pipeline for formatting/sending/tracking.
+    """
+    from hunt_core.runtime.cycle._impl import _evaluate_delivery_row as _eval_row
+    from hunt_core.deliver.templates import format_telegram_confirm
+    from hunt_core.scanner.delivery.lab import send_lane_html
+    from hunt_core.signals.lifecycle import build_scanner_signal
+    from hunt_core.track.events import record_sent_delivery
+    from hunt_core.track.candidates import promote_to_confirm
+    from hunt_core.features.prepare_columns import feature_vector_from_row, book_walls_from_row
+    from hunt_core.runtime.cycle._cycle_ledger import record_outcome_ledger as _record_ledger
+
+    gate, delivery_tier = _eval_row(
+        row,
+        direction=direction,
+        setup=setup,
+        lifecycle=lifecycle_raw if isinstance(lifecycle_raw, dict) else None,
+        symbol=symbol,
+        refresh_live_price=True,
+        ws_feed=ws_feed,
+    )
+    if not gate.ok or delivery_tier is None:
+        LOG.info(
+            "auto_delivery_blocked",
+            symbol=symbol, direction=direction,
+            reason=gate.code if not gate.ok else "stale_tier",
+        )
+        _record_ledger(
+            symbol=symbol, direction=direction, row=row, setup=setup,
+            delivered=False, event="blocked",
+            blockers=[str(gate.code or "unknown")] if not gate.ok else ["stale_tier"],
+        )
+        return False
+
+    if str(delivery_tier).upper() not in {"ARMED", "TRIGGERED", "LAB"}:
+        LOG.info(
+            "auto_delivery_insufficient_tier",
+            symbol=symbol, direction=direction, tier=delivery_tier,
+        )
+        return False
+
+    from hunt_core.runtime.cycle._impl import _refresh_live_price as _refresh_px
+    price_now = _refresh_px(row, ws_feed=ws_feed, symbol=symbol)
+
+    as_of = str(row.get("ts") or now.isoformat())
+    scan_transition = build_scanner_signal(
+        symbol=symbol,
+        direction=direction,
+        setup_id=str(setup.get("setup_id") or setup.get("phase") or ""),
+        thesis=str(setup.get("phase") or "pre_move"),
+        plan={
+            "entry_zone": setup.get("entry_zone"),
+            "stop_loss": setup.get("stop_loss"),
+            "tp1": setup.get("tp1"),
+            "trigger_level": (setup.get("entry_zone") or [0])[0]
+            if setup.get("entry_zone")
+            else setup.get("trigger_level"),
+        },
+        as_of=as_of,
+    )
+    if scan_transition.event == "none":
+        LOG.info(
+            "auto_delivery_lifecycle_suppressed",
+            symbol=symbol, direction=direction,
+            reason=scan_transition.suppress_reason,
+        )
+        return False
+
+    msg = format_telegram_confirm(
+        row,
+        direction=direction,
+        confirm_reasons=setup.get("confirm_hard") or [],
+        delivery_tier=delivery_tier,
+    )
+    result = await send_lane_html(broadcaster, msg, setup=setup, row=row)
+    if result.status != "sent":
+        LOG.info("auto_delivery_send_failed", symbol=symbol, direction=direction, status=result.status)
+        return False
+
+    record_sent_delivery(
+        symbol=symbol, direction=direction,
+        message_id=result.message_id, html=msg,
+        setup=setup, delivery_tier=str(delivery_tier or ""),
+        price=float(row.get("price") or 0) or None,
+    )
+
+    from hunt_core.deliver.dispatch import mark_unified_sent
+    state_key = f"{symbol}:{direction}"
+    state[state_key] = now.isoformat()
+    mark_unified_sent(state, symbol=symbol, direction=direction, stage="confirm", now=now)
+
+    if pump_store is not None:
+        record_pump_signal_open(pump_store, symbol=symbol, direction=direction, now=now)
+
+    setup_latch = {**setup, "telegram_sent": True, "delivery_tier": delivery_tier}
+    register_signal_open(
+        tracker_state, symbol=symbol, direction=direction, price=price_now,
+        setup=setup_latch,
+        lifecycle=lifecycle_raw if isinstance(lifecycle_raw, dict) else None,
+        now=now, entry_message_id=result.message_id,
+        features_open=feature_vector_from_row(row),
+        book_walls=book_walls_from_row(row),
+    )
+
+    _record_ledger(
+        symbol=symbol, direction=direction, row=row, setup=setup_latch,
+        delivered=True, event="delivered_auto",
+    )
+    promote_to_confirm(setup_candidates_state, symbol=symbol, direction=direction, price=price_now, now=now)
+
+    LOG.info(
+        "auto_delivery_sent",
+        symbol=symbol, direction=direction,
+        message_id=result.message_id, delivery_tier=delivery_tier,
+    )
+    return True
 
 
 async def run_tick(
@@ -774,6 +910,35 @@ async def run_tick(
                         if routed_dirs and direction not in routed_dirs:
                             continue
                         if not setup:
+                            continue
+                        if setup.get("confirmed") and setup.get("signal_type") in (
+                            "pre_phase", "mid_phase",
+                        ):
+                            try:
+                                delivered = await _evaluate_auto_delivery(
+                                    symbol=symbol,
+                                    direction=direction,
+                                    setup=setup,
+                                    row=row,
+                                    lifecycle_raw=lifecycle_raw,
+                                    broadcaster=broadcaster,
+                                    tracker_state=tracker_state,
+                                    setup_candidates_state=setup_candidates_state,
+                                    state=state,
+                                    pump_store=pump_store,
+                                    now=now,
+                                    ws_feed=ws_feed,
+                                )
+                            except Exception as exc:
+                                LOG.warning(
+                                    "auto_delivery_error",
+                                    symbol=symbol,
+                                    direction=direction,
+                                    error=repr(exc),
+                                )
+                                delivered = False
+                            if delivered:
+                                tg_confirm_sent_this_tick = True
                             continue
                         _maybe_emit_scanner_continuation_wait(
                             symbol=symbol,
@@ -1520,6 +1685,18 @@ async def run_tick(
                     now=orphan_now,
                     pump_store=pump_store,
                 )
+        if ticker_by_sym and tracker_state.get("signals"):
+            price_map = {
+                sym: float(t.get("last_price") or 0)
+                for sym, t in ticker_by_sym.items()
+            }
+            resolved = auto_resolve_active_signals(
+                tracker_state,
+                price_map,
+                now=clock.now_utc(),
+            )
+            if resolved:
+                LOG.info("watch_auto_resolve", closed=resolved)
         if send_telegram and broadcaster is not None:
             await get_advisory_digest().maybe_flush(broadcaster)
         from hunt_core.runtime.tick_state import hunt_scan_store
