@@ -11,8 +11,7 @@ ReconcileLevel = Literal["coherent", "mild_conflict", "strong_conflict"]
 
 _DOM_CONFLICT = 0.15
 _DOM_STRONG = 0.28
-_CONF_GAP_MILD = 0.35
-_CONF_GAP_STRONG = 0.55
+_CONF_DELTA_MILD = 0.15
 _MAGNET_INTENSITY_MIN = 0.50
 
 
@@ -66,21 +65,23 @@ def _dom_conflict(side: str, imb: float) -> tuple[str | None, bool]:
 
 
 def _band_conflicts(side: str, pos: EngineOutput | None) -> list[str]:
+    """Compare positioning engine confidence (long vs short) for direction conflict.
+
+    Uses pos.long/pos.short — the engine's blended confidence scores that
+    incorporate target distances, POC alignment, and liq magnet pull.
+    This is the same metric shown in forecast panel as ``увер.X%``,
+    eliminating the earlier mismatch where raw distance shares were compared
+    instead of confidence deltas.
+    """
     if pos is None:
         return []
-    up = pos.upside_reward_pct
-    down = pos.downside_reward_pct
-    if up <= 0 and down <= 0:
+    delta = pos.short - pos.long
+    if abs(delta) < _CONF_DELTA_MILD:
         return []
-    total = up + down
-    if total <= 0:
-        return []
-    up_share = up / total
-    down_share = down / total
     out: list[str] = []
-    if side == "short" and up_share > down_share + _CONF_GAP_MILD:
+    if side == "short" and delta < -_CONF_DELTA_MILD:
         out.append("upside_band_vs_short")
-    if side == "long" and down_share > up_share + _CONF_GAP_MILD:
+    if side == "long" and delta > _CONF_DELTA_MILD:
         out.append("downside_band_vs_long")
     return out
 
@@ -187,10 +188,9 @@ def _classify_level(conflicts: list[str]) -> ReconcileLevel:
         return "strong_conflict"
     if len(conflicts) >= 3:
         return "strong_conflict"
-    if any(c.endswith("_vs_short") or c.endswith("_vs_long") for c in conflicts):
-        gap_conflicts = [c for c in conflicts if "band" in c]
-        if len(gap_conflicts) >= 1 and len(conflicts) >= 2:
-            return "strong_conflict"
+    band_conflicts = [c for c in conflicts if "band" in c]
+    if band_conflicts and len(conflicts) >= 2:
+        return "strong_conflict"
     if conflicts:
         return "mild_conflict"
     return "coherent"
@@ -200,8 +200,8 @@ def _caveats_for(conflicts: tuple[str, ...]) -> tuple[str, ...]:
     _RU = {
         "dom_buyers_vs_short": "стакан в пользу покупателей против шорта",
         "dom_sellers_vs_long": "стакан в пользу продавцов против лонга",
-        "upside_band_vs_short": "апсайд-зона преобладает в структуре целей при шорте",
-        "downside_band_vs_long": "даунсайд-зона преобладает в структуре целей при лонге",
+        "upside_band_vs_short": "скоринг апсайда выше даунсайда при шорте",
+        "downside_band_vs_long": "скоринг даунсайда выше апсайда при лонге",
         "liq_magnet_above_stop": "магнит ликвидаций за стопом (вверх)",
         "liq_magnet_below_stop": "магнит ликвидаций за стопом (вниз)",
         "poc_cite_mismatch": "POC не согласуется с фактором сценария",
