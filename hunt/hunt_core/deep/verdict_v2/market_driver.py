@@ -5,7 +5,7 @@ from hunt_core.deep.verdict_v2.types import DriverKind, MarketDriver, PatternCan
 
 DRIVER_PATTERN_WHITELIST: dict[DriverKind, frozenset[str]] = {
     "trend_driven": frozenset(
-        {"trend_continuation", "trend_acceleration", "bull_pullback", "bear_rally", "distribution", "accumulation"}
+        {"trend_continuation", "trend_acceleration", "bull_pullback", "bear_rally", "bear_continuation", "distribution", "accumulation"}
     ),
     "positioning_driven": frozenset({"range_bound", "mean_reversion", "value_area_reject"}),
     "liquidity_driven": frozenset({"long_squeeze", "short_squeeze", "liquidity_sweep", "stop_hunt"}),
