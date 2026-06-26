@@ -98,6 +98,9 @@ def build_trade_plan(
     rr1 = float(geom.get("rr_tp1") or 0)
     rr2 = float(geom.get("rr_tp2") or 0)
     rr3 = float(geom.get("rr_tp3") or 0)
+    rr_cons1 = float(geom.get("rr_conservative_tp1") or 0)
+    rr_cons2 = float(geom.get("rr_conservative_tp2") or 0)
+    rr_cons3 = float(geom.get("rr_conservative_tp3") or 0)
     sources = [zone_src, stop_src, *tgt_factors[:2]]
 
     summary_stub = {
@@ -123,7 +126,10 @@ def build_trade_plan(
         invalidation_reason=f"Close beyond {stop_src}",
         level_sources=sources,
         entry_reference=round(entry_ref, 6),
-        rr_base_label=str(geom.get("rr_base_label") or "≈R:R (от края зоны)"),
+        rr_conservative_tp1=round(rr_cons1, 2),
+        rr_conservative_tp2=round(rr_cons2, 2),
+        rr_conservative_tp3=round(rr_cons3, 2),
+        rr_base_label=str(geom.get("rr_base_label") or "≈R:R (от середины зоны)"),
         plan_lifecycle=lifecycle,
     )
     if lifecycle == "active" and price > 0:

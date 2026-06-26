@@ -112,6 +112,9 @@ def recompute_plan_on_activation(
         invalidation_reason=plan.invalidation_reason,
         level_sources=plan.level_sources,
         entry_reference=round(fill_price, 6),
+        rr_conservative_tp1=plan.rr_conservative_tp1,
+        rr_conservative_tp2=plan.rr_conservative_tp2,
+        rr_conservative_tp3=plan.rr_conservative_tp3,
         rr_base_label="R:R (от входа)",
         plan_lifecycle="active",
     )

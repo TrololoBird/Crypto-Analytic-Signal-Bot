@@ -271,6 +271,69 @@ def check_plan_monotonic_r() -> None:
     assert geom["rr_tp1"] <= geom["rr_tp2"] <= geom["rr_tp3"]
 
 
+def check_three_dimensional_scores() -> None:
+    """Scenario/geometry/data_completeness must be present and in [0, 1]."""
+    v = build_scenario_verdict(_base_row())
+    s = v.signal_strength
+    assert 0.0 <= s.scenario_confidence <= 1.0, f"scenario_confidence={s.scenario_confidence}"
+    # geometry_confidence is 0 when plan is None (no structural targets in base row)
+    assert 0.0 <= s.geometry_confidence <= 1.0, f"geometry_confidence={s.geometry_confidence}"
+    dq = v.data_quality
+    assert 0.0 <= dq.data_completeness <= 1.0, f"data_completeness={dq.data_completeness}"
+    assert isinstance(dq.sources, dict) and len(dq.sources) > 0, "sources must be populated"
+    # all source values are bool
+    assert all(isinstance(v, bool) for v in dq.sources.values()), "all sources must be bool"
+
+
+def check_wait_category() -> None:
+    """WAIT decisions must have a classified category."""
+    from hunt_core.deep.verdict_v2.signal_decision import decide_signal, _classify_wait
+    from hunt_core.deep.verdict_v2.config import VerdictV2Config, SignalGates
+    from hunt_core.deep.verdict_v2.types import (
+        DataQualityReport, ExpectedPath, ScenarioCatalyst, ScenarioFragility,
+        SignalStrength, TradeQuality,
+    )
+    # no_plan → geometry category
+    path = ExpectedPath("continuation_up", "long", (1.0, 3.0), (6.0, 24.0), 0.0, 0.6, "test", [], "")
+    dec = decide_signal(
+        path, SignalStrength(0.8, "strong", False), ScenarioFragility(0.1, "low"),
+        TradeQuality(0.9, 1.5, 2.0, "favorable"),
+        None,  # no plan
+        DataQualityReport(0.9), ScenarioCatalyst("level_break", "break", None, 0.7),
+        VerdictV2Config(gates=SignalGates(require_timing_c=False)),
+        timing=None,
+    )
+    assert dec.wait_category == "geometry", f"expected geometry, got {dec.wait_category}"
+    # strength fail → strength category
+    dec2 = decide_signal(
+        path, SignalStrength(0.2, "weak", False), ScenarioFragility(0.1, "low"),
+        TradeQuality(0.9, 1.5, 2.0, "favorable"),
+        None,
+        DataQualityReport(0.9), ScenarioCatalyst("level_break", "break", None, 0.7),
+        VerdictV2Config(gates=SignalGates(require_timing_c=False, strength_min=0.5)),
+        timing=None,
+    )
+    # no_plan is higher priority than strength
+    assert dec2.wait_category == "geometry"
+    # verify _classify_wait directly
+    assert _classify_wait(["strength", "fragility"]) == "strength"
+    assert _classify_wait(["no_plan"]) == "geometry"
+    assert _classify_wait(["coverage"]) == "data"
+    assert _classify_wait(["context_conflict"]) == "conflict"
+
+
+def check_data_completeness_property() -> None:
+    """DataQualityReport.data_completeness must equal source fraction."""
+    from hunt_core.deep.verdict_v2.types import DataQualityReport
+    dq = DataQualityReport(
+        coverage_score=0.8,
+        sources={"dom": True, "heatmap": False, "oi": True, "funding": True},
+    )
+    assert abs(dq.data_completeness - 0.75) < 0.001, f"expected 0.75, got {dq.data_completeness}"
+    dq_empty = DataQualityReport(coverage_score=0.6)
+    assert abs(dq_empty.data_completeness - 0.6) < 0.001
+
+
 def check_queue_gold_collapse() -> None:
     from hunt_core.deep.verdict_v2.signal_queue import build_top3
 
@@ -338,6 +401,9 @@ def main() -> int:
         check_plan_eth_geometry,
         check_plan_monotonic_r,
         check_queue_gold_collapse,
+        check_three_dimensional_scores,
+        check_wait_category,
+        check_data_completeness_property,
     ]
     failed = 0
     for fn in checks:

@@ -17,16 +17,6 @@ from typing import Any
 
 from hunt_core.paths import EVIDENCE_TRACE_JSONL
 
-# Strength-formula weights — kept in sync with ``compute_signal_strength``.
-_FRAGILITY_PENALTY_W = 0.12
-_DISAGREE_PENALTY_W = 0.08
-_TOPOLOGY_DELTA = {
-    "aligned_trend": 0.07,
-    "bull_pullback": 0.04,
-    "bear_rally": 0.04,
-    "compression": -0.03,
-}
-
 
 def evidence_trace_enabled() -> bool:
     return os.getenv("HUNT_EVIDENCE_TRACE", "1").strip().lower() in {"1", "true", "yes", "on"}
@@ -71,36 +61,38 @@ def _direction_contributors(verdict: Any) -> dict[str, Any]:
 
 
 def _strength_terms(verdict: Any) -> dict[str, Any]:
-    """Reconstruct the strength score from its named formula terms."""
+    """Extract strength decomposition directly from breakdown dict.
+
+    Uses strength.breakdown (authoritative) rather than reconstructing the
+    formula with hardcoded weights — avoids drift when formula changes.
+    """
     path = getattr(verdict, "expected_path", None)
     topo = getattr(verdict, "horizon_topology", None)
-    frag = getattr(verdict, "fragility", None)
-    disagree = getattr(verdict, "disagreement", None)
     data = getattr(verdict, "data_quality", None)
     strength = getattr(verdict, "signal_strength", None)
-    horizons = getattr(verdict, "horizons", None) or {}
-    h_b = horizons.get("B") if isinstance(horizons, dict) else None
 
     rank = float(getattr(path, "probability_rank", 0.0) or 0.0)
-    b_conv = float(getattr(h_b, "conviction", 0.0) or 0.0) if h_b else None
     topo_kind = str(getattr(topo, "kind", "") or "")
     coverage = float(getattr(data, "coverage_score", 0.0) or 0.0)
+    sources = dict(getattr(data, "sources", None) or {})
+    present = sum(sources.values()) if sources else 0
+    total = len(sources) if sources else 0
+    data_completeness = round(present / total, 3) if total > 0 else coverage
+
     return {
         "probability_rank": round(rank, 3),
-        "horizon_b_conviction": round(b_conv, 3) if b_conv is not None else None,
-        "base_blend": round(rank * 0.40 + b_conv * 0.60, 3) if b_conv is not None else round(rank, 3),
         "topology_kind": topo_kind,
-        "topology_delta": _TOPOLOGY_DELTA.get(topo_kind, 0.0),
-        "fragility_score": round(float(getattr(frag, "score", 0.0) or 0.0), 3),
-        "fragility_penalty": round(-float(getattr(frag, "score", 0.0) or 0.0) * _FRAGILITY_PENALTY_W, 4),
-        "disagreement_score": round(float(getattr(disagree, "score", 0.0) or 0.0), 3),
-        "disagreement_penalty": round(-float(getattr(disagree, "score", 0.0) or 0.0) * _DISAGREE_PENALTY_W, 4),
         "coverage_score": round(coverage, 3),
+        "data_completeness": data_completeness,
+        "data_sources": sources,
         "coverage_capped": coverage < 0.55,
         "reconcile_level": str(getattr(verdict, "reconcile_level", "coherent") or "coherent"),
         "final_score": round(float(getattr(strength, "score", 0.0) or 0.0), 3),
         "final_label": str(getattr(strength, "label", "") or ""),
+        "scenario_confidence": round(float(getattr(strength, "scenario_confidence", 0.0) or 0.0), 3),
+        "geometry_confidence": round(float(getattr(strength, "geometry_confidence", 0.0) or 0.0), 3),
         "capped_by_data": bool(getattr(strength, "capped_by_data", False)),
+        "breakdown": dict(getattr(strength, "breakdown", None) or {}),
     }
 
 
@@ -159,6 +151,7 @@ def append_evidence_trace(row: dict[str, Any], *, verdict: Any | None) -> None:
             "action": action,
             "playbook": playbook,
             "gates_failed": list(getattr(dec, "gates_failed", []) or []),
+            "wait_category": str(getattr(dec, "wait_category", "") or ""),
             "direction": _direction_contributors(verdict),
             "strength": _strength_terms(verdict),
             "zone_origin": _zone_origin(verdict, price),

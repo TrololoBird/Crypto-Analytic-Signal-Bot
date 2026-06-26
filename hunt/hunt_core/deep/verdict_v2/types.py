@@ -181,6 +181,13 @@ class DataQualityReport:
     missing_groups: list[str] = field(default_factory=list)
     sources: dict[str, bool] = field(default_factory=dict)
 
+    @property
+    def data_completeness(self) -> float:
+        """Named-source completeness 0-1; falls back to coverage_score when sources empty."""
+        if not self.sources:
+            return self.coverage_score
+        return sum(self.sources.values()) / len(self.sources)
+
 
 @dataclass(frozen=True, slots=True)
 class MaturityFeatures:
@@ -270,7 +277,7 @@ class ScenarioVerdict:
             "strength_label": self.signal_strength.label,
             "scenario_confidence": self.signal_strength.scenario_confidence,
             "geometry_confidence": self.signal_strength.geometry_confidence,
-            "data_completeness": sum(self.data_quality.sources.values()) / max(len(self.data_quality.sources), 1) if self.data_quality.sources else self.data_quality.coverage_score,
+            "data_completeness": round(self.data_quality.data_completeness, 3),
             "wait_category": self.signal_decision.wait_category,
             "fragility": self.fragility.score,
             "fragility_label": self.fragility.label,

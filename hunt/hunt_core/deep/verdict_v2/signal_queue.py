@@ -93,7 +93,10 @@ def compute_opportunity_score(summary: dict[str, Any], *, activation_state: str 
     frag = float(summary.get("fragility") or 0)
     tq = str(summary.get("trade_quality") or "marginal")
     tq_score = {"favorable": 1.0, "marginal": 0.55, "poor": 0.25}.get(tq, 0.4)
-    score = strength * 0.45 + rr_norm * 0.22 + (1.0 - frag) * 0.18 + tq_score * 0.15
+    # geometry_confidence ±0.03 nudge: strong geometry boosts, poor geometry penalises.
+    gc = float(summary.get("geometry_confidence") or 0)
+    geo_adj = (gc - 0.5) * 0.06 if gc > 0 else 0.0
+    score = strength * 0.45 + rr_norm * 0.22 + (1.0 - frag) * 0.18 + tq_score * 0.15 + geo_adj
     if action in {"long", "short"}:
         score = clamp01(score + 0.12)
     elif strength < 0.32:
@@ -316,7 +319,14 @@ def format_queue_telegram(queue: dict[str, Any] | None = None) -> str:
     if not top3:
         return ""
     _ACTION_RU = {"LONG": "ЛОНГ", "SHORT": "ШОРТ", "WAIT": "ЖДЁМ"}
-    _LIFE_RU = {"WAITING": "ожидание", "ACTIVE": "активен", "WATCHING": "наблюдение"}
+    _LIFE_RU = {
+        "WAITING": "ожидание", "ACTIVE": "активен", "WATCHING": "наблюдение",
+        "pre_pump": "накопление", "pre_dump": "распределение",
+        "mid": "в движении", "neutral": "нейтрально",
+        "accumulation": "накопление", "distribution": "распределение",
+        "exhaustion_at_high": "истощение", "breakout_arming": "подготовка пробоя",
+        "recovery": "восстановление", "dump_active": "дамп",
+    }
     _ACT_RU = {
         "in_entry_zone": "в зоне",
         "at_catalyst": "на катализаторе",
@@ -347,11 +357,11 @@ def format_queue_telegram(queue: dict[str, Any] | None = None) -> str:
         promo = " · 🆕" if item.get("promoted") else ""
         act_bit = f" · {html.escape(act_ru)}" if act_ru else ""
         tag = ""
-        if item.get("correlation_tag"):
-            tag = f" · <i>{html.escape(str(item['correlation_tag']))}</i>"
         if item.get("equivalence") == "gold":
             gold_dir = "↓" if action_raw == "SHORT" else ("↑" if action_raw == "LONG" else "")
             tag = f" · <i>корр. золото {gold_dir}</i>"
+        elif item.get("correlation_tag"):
+            tag = f" · <i>{html.escape(str(item['correlation_tag']))}</i>"
         lines.append(
             f"{rank}. <b>{sym}</b> {action_ru} · {life_ru} · "
             f"приоритет <code>{score:.2f}</code> · {path}{act_bit}{promo}{tag}"
@@ -370,5 +380,4 @@ def format_queue_telegram(queue: dict[str, Any] | None = None) -> str:
             peer_bits.append(f"{psym} <code>{pscore:.2f}</code>{act_s}")
         if peer_bits:
             lines.append("<i>В зоне / рядом: " + " · ".join(peer_bits) + "</i>")
-    lines.append("<i>приоритет очереди, не вероятность</i>")
     return "\n".join(lines)
