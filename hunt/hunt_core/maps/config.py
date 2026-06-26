@@ -1,6 +1,7 @@
 """Maps subsystem configuration — TOML [maps] + HUNT_MAPS_* env overrides."""
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -90,7 +91,7 @@ def load_maps_config(defaults: Mapping[str, Any] | None = None) -> MapsConfig:
             if isinstance(raw.get("maps"), dict):
                 section = dict(raw["maps"])
         except Exception:
-            pass
+            logging.getLogger(__name__).exception("maps config load from defaults failed")
     return MapsConfig.from_defaults(section)
 
 

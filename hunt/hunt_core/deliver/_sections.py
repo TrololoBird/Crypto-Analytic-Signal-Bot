@@ -361,53 +361,22 @@ def format_liquidation_map_section(row: dict[str, Any]) -> str:
     synthetic_only = bool(market.get("liq_synthetic_only"))
     if nearest_long is None and nearest_short is None and not cascade:
         return ""
-    if synthetic_only:
-        lines = [
-            "💥 <b>Карта ликвидаций</b> "
-            "<i>(оценка по плечевым тирам · не реальные ликвидации)</i>"
-        ]
-    else:
-        lines = ["💥 <b>Карта ликвидаций</b> <i>(пулы маржин-коллов · не стакан)</i>"]
-    if venues:
-        lines[0] += f" <i>({', '.join(str(v)[:3].upper() for v in venues)})</i>"
+    lines = ["💥 <b>Ликвидации</b>"]
     if nearest_long is not None:
         pull = market.get("liq_magnet_pull_long_pct")
-        tail = f" ({pull:.2f}%)" if pull is not None else ""
-        tag = " · оценка" if synthetic_only else ""
+        tail = f" ({pull:.1f}%)" if pull is not None else ""
         lines.append(
-            f"Магнит лонг-ликвидаций ↓ <code>{_fmt_price(float(nearest_long))}</code>{tail}{tag}"
+            f"Лонг-ликвидации ↓ <code>{_fmt_price(float(nearest_long))}</code>{tail}"
         )
     if nearest_short is not None:
         pull = market.get("liq_magnet_pull_short_pct")
-        tail = f" ({pull:.2f}%)" if pull is not None else ""
-        tag = " · оценка" if synthetic_only else ""
+        tail = f" ({pull:.1f}%)" if pull is not None else ""
         lines.append(
-            f"Шорт-сквиз ↑ <code>{_fmt_price(float(nearest_short))}</code>{tail}{tag}"
+            f"Шорт-сквиз ↑ <code>{_fmt_price(float(nearest_short))}</code>{tail}"
         )
     if cascade:
         label = "лонг-флаш" if cascade == "long_flush" else "шорт-сквиз"
         lines.append(f"Риск каскада: <b>{label}</b>")
-    show_conf = conf is not None
-    if show_conf and synthetic_only and int(events or 0) == 0 and abs(float(conf) - 0.35) < 0.02:
-        show_conf = False
-    if show_conf:
-        lines.append(f"Прогнозная уверенность: <code>{float(conf):.2f}</code>")
-    if events is not None and int(events) > 0:
-        lines.append(f"Событий за 5m: <code>{int(events)}</code>")
-    zones = market.get("liq_density_zones") or []
-    hot = [z for z in zones if isinstance(z, dict) and float(z.get("intensity") or 0) >= 0.5][:2]
-    if hot:
-        bits: list[str] = []
-        for z in hot:
-            if z.get("price_center") is None:
-                continue
-            src = str(z.get("source") or "")
-            src_tag = " · оценка" if src in {"leverage_tier_estimate", "forward", "entry_anchored"} else ""
-            bits.append(
-                f"{_fmt_price(float(z['price_center']))} ({float(z['intensity']):.0%}){src_tag}"
-            )
-        if bits:
-            lines.append("Горячие зоны: " + " · ".join(bits))
     return "\n".join(lines)
 
 

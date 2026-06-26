@@ -788,9 +788,7 @@ def format_delivery_card(
 
     from hunt_core.deliver._sections import (
         format_forecast_section,
-        format_book_walls_section,
         format_liquidation_map_section,
-        format_orderflow_section,
         format_volume_profile_section,
     )
 
@@ -804,9 +802,7 @@ def format_delivery_card(
     for block_fn in (
         format_forecast_section,
         format_volume_profile_section,
-        format_book_walls_section,
         format_liquidation_map_section,
-        format_orderflow_section,
     ):
         block = block_fn(row)
         if block:
