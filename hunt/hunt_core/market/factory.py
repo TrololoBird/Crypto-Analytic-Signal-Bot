@@ -91,8 +91,11 @@ def build_network_config(
         # CCXT Pro manual: delta-only updates reduce hot-path work in watch loops.
         config["newUpdates"] = True
         config["streaming"] = {
-            "keepAlive": 30_000,
-            "maxPingPongMisses": 2.0,
+            # Binance recommendation: client-side keepalive every 3min.
+            # 30s was too aggressive — event-loop saturation during startup
+            # caused ping/pong misses, making CCXT Pro self-close every ~79s.
+            "keepAlive": 180_000,
+            "maxPingPongMisses": 3.0,
         }
     if proxy_url:
         config["aiohttp_proxy"] = proxy_url
