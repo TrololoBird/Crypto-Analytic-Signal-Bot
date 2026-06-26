@@ -207,14 +207,25 @@ def check_plan_eth_geometry() -> None:
     row = {
         "symbol": "ETHUSDT",
         "price": 1667.52,
-        "market": {"map_vp_poc": 1731.65, "atr14": 12.0},
+        "market": {
+            "map_vp_poc": 1731.65,
+            "atr14": 12.0,
+            "liq_heatmap_nearest_short": 1690.0,
+        },
+        "maps": {
+            "volume_profile": {
+                "profiles": [{"hvn_nodes": [{"price": 1685.0}, {"price": 1710.0}]}],
+            },
+        },
         "structure": {
             "key_levels": {"resistance": 1667.8, "support": 1650.35, "last_swing_low": 1650.0},
             "liquidity_pools": {"nearest_below": 1663.36},
         },
         "regime": {"poc_1h": 1731.65},
     }
-    zone, _ = entry_zone(row, "long", 0.35)
+    ez_result = entry_zone(row, "long", 0.35)
+    assert ez_result is not None, "entry_zone must find structural anchor"
+    zone, _ = ez_result
     assert zone[1] < row["price"], f"zone hi {zone[1]} must be below price"
     path = ExpectedPath(
         "breakout_up", "long", (1.0, 3.0), (6.0, 24.0), 1725.0, 0.6, "test", [], ""
@@ -230,9 +241,10 @@ def check_plan_eth_geometry() -> None:
     )
     geom = finalize_plan_geometry(
         {
-            "entry_zone": [1662.0, 1733.46],
-            "stop_loss": 1650.35,
-            "tp1": 1725.17,
+            "entry_zone": [1650.0, 1667.0],
+            "stop_loss": 1645.0,
+            "tp1": 1685.0,
+            "tp2": 1710.0,
             "price_hint": 1667.52,
         },
         direction="long",

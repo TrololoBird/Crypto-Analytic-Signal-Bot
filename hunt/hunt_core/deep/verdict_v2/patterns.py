@@ -15,10 +15,10 @@ from hunt_core.deep.verdict_v2.types import (
 )
 
 
-_BASELINE_TREND = 0.45
-_BASELINE_MEAN_REVERSION = 0.35
-_BASELINE_LIQUIDITY = 0.30
-_BASELINE_DISTRIBUTION = 0.32
+_BASELINE_TREND = 0.40
+_BASELINE_MEAN_REVERSION = 0.25
+_BASELINE_LIQUIDITY = 0.20
+_BASELINE_DISTRIBUTION = 0.22
 
 
 def _gen_trend(row: dict[str, Any], topo: HorizonTopology, mat: MaturityFeatures) -> PatternCandidate:

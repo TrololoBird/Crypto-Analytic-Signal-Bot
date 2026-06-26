@@ -5,17 +5,12 @@ from typing import Any, Literal
 
 import structlog
 
-from hunt_core.analysis.primitives import atr_pad, forecast_band
-
 _LOG = structlog.get_logger(__name__)
 
 _MAX_RR = 10.0
 _MIN_RR = 0.3
 _ZONE_MAX_WIDTH_ATR_MULT = 1.8
 _ZONE_MAX_WIDTH_PRICE_PCT = 0.018
-_SL_ATR_BUFFER = 1.2
-_SL_ZONE_WIDTH_FACTOR = 0.5
-_TP_FALLBACK_ATR_BASE = 1.5
 _ENTRY_PAD_K = 0.35
 PlanDirection = Literal["long", "short"]
 
@@ -105,11 +100,11 @@ def finalize_plan_geometry(
     sl = float(p.get("stop_loss") or p.get("stop") or 0.0)
 
     if direction == "long" and sl >= ez_lo and ez_lo > 0:
-        sl = ez_lo - max(atr * _SL_ATR_BUFFER, abs(ez_hi - ez_lo) * _SL_ZONE_WIDTH_FACTOR)
-        p["stop_loss"] = round(sl, 6)
+        p["geometry_valid"] = False
+        return p
     elif direction == "short" and sl <= ez_hi and ez_hi > 0:
-        sl = ez_hi + max(atr * _SL_ATR_BUFFER, abs(ez_hi - ez_lo) * _SL_ZONE_WIDTH_FACTOR)
-        p["stop_loss"] = round(sl, 6)
+        p["geometry_valid"] = False
+        return p
 
     tps_raw = [p.get("tp1"), p.get("tp2"), p.get("tp3")]
     tps: list[float] = []
@@ -125,36 +120,42 @@ def finalize_plan_geometry(
         except (TypeError, ValueError):
             pass
 
-    if direction == "long":
-        tps = sorted(tps)
-    else:
-        tps = sorted(tps, reverse=True)
-
-    while len(tps) < 3:
-        mult = (len(tps) + 2) * _TP_FALLBACK_ATR_BASE
-        if direction == "long":
-            tps.append(entry_ref_mid + atr * mult)
-        else:
-            tps.append(entry_ref_mid - atr * mult)
-
-    for i, tp in enumerate(tps):
-        rr = _rr(entry_ref_mid, tp, sl, direction)
-        if rr < _MIN_RR or rr > _MAX_RR:
-            mult = (i + 2) * _TP_FALLBACK_ATR_BASE
-            tps[i] = (entry_ref_mid + atr * mult) if direction == "long" else (entry_ref_mid - atr * mult)
+    if not tps:
+        p["geometry_valid"] = False
+        return p
 
     if direction == "long":
         tps = sorted(tps)
     else:
         tps = sorted(tps, reverse=True)
 
-    prev_rr = 0.0
-    for i, tp in enumerate(tps):
+    # Filter TPs with invalid RR — drop instead of replacing with ATR
+    tps = [tp for tp in tps if _MIN_RR <= _rr(entry_ref_mid, tp, sl, direction) <= _MAX_RR]
+    if not tps:
+        p["geometry_valid"] = False
+        return p
+
+    if direction == "long":
+        tps = sorted(tps)
+    else:
+        tps = sorted(tps, reverse=True)
+
+    # Deduplicate TPs too close together (0.15% apart) — keep first
+    _deduped_tps: list[float] = [tps[0]]
+    for tp in tps[1:]:
+        if abs(tp - _deduped_tps[-1]) / max(abs(_deduped_tps[-1]), 1e-8) >= 0.0015:
+            _deduped_tps.append(tp)
+    tps = _deduped_tps
+
+    # Enforce monotonic RR — drop non-monotonic TPs
+    _mono: list[float] = [tps[0]]
+    prev_rr = _rr(entry_ref_mid, tps[0], sl, direction)
+    for tp in tps[1:]:
         rr = _rr(entry_ref_mid, tp, sl, direction)
-        if rr < prev_rr:
-            mult = (i + 2) * _TP_FALLBACK_ATR_BASE
-            tps[i] = (entry_ref_mid + atr * mult) if direction == "long" else (entry_ref_mid - atr * mult)
-        prev_rr = max(prev_rr, _rr(entry_ref_mid, tps[i], sl, direction))
+        if rr > prev_rr:
+            _mono.append(tp)
+            prev_rr = rr
+    tps = _mono
 
     price_hint = float(p.get("price_hint") or entry_ref_mid or 0.0)
     ez_lo, ez_hi = _clamp_entry_zone_to_targets(
@@ -164,25 +165,20 @@ def finalize_plan_geometry(
     entry_ref_mid = _zone_midpoint((ez_lo, ez_hi))
     p["entry_zone"] = [ez_lo, ez_hi]
 
-    # Zone clamping may have moved entry_ref_mid — re-enforce _MIN_RR with updated midpoint.
-    _stale_rr1 = _rr(entry_ref_mid, tps[0], sl, direction) if tps else 0.0
-    _replaced = False
-    for i, tp in enumerate(tps):
-        if _rr(entry_ref_mid, tp, sl, direction) < _MIN_RR:
-            mult = (i + 2) * _TP_FALLBACK_ATR_BASE
-            tps[i] = (entry_ref_mid + atr * mult) if direction == "long" else (entry_ref_mid - atr * mult)
-            _replaced = True
-    if _replaced:
-        _LOG.warning(
-            "plan_rr_clamp_repair",
-            stale_rr1=round(_stale_rr1, 3),
-            repaired_rr1=round(_rr(entry_ref_mid, tps[0], sl, direction), 3),
-            direction=direction,
-        )
+    # Zone clamping may have moved entry_ref_mid — drop TPs that no longer meet MIN_RR
+    tps = [tp for tp in tps if _rr(entry_ref_mid, tp, sl, direction) >= _MIN_RR]
+    if not tps:
+        p["geometry_valid"] = False
+        return p
+
     if direction == "long":
         tps = sorted(tps)
     else:
         tps = sorted(tps, reverse=True)
+
+    # Pad tp2/tp3 slots from available structural TPs (repeat last if fewer than 3)
+    while len(tps) < 3:
+        tps.append(tps[-1])
 
     p["tp1"] = round(tps[0], 6)
     p["tp2"] = round(tps[1], 6)
@@ -200,18 +196,4 @@ def finalize_plan_geometry(
     return p
 
 
-def build_trade_plan(row: dict[str, Any], *, side: str, price: float, atr: float) -> dict[str, Any]:
-    lo, hi = atr_pad(price, atr, k=_ENTRY_PAD_K)
-    tgt_lo, tgt_hi = forecast_band(price, atr, side=side, k=_TP_FALLBACK_ATR_BASE)
-    stop = price - atr * _SL_ATR_BUFFER if side == "long" else price + atr * _SL_ATR_BUFFER
-    plan = {
-        "entry_zone": [round(lo, 6), round(hi, 6)],
-        "stop_loss": round(stop, 6),
-        "tp1": round(tgt_lo if side == "long" else tgt_hi, 6),
-        "tp2": round(tgt_hi if side == "long" else tgt_lo, 6),
-        "side": side,
-    }
-    return finalize_plan_geometry(plan, direction=side, atr=atr)  # type: ignore[arg-type]
-
-
-__all__ = ["build_trade_plan", "finalize_plan_geometry", "plan_geometry_valid"]
+__all__ = ["finalize_plan_geometry", "plan_geometry_valid"]

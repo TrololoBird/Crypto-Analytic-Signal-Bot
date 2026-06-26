@@ -105,26 +105,15 @@ def _bar_extremes(row: dict[str, Any], price: float) -> tuple[float, float]:
     return hi, lo
 
 
-def _fallback_levels(
-    price: float, *, direction: str, row: dict[str, Any]
-) -> tuple[float, float, float]:
-    atr = float(((row.get("timeframes") or {}).get("15m") or {}).get("atr14") or 0)
-    if atr <= 0:
-        atr = price * 0.02
-    if direction == "short":
-        return price + atr * 2.0, price - atr * 2.0, price - atr * 4.0
-    return price - atr * 2.0, price + atr * 2.0, price + atr * 4.0
-
-
 def _levels_from_setup(
     setup: dict[str, Any], *, direction: str, price: float, row: dict[str, Any]
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float] | None:
     sl = float(setup.get("stop_loss") or 0)
     tp1 = float(setup.get("tp1") or 0)
     tp2 = float(setup.get("tp2") or 0)
     if sl > 0 and tp1 > 0:
         return sl, tp1, tp2 if tp2 > 0 else tp1 * (0.98 if direction == "short" else 1.02)
-    return _fallback_levels(price, direction=direction, row=row)
+    return None
 
 
 def _update_rollup(state: dict[str, Any], closed: dict[str, Any]) -> None:
@@ -233,7 +222,10 @@ def _open_candidate(
         _close_candidate(state, prev, reason="superseded", exit_price=price, now=now)
         active.pop(key, None)
 
-    sl, tp1, tp2 = _levels_from_setup(setup, direction=direction, price=price, row=row)
+    _lvl = _levels_from_setup(setup, direction=direction, price=price, row=row)
+    if _lvl is None:
+        return {}
+    sl, tp1, tp2 = _lvl
     cid = f"{sym}:{direction}:{stage}:{uuid.uuid4().hex[:8]}"
     dir_l = direction.lower()
     fuel_key = "dump_fuel" if dir_l == "short" else "long_fuel"

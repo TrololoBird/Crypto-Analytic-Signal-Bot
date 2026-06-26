@@ -1,7 +1,10 @@
 """Verdict V2 orchestrator — L0–L5 pipeline."""
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from hunt_core.deep.verdict_v2.blender import blend_horizons, build_conflict_matrix
 from hunt_core.deep.verdict_v2._helpers import atr_from_row
@@ -68,6 +71,7 @@ def build_scenario_verdict(
         data_quality,
         symbol=sym,
         topology_kind=topology.kind,
+        engines=engines,
     )
     reconcile = reconcile_context(row, path, plan, engines, patterns)
     from hunt_core.deep.verdict_v2.path_shadow import (
@@ -99,6 +103,7 @@ def build_scenario_verdict(
             data_quality,
             symbol=sym,
             topology_kind=topology.kind,
+            engines=engines,
         )
         reconcile = reconcile_context(row, path_for_decision, plan, engines, patterns)
     strength = apply_reconcile_to_strength(strength, reconcile)
@@ -161,13 +166,13 @@ def build_scenario_verdict(
 
         append_rr_geometry_audit(row, plan=plan, verdict=verdict)
     except Exception:
-        pass
+        logger.exception("RR geometry audit failed")
     try:
         from hunt_core.deep.verdict_v2.evidence_trace import append_evidence_trace
 
         append_evidence_trace(row, verdict=verdict)
     except Exception:
-        pass
+        logger.exception("evidence trace append failed")
     try:
         append_reconcile_path_shadow(
             row,
@@ -179,5 +184,5 @@ def build_scenario_verdict(
             action=str(decision.action),
         )
     except Exception:
-        pass
+        logger.exception("reconcile path shadow append failed")
     return verdict

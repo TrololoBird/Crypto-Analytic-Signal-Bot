@@ -1,6 +1,7 @@
 """Level selection for trade plan — canonical confluence grid / structure set."""
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from hunt_core.deep.verdict_v2._helpers import atr_from_row, safe_float
@@ -11,6 +12,7 @@ from hunt_core.analysis.targets import (
 
 _STOP_BUFFER_ATR = 0.12
 _CATALYST_BUFFER_ATR = 0.10
+_MAP_STALE_MS = 10 * 60 * 1000
 
 
 def _structure(row: dict[str, Any]) -> dict[str, Any]:
@@ -35,12 +37,20 @@ def _regime(row: dict[str, Any]) -> dict[str, Any]:
     return r if isinstance(r, dict) else {}
 
 
+def _market_fresh(market: dict[str, Any]) -> bool:
+    ts = market.get("maps_ts_ms")
+    if ts is None or not isinstance(ts, (int, float)) or ts <= 0:
+        return False
+    return int(time.time() * 1000) - int(ts) < _MAP_STALE_MS
+
+
 def canonical_levels(row: dict[str, Any], direction: str) -> dict[str, float]:
     """One level set for stop, catalyst, and display — confluence grid + maps."""
     kl = _key_levels(row)
     pools = _pools(row)
     regime = _regime(row)
-    market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    raw_market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    market = raw_market if _market_fresh(raw_market) else {}
     out: dict[str, float] = {}
     if direction == "long":
         for key in ("support", "last_swing_low"):
@@ -134,8 +144,12 @@ def pick_targets(row: dict[str, Any], direction: str) -> tuple[list[float], list
     return _collect_downward_targets(row, price)
 
 
-def pick_stop(row: dict[str, Any], direction: str, entry: float, *, catalyst_level: float = 0.0) -> tuple[float, str]:
-    """Stop beyond catalyst/structure by real buffer — catalyst ≠ stop by construction."""
+def pick_stop(row: dict[str, Any], direction: str, entry: float, *, catalyst_level: float = 0.0) -> tuple[float, str] | None:
+    """Stop beyond catalyst/structure by real buffer.
+
+    Returns None when no structural level exists — zero degradation policy
+    forbids ATR-based stop substitution.
+    """
     atr = atr_from_row(row)
     buffer = max(atr * _STOP_BUFFER_ATR, entry * 0.0008)
     cat = catalyst_level if catalyst_level > 0 else pick_catalyst_level(row, direction)[0]
@@ -146,14 +160,14 @@ def pick_stop(row: dict[str, Any], direction: str, entry: float, *, catalyst_lev
         structural = levels.get("support") or levels.get("pool_below") or 0.0
         if structural > 0 and structural < entry:
             return round(structural - buffer, 6), "structure_below_buf"
-        return round(entry - atr * 1.5, 6), "atr_fallback"
+        return None
     if cat > 0 and cat > entry:
         return round(cat + buffer, 6), "beyond_catalyst_buf"
     levels = canonical_levels(row, direction)
     structural = levels.get("resistance") or levels.get("pool_above") or 0.0
     if structural > 0 and structural > entry:
         return round(structural + buffer, 6), "structure_above_buf"
-    return round(entry + atr * 1.5, 6), "atr_fallback"
+    return None
 
 
 def stop_structural_buffer_atr(row: dict[str, Any], plan_direction: str, stop: float, entry: float) -> float:
@@ -173,45 +187,47 @@ def stop_structural_buffer_atr(row: dict[str, Any], plan_direction: str, stop: f
     return gap / atr
 
 
-def entry_zone(row: dict[str, Any], direction: str, pad_atr: float) -> tuple[tuple[float, float], str]:
-    """Entry zone anchored to structural reference — not raw price every tick."""
+def entry_zone(row: dict[str, Any], direction: str, pad_atr: float) -> tuple[tuple[float, float], str] | None:
+    """Entry zone anchored to structural reference.
+
+    Returns None when no structural anchor exists — zero degradation policy.
+    """
     price = safe_float(row.get("price"))
     atr = atr_from_row(row)
     pad = atr * pad_atr
     levels = canonical_levels(row, direction)
     regime = _regime(row)
-    market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    raw_market = row.get("market") if isinstance(row.get("market"), dict) else {}
+    market = raw_market if _market_fresh(raw_market) else {}
 
     if direction == "long":
         anchor = levels.get("poc") or levels.get("support") or safe_float(regime.get("poc_1h"))
         if anchor <= 0:
             anchor = safe_float(market.get("map_vp_poc"))
+        if anchor <= 0:
+            return None
         structural = levels.get("support") or levels.get("pool_below") or 0.0
         if anchor > price * 1.002:
-            # POC above price — pullback zone stays below market (limit on dip).
             hi = round(price - pad * 0.08, 6)
-            lo_anchor = structural if structural > 0 and structural < price else price - pad * 1.4
+            lo_anchor = structural if structural > 0 and structural < price else anchor - pad * 1.4
             lo = round(min(lo_anchor, hi - pad * 0.35), 6)
             if lo >= hi:
                 lo = round(hi - max(pad * 0.8, atr * 0.45), 6)
             return (lo, hi), "pullback_below_price"
-        if anchor <= 0:
-            anchor = price
         lo = round(min(anchor, price) - pad * 0.5, 6)
         hi = round(min(max(anchor, price) + pad * 0.2, price), 6)
         if lo >= hi:
-            lo, hi = round(price - pad, 6), round(price - pad * 0.05, 6)
+            lo, hi = round(anchor - pad, 6), round(anchor - pad * 0.05, 6)
         return (lo, hi), "struct_pullback_zone"
     anchor = levels.get("poc") or levels.get("resistance") or safe_float(regime.get("poc_1h"))
     if anchor <= 0:
         anchor = safe_float(market.get("map_vp_poc"))
     if anchor <= 0:
-        anchor = price
+        return None
     lo = round(min(anchor, price) - pad * 0.25, 6)
     hi = round(max(anchor, price) + pad * 0.5, 6)
     if lo >= hi:
-        lo, hi = round(price, 6), round(price + pad, 6)
-    # Guard: for short, entry zone must stay above local support — don't enter below support.
+        lo, hi = round(anchor, 6), round(anchor + pad, 6)
     local_support = levels.get("support") or levels.get("pool_below") or 0.0
     if local_support > 0 and lo < local_support:
         lo = round(local_support * 1.0005, 6)

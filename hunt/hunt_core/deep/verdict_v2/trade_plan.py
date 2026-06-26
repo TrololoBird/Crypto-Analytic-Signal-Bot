@@ -19,7 +19,12 @@ def build_trade_plan(
     if path.direction not in {"long", "short"}:
         return None
     direction = path.direction
-    zone, zone_src = entry_zone(row, direction, cfg.entry_atr_pad)
+
+    ez_result = entry_zone(row, direction, cfg.entry_atr_pad)
+    if ez_result is None:
+        return None
+    zone, zone_src = ez_result
+
     price = safe_float(row.get("price"))
     atr = atr_from_row(row)
     zone_mid = (zone[0] + zone[1]) / 2.0
@@ -41,23 +46,30 @@ def build_trade_plan(
     from hunt_core.deep.verdict_v2.levels import pick_catalyst_level
 
     cat_level, _ = pick_catalyst_level(row, direction, entry_zone=zone, atr=atr)
-    stop, stop_src = pick_stop(row, direction, zone_mid, catalyst_level=cat_level)
+
+    stop_result = pick_stop(row, direction, zone_mid, catalyst_level=cat_level)
+    if stop_result is None:
+        return None
+    stop, stop_src = stop_result
+
     targets, tgt_factors = pick_targets(row, direction)
 
     if not targets:
-        if direction == "long":
-            targets = [zone_mid + atr * 2, zone_mid + atr * 3.5, zone_mid + atr * 5]
-        else:
-            targets = [zone_mid - atr * 2, zone_mid - atr * 3.5, zone_mid - atr * 5]
-        tgt_factors = ["atr_fallback"]
+        return None
 
     if direction == "long":
         targets = sorted(t for t in targets if t > zone_mid * 1.0005)[:3]
     else:
         targets = sorted((t for t in targets if t < zone_mid * 0.9995), reverse=True)[:3]
-    while len(targets) < 3:
-        mult = (len(targets) + 1) * 2
-        targets.append(zone_mid + atr * mult if direction == "long" else zone_mid - atr * mult)
+
+    _deduped: list[float] = []
+    for _t in targets:
+        if not any(abs(_t - _d) / max(_d, 1e-8) < 0.001 for _d in _deduped):
+            _deduped.append(_t)
+    targets = _deduped
+
+    if not targets:
+        return None
 
     zone_width = abs(zone[1] - zone[0])
     atr_for_geom = atr if atr and atr > 0 else max(zone_width * 2.0, 1e-6)
@@ -66,19 +78,21 @@ def build_trade_plan(
             "entry_zone": [zone[0], zone[1]],
             "stop_loss": stop,
             "tp1": targets[0],
-            "tp2": targets[1],
-            "tp3": targets[2],
+            "tp2": targets[1] if len(targets) > 1 else None,
+            "tp3": targets[2] if len(targets) > 2 else None,
             "price_hint": price,
         },
         direction=direction,
         atr=atr_for_geom,
     )
+    if not geom.get("geometry_valid"):
+        return None
+
     zone = (round(float(geom["entry_zone"][0]), 6), round(float(geom["entry_zone"][1]), 6))
     stop = float(geom.get("stop_loss") or stop)
     tp1 = float(geom.get("tp1") or targets[0])
-    tp2 = float(geom.get("tp2") or targets[1])
-    tp3 = float(geom.get("tp3") or targets[2])
-    # entry_reference from geometry is the zone midpoint — use it for both directions.
+    tp2 = float(geom.get("tp2") or (targets[1] if len(targets) > 1 else tp1))
+    tp3 = float(geom.get("tp3") or (targets[2] if len(targets) > 2 else tp2))
     _geom_entry_ref = geom.get("entry_reference")
     entry_ref = float(_geom_entry_ref if _geom_entry_ref else (zone[0] if direction == "long" else zone[1]))
     rr1 = float(geom.get("rr_tp1") or 0)

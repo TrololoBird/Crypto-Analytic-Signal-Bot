@@ -34,9 +34,9 @@ _PATTERN_PATH: dict[str, PathType] = {
 
 
 def _path_direction(path: PathType) -> str:
-    if path.endswith("_up") or path in {"continuation_up", "pullback_up", "breakout_up", "squeeze_up"}:
+    if path.endswith("_up"):
         return "long"
-    if path.endswith("_down") or path in {"continuation_down", "pullback_down", "breakout_down", "squeeze_down"}:
+    if path.endswith("_down"):
         return "short"
     return "neutral"
 
@@ -65,14 +65,30 @@ def _move_bounds(row: dict[str, Any], direction: str) -> tuple[float, float]:
     return (round(atr_pct * 0.8, 2), round(atr_pct * 2.5, 2))
 
 
-def _time_bounds(path: PathType) -> tuple[float, float]:
+_TF_SCALE: dict[str, float] = {"5m": 0.25, "15m": 0.5, "1h": 1.0, "4h": 2.0}
+
+
+def _time_bounds(path: PathType, row: dict[str, Any] | None = None) -> tuple[float, float]:
+    setup = {}
+    if isinstance(row, dict):
+        for key in ("short", "dump", "long"):
+            candidate = row.get(key)
+            if isinstance(candidate, dict):
+                setup = candidate
+                break
+    entry_tf = str(setup.get("entry_tf") or setup.get("dominant_tf") or "")
+    scale = _TF_SCALE.get(entry_tf, 1.0)
     if path == "range":
-        return (12.0, 48.0)
+        return (round(12.0 * scale, 1), round(48.0 * scale, 1))
     if "squeeze" in path:
-        return (4.0, 18.0)
+        return (round(4.0 * scale, 1), round(18.0 * scale, 1))
+    if "local_impulse" in path:
+        return (round(4.0 * scale, 1), round(24.0 * scale, 1))
     if "pullback" in path:
-        return (6.0, 36.0)
-    return (8.0, 72.0)
+        return (round(6.0 * scale, 1), round(36.0 * scale, 1))
+    if "continuation" in path:
+        return (round(8.0 * scale, 1), round(48.0 * scale, 1))
+    return (round(8.0 * scale, 1), round(48.0 * scale, 1))
 
 
 _CONTINUATION_PATTERNS = frozenset({"trend_continuation", "trend_acceleration", "bear_continuation"})
@@ -115,14 +131,19 @@ def map_to_expected_path(
     pid = patterns.primary.id
     path_type = _PATTERN_PATH.get(pid, "range")
     direction = _path_direction(path_type)
-    if topo.kind == "aligned_trend" and direction != "neutral":
-        if topo.a_dominant == "long" and pid in _CONTINUATION_PATTERNS and direction == "long":
-            path_type = "continuation_up"
-        elif topo.a_dominant == "short" and pid in _CONTINUATION_PATTERNS and direction == "short":
-            path_type = "continuation_down"
+    if pid in _CONTINUATION_PATTERNS and direction != "neutral":
+        if topo.kind == "aligned_trend":
+            # All horizons agree — genuine trend continuation
+            if topo.a_dominant == "long" and direction == "long":
+                path_type = "continuation_up"
+            elif topo.a_dominant == "short" and direction == "short":
+                path_type = "continuation_down"
+        else:
+            # HTF neutral/conflicting, only LTF agrees — local impulse, not continuation
+            path_type = "local_impulse_up" if direction == "long" else "local_impulse_down"
         direction = _path_direction(path_type)
     move_lo, move_hi = _move_bounds(row, direction)
-    time_lo, time_hi = _time_bounds(path_type)
+    time_lo, time_hi = _time_bounds(path_type, row)
     price = safe_float(row.get("price"))
     atr = atr_from_row(row)
     if direction == "long":
@@ -131,7 +152,7 @@ def map_to_expected_path(
         invalidation = price + atr * 1.5 if price > 0 else 0.0
     else:
         invalidation = price
-    rank = clamp01(patterns.primary.raw_score + topo.coherence * 0.2 - (0.1 if patterns.ambiguous else 0))
+    rank = clamp01(patterns.primary.raw_score + topo.coherence * 0.30 - (0.12 if patterns.ambiguous else 0))
     narrative = f"{path_type.replace('_', ' ')} via {pid}"
     if patterns.ambiguous:
         narrative += " (ambiguous pattern spread)"

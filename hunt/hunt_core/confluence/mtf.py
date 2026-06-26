@@ -161,18 +161,32 @@ def build_mtf_confluence(
 
         score = round(htf_ratio * 0.60 + ltf_edge * 0.40, 3)
 
+        # Structural geometry from targets — no ATR fallback
+        from hunt_core.analysis.targets import (
+            collect_downward_targets as _cdt,
+            collect_upward_targets as _cut,
+        )
+
+        structure = row.get("structure") if isinstance(row.get("structure"), dict) else {}
+        kl = structure.get("key_levels") if isinstance(structure.get("key_levels"), dict) else {}
+        pools = structure.get("liquidity_pools") if isinstance(structure.get("liquidity_pools"), dict) else {}
+
         if direction == "long":
             entry_lo = price - 0.3 * atr
             entry_hi = price + 0.3 * atr
-            tp1 = price + 2.0 * atr
-            tp2 = price + 4.0 * atr
-            stop = price - 1.5 * atr
+            tgts, _ = _cut(row, price)
+            tp1 = tgts[0] if len(tgts) > 0 else 0.0
+            tp2 = tgts[1] if len(tgts) > 1 else tp1
+            sup = float(kl.get("support") or kl.get("last_swing_low") or pools.get("nearest_below") or 0)
+            stop = sup if sup > 0 and sup < price else 0.0
         else:
             entry_lo = price - 0.3 * atr
             entry_hi = price + 0.3 * atr
-            tp1 = price - 2.0 * atr
-            tp2 = price - 4.0 * atr
-            stop = price + 1.5 * atr
+            tgts, _ = _cdt(row, price)
+            tp1 = tgts[0] if len(tgts) > 0 else 0.0
+            tp2 = tgts[1] if len(tgts) > 1 else tp1
+            res = float(kl.get("resistance") or kl.get("last_swing_high") or pools.get("nearest_above") or 0)
+            stop = res if res > 0 and res > price else 0.0
 
         if htf_total:
             evidence.insert(0, f"HTF {htf_aligned}/{htf_total}")

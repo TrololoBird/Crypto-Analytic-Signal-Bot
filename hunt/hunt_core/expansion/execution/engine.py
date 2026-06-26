@@ -73,21 +73,23 @@ def build_execution(ctx: BlockContext, *, direction: str) -> ExpansionExecution 
     if direction == "up":
         entry_band = (round(price - 0.6 * atr, 8), round(price + 0.2 * atr, 8))
         support = opt_float(pools.get("nearest_below"))
-        stop = round(min(support, price - 1.5 * atr) if support else price - 1.5 * atr, 8)
+        if not support:
+            return None
+        stop = round(support, 8)
     else:
         entry_band = (round(price - 0.2 * atr, 8), round(price + 0.6 * atr, 8))
         resistance = opt_float(pools.get("nearest_above"))
-        stop = round(max(resistance, price + 1.5 * atr) if resistance else price + 1.5 * atr, 8)
+        if not resistance:
+            return None
+        stop = round(resistance, 8)
 
     activation = _activation_level(ctx, direction)
     if activation is None:
-        activation = round(price + (0.8 * atr if direction == "up" else -0.8 * atr), 8)
+        return None
 
     targets = _targets(ctx, direction)
     if not targets:
-        # ATR-laddered fallback.
-        step = atr * (1.0 if direction == "up" else -1.0)
-        targets = [round(price + step * k, 8) for k in (1.5, 3.0, 5.0)]
+        return None
     return ExpansionExecution(
         entry_band=entry_band,
         activation=round(float(activation), 8),
