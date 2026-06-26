@@ -18,6 +18,34 @@ from hunt_core.deep.verdict_v2.types import (
 from hunt_core.deep.verdict_v2.timing_gate import TimingGate
 
 
+_WAIT_CAT_MAP: dict[str, str] = {
+    "no_plan": "geometry",
+    "plan_geometry": "geometry",
+    "rr_primary": "rr",
+    "rr": "rr",
+    "strength": "strength",
+    "fragility": "strength",
+    "coverage": "data",
+    "context_conflict": "conflict",
+    "mid_leg": "conflict",
+    "timing_c": "timing",
+    "timing_a": "timing",
+    "timing_b": "timing",
+    "path_neutral": "path",
+    "catalyst": "catalyst",
+    "trade_quality": "quality",
+}
+_WAIT_CAT_PRIORITY = ["geometry", "conflict", "strength", "data", "rr", "timing", "path", "catalyst", "quality"]
+
+
+def _classify_wait(gates: list[str]) -> str:
+    cats = {_WAIT_CAT_MAP.get(g.lower(), "") for g in gates}
+    for cat in _WAIT_CAT_PRIORITY:
+        if cat in cats:
+            return cat
+    return ""
+
+
 def _mid_leg_context_wait(row: dict[str, object] | None) -> str | None:
     """Block deep signal on MID + extended leg — late-chase context (P2)."""
     if os.getenv("HUNT_DEEP_BLOCK_MID", "1").strip().lower() in {"0", "false", "no", "off"}:
@@ -63,6 +91,7 @@ def decide_signal(
             reason=f"WAIT: {mid_block}",
             gates_failed=gates_failed,
             trade_plan=plan,
+            wait_category=_classify_wait(gates_failed),
         )
 
     if reconcile is not None and reconcile.level == "strong_conflict":
@@ -73,11 +102,17 @@ def decide_signal(
             reason=f"WAIT: контекст против — {caveat}",
             gates_failed=gates_failed,
             trade_plan=plan,
+            wait_category=_classify_wait(gates_failed),
         )
 
     if path.direction == "neutral" or path.type == "range":
         gates_failed.append("path_neutral")
-        return SignalDecision(action="wait", reason="Path neutral/range — no directional signal", gates_failed=gates_failed)
+        return SignalDecision(
+            action="wait",
+            reason="Path neutral/range — no directional signal",
+            gates_failed=gates_failed,
+            wait_category=_classify_wait(gates_failed),
+        )
 
     # timing_c is a binary veto — if bar not closed, no point evaluating strength/RR
     if cfg.gates.require_timing_c and timing is not None and not timing.ready:
@@ -87,6 +122,7 @@ def decide_signal(
             reason="WAIT: timing_c — ждём закрытия бара",
             gates_failed=gates_failed,
             trade_plan=plan,
+            wait_category=_classify_wait(gates_failed),
         )
 
     if strength.score < cfg.gates.strength_min:
@@ -124,7 +160,13 @@ def decide_signal(
 
     if gates_failed:
         reason = f"WAIT: {', '.join(gates_failed)}"
-        return SignalDecision(action="wait", reason=reason, gates_failed=gates_failed, trade_plan=plan)
+        return SignalDecision(
+            action="wait",
+            reason=reason,
+            gates_failed=gates_failed,
+            trade_plan=plan,
+            wait_category=_classify_wait(gates_failed),
+        )
 
     action = path.direction  # type: ignore[assignment]
     reason = f"{action.upper()} path={path.type} strength={strength.label}"

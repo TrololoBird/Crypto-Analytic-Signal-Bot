@@ -34,6 +34,8 @@ _ENTRY_TYPE_RU = {"market": "рынок", "pullback_limit": "лимит на о�
 _PATH_RU = {
     "continuation_down": "продолжение вниз",
     "continuation_up": "продолжение вверх",
+    "local_impulse_down": "локальный импульс вниз",
+    "local_impulse_up": "локальный импульс вверх",
     "breakout_down": "пробой вниз",
     "breakout_up": "пробой вверх",
     "pullback_down": "откат вниз",
@@ -61,6 +63,8 @@ _PATH_SOFT_RU = {
     "stop_hunt": "отскок от уровня",
     "continuation_down": "локальное давление вниз",
     "continuation_up": "локальное давление вверх",
+    "local_impulse_down": "локальный импульс (LTF)",
+    "local_impulse_up": "локальный импульс (LTF)",
 }
 _REJECT_HYPOTHESIS_GATES = frozenset(
     {"strength", "rr", "rr_primary", "context_conflict", "fragility"}
@@ -338,6 +342,43 @@ def format_pinned_signal(
         f"Сила сигнала <b>{strength_ru}</b> ({strength.score:.2f}){strength_note} · "
         f"Хрупкость <b>{frag_ru}</b> · Сделка <b>{trade_ru}</b>"
     )
+    if strength.breakdown:
+        _BD_LABELS = {
+            "path": "path", "horizon": "horizon", "topology": "topo",
+            "fragility": "fragility", "disagree": "disagree",
+            "data_cap": "data", "precious_adj": "precious", "reconcile": "reconcile",
+        }
+        parts = []
+        for k, v in strength.breakdown.items():
+            if k == "path" or abs(v) < 0.005:
+                continue
+            lbl = _BD_LABELS.get(k, k)
+            parts.append(f"{lbl} {v:+.2f}")
+        if parts:
+            lines.append(f"  <i>{' · '.join(parts[:5])}</i>")
+
+    # Three-dimensional score display
+    dq = v2.data_quality
+    src = dq.sources
+    if src:
+        total = len(src)
+        present = sum(src.values())
+        pct = int(present / total * 100) if total > 0 else 0
+        _SRC_RU = {
+            "dom": "DOM", "heatmap": "Heatmap", "liquidations": "Ликв",
+            "funding": "Фандинг", "oi": "OI", "taker_flow": "Такер",
+            "volume_profile": "VP", "ls_ratio": "LS", "htf": "HTF", "cross_ms": "Кросс",
+        }
+        src_parts = []
+        for key, ok in src.items():
+            lbl = _SRC_RU.get(key, key)
+            src_parts.append(f"{lbl} {'✓' if ok else '✗'}")
+        lines.append(f"  <i>Данные {pct}%: {' · '.join(src_parts)}</i>")
+    if strength.scenario_confidence > 0 or strength.geometry_confidence > 0:
+        sc = strength.scenario_confidence
+        gc = strength.geometry_confidence
+        lines.append(f"  <i>Сценарий: {sc:.2f} · Геометрия: {gc:.2f}</i>")
+
     if v2.reconcile_caveats and action != "WAIT":
         lines.append(f"⚠️ <i>{html.escape(v2.reconcile_caveats[0])}</i>")
 
@@ -402,7 +443,21 @@ def format_pinned_signal(
     ]
     if opposite_alts:
         alt_ru = ", ".join(_ru_path(str(p), soft=False) for p in opposite_alts[:2])
-        lines.append(f"<i>Альт. сценарий (отмена): {html.escape(alt_ru)}</i>")
+        # Add trigger condition based on SL / invalidation level
+        trigger = ""
+        if plan and plan.stop_loss > 0:
+            sl_px = _px(plan.stop_loss)
+            if main_dir in ("short", "weak_short"):
+                trigger = f" · при закреплении выше {sl_px}"
+            elif main_dir in ("long", "weak_long"):
+                trigger = f" · при закреплении ниже {sl_px}"
+        elif path.invalidation > 0:
+            inv_px = _px(path.invalidation)
+            if main_dir in ("short", "weak_short"):
+                trigger = f" · при закреплении выше {inv_px}"
+            elif main_dir in ("long", "weak_long"):
+                trigger = f" · при закреплении ниже {inv_px}"
+        lines.append(f"<i>Альт. сценарий (отмена): {html.escape(alt_ru)}{trigger}</i>")
     elif same_dir_alts:
         alt_ru = ", ".join(_ru_path(str(p), soft=soft_narr) for p in same_dir_alts[:2])
         lines.append(f"<i>Альт. сценарий: {html.escape(alt_ru)}</i>")

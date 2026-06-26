@@ -10,6 +10,7 @@ from hunt_core.deep.verdict_v2.types import (
     HorizonForecast,
     ScenarioFragility,
     SignalStrength,
+    TradePlan,
 )
 
 _COVERAGE_PENALTY_THRESHOLD = 0.55
@@ -17,6 +18,22 @@ _PRECIOUS_METAL_COVERAGE_THRESHOLD = 0.65
 _PRECIOUS_METAL_BOOST_DIVISOR = 0.90
 
 _CONVICTION_THRESHOLD = 0.08
+
+
+def _geometry_confidence(plan: TradePlan | None) -> float:
+    """Quality score for Entry/SL/TP — independent of scenario direction."""
+    if plan is None:
+        return 0.0
+    rr_score = clamp01(plan.rr_tp1 / 3.0)  # 3:1 RR = full score
+    level_score = clamp01(len(plan.level_sources) / 4.0)  # 4+ sources = full score
+    lo, hi = plan.entry_zone
+    mid = (lo + hi) / 2.0
+    if mid > 0:
+        zone_pct = abs(hi - lo) / mid
+        zone_score = clamp01(1.0 - zone_pct / 0.02)  # >2% wide = 0, <0.5% tight = 1
+    else:
+        zone_score = 0.3
+    return round(clamp01(rr_score * 0.50 + level_score * 0.30 + zone_score * 0.20), 3)
 
 
 def _engine_agreement(
@@ -71,6 +88,7 @@ def compute_signal_strength(
     symbol: str = "",
     topology_kind: str = "",
     engines: dict[str, EngineOutput] | None = None,
+    plan: TradePlan | None = None,
 ) -> SignalStrength:
     contrib: dict[str, float] = {}
 
@@ -111,6 +129,9 @@ def compute_signal_strength(
     contrib["disagree"] = round(disagree_penalty, 4)
     base = clamp01(base + frag_penalty + disagree_penalty)
 
+    # scenario_confidence = analytical score before data quality cap
+    scenario_conf = round(base, 3)
+
     capped = False
     if data.coverage_score < _COVERAGE_PENALTY_THRESHOLD:
         pre = base
@@ -137,6 +158,8 @@ def compute_signal_strength(
         label=label,  # type: ignore[arg-type]
         capped_by_data=capped,
         breakdown=contrib,
+        scenario_confidence=scenario_conf,
+        geometry_confidence=_geometry_confidence(plan),
     )
 
 
@@ -162,4 +185,6 @@ def apply_reconcile_to_strength(
         label=label,  # type: ignore[arg-type]
         capped_by_data=strength.capped_by_data,
         breakdown=bd,
+        scenario_confidence=strength.scenario_confidence,
+        geometry_confidence=strength.geometry_confidence,
     )

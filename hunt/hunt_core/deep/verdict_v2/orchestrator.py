@@ -72,6 +72,7 @@ def build_scenario_verdict(
         symbol=sym,
         topology_kind=topology.kind,
         engines=engines,
+        plan=plan,
     )
     reconcile = reconcile_context(row, path, plan, engines, patterns)
     from hunt_core.deep.verdict_v2.path_shadow import (
@@ -104,6 +105,7 @@ def build_scenario_verdict(
             symbol=sym,
             topology_kind=topology.kind,
             engines=engines,
+            plan=plan,
         )
         reconcile = reconcile_context(row, path_for_decision, plan, engines, patterns)
     strength = apply_reconcile_to_strength(strength, reconcile)

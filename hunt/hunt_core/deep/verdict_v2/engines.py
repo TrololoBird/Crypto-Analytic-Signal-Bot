@@ -387,18 +387,41 @@ def run_data_quality(row: dict[str, Any]) -> DataQualityReport:
     market = row.get("market") if isinstance(row.get("market"), dict) else {}
     maps = row.get("maps") if isinstance(row.get("maps"), dict) else {}
     tf = row.get("timeframes") if isinstance(row.get("timeframes"), dict) else {}
-    groups = {
-        "funding_oi": any(market.get(k) is not None for k in ("funding_rate", "oi", "oi_z")),
-        "ls_ratios": market.get("ls_1h") is not None or market.get("top_ls_1h") is not None,
-        "maps_liq": bool(maps.get("liquidation")),
-        "maps_vp": bool(maps.get("volume_profile")),
-        "orderbook": market.get("bid") is not None,
-        "tf_htf": any((tf.get(k) or {}).get("status") != "empty" for k in ("1d", "4h", "1w")),
+    # Named per-source tracking — drives data completeness display
+    sources: dict[str, bool] = {
+        "dom": market.get("bid") is not None,
+        "heatmap": (
+            market.get("liq_heatmap_nearest_short") is not None
+            or market.get("liq_heatmap_nearest_long") is not None
+        ),
+        "liquidations": bool(maps.get("liquidation")),
+        "funding": market.get("funding_rate") is not None,
+        "oi": market.get("oi") is not None or market.get("oi_z") is not None,
+        "taker_flow": (
+            market.get("taker_5m") is not None or market.get("taker_15m") is not None
+        ),
+        "volume_profile": bool(maps.get("volume_profile")),
+        "ls_ratio": market.get("ls_1h") is not None or market.get("top_ls_1h") is not None,
+        "htf": any((tf.get(k) or {}).get("status") != "empty" for k in ("1d", "4h", "1w")),
         "cross_ms": bool(row.get("cross_microstructure")),
+    }
+    # Legacy groups for coverage_score (backward compat with gates)
+    groups = {
+        "funding_oi": sources["funding"] or sources["oi"],
+        "ls_ratios": sources["ls_ratio"],
+        "maps_liq": sources["liquidations"],
+        "maps_vp": sources["volume_profile"],
+        "orderbook": sources["dom"],
+        "tf_htf": sources["htf"],
+        "cross_ms": sources["cross_ms"],
     }
     missing = [k for k, ok in groups.items() if not ok]
     score = coverage_ratio(len(groups) - len(missing), len(groups))
-    return DataQualityReport(coverage_score=round(score, 3), missing_groups=missing)
+    return DataQualityReport(
+        coverage_score=round(score, 3),
+        missing_groups=missing,
+        sources=sources,
+    )
 
 
 def run_all_engines(row: dict[str, Any]) -> dict[str, EngineOutput]:

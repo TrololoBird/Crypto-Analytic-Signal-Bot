@@ -7,6 +7,8 @@ from typing import Any, Literal
 PathType = Literal[
     "continuation_up",
     "continuation_down",
+    "local_impulse_up",
+    "local_impulse_down",
     "pullback_up",
     "pullback_down",
     "range",
@@ -159,6 +161,9 @@ class SignalStrength:
     label: Literal["strong", "moderate", "weak"]
     capped_by_data: bool
     disclaimer: str = "rank only — not win probability"
+    breakdown: dict[str, float] = field(default_factory=dict)
+    scenario_confidence: float = 0.0
+    geometry_confidence: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +179,7 @@ class TradeQuality:
 class DataQualityReport:
     coverage_score: float
     missing_groups: list[str] = field(default_factory=list)
+    sources: dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +223,7 @@ class SignalDecision:
     reason: str
     gates_failed: list[str] = field(default_factory=list)
     trade_plan: TradePlan | None = None
+    wait_category: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +268,10 @@ class ScenarioVerdict:
             "driver": self.market_driver.primary,
             "strength": self.signal_strength.score,
             "strength_label": self.signal_strength.label,
+            "scenario_confidence": self.signal_strength.scenario_confidence,
+            "geometry_confidence": self.signal_strength.geometry_confidence,
+            "data_completeness": sum(self.data_quality.sources.values()) / max(len(self.data_quality.sources), 1) if self.data_quality.sources else self.data_quality.coverage_score,
+            "wait_category": self.signal_decision.wait_category,
             "fragility": self.fragility.score,
             "fragility_label": self.fragility.label,
             "trade_quality": self.trade_quality.verdict,
