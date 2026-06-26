@@ -38,7 +38,7 @@ LOG = logging.getLogger("hunt_core.market.streams")
 _MAX_SYMBOL_STREAMS = 24
 _LIQ_BUFFER_MAX = 8_000
 _AGG_BUFFER_MAX = 2_000
-_WS_WATCH_TIMEOUT_S: float = 30.0
+_WS_WATCH_TIMEOUT_S: float = 120.0
 _KLINE_INTERVAL = "1m"
 _KLINE_5M_INTERVAL = "5m"
 _KLINE_15M_INTERVAL = "15m"
@@ -362,7 +362,7 @@ class HuntCcxtStreams:
             self._kline_waiting.clear()
             self._kline_waiting_5m.clear()
             self._kline_waiting_15m.clear()
-            self._post_reconnect_quiet_until = time.monotonic() + 30.0
+            self._post_reconnect_quiet_until = time.monotonic() + 45.0
             self._reconnect_count += 1
             LOG.info(
                 "hunt_ccxt_pro_reconnected | tasks=%s",
@@ -378,6 +378,11 @@ class HuntCcxtStreams:
             self.client.rest_gate.record_error(exc, context=f"ws:{label}")
             return
         if self._ws_transport_fatal(exc):
+            # Suppress cascade reconnects during post-reconnect quiet window.
+            # _reconnect_task guard already blocks if task is running; this guard
+            # blocks the frequent 1006s that fire right after a completed reconnect.
+            if time.monotonic() < self._post_reconnect_quiet_until:
+                return
             self._schedule_pro_reconnect()
             return
         await asyncio.sleep(2.0)
