@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 
-
+import logging
 import asyncio
 import json
 import os
 from typing import Any
 
 from hunt_core.domain.config import SYMBOL_TICK_TIMEOUT_S
+
+logger = logging.getLogger(__name__)
 
 from hunt_core.market import HuntCcxtStreams, apply_live_price_to_row
 
@@ -127,7 +129,7 @@ def _load_state() -> dict[str, str]:
         if isinstance(ds, dict):
             state.update({str(k): str(v) for k, v in ds.items()})
     except Exception:
-        pass
+        logger.exception("load delivery state failed")
     return state
 
 
@@ -138,7 +140,7 @@ def _save_state(state: dict[str, str]) -> None:
 
         save_delivery_state(state)
     except Exception:
-        pass
+        logger.exception("save delivery state failed")
 
 
 from hunt_core.runtime.cycle._cycle_tick import run_tick

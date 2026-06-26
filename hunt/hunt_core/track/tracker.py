@@ -711,7 +711,7 @@ def close_signal(
 
             append_outcome_record(SIGNAL_HISTORY, {**record, "kpi_bucket": kpi_bucket(record)})
         except Exception:  # noqa: BLE001
-            pass
+            _LOG.exception("outcome record append failed")
     try:
         _append_event(
             "close",
@@ -733,7 +733,7 @@ def close_signal(
             },
         )
     except Exception:  # noqa: BLE001
-        pass
+        _LOG.exception("close event append failed")
     # Task 7: auto-resolution — record outcome to ledger
     try:
         _ledger_event = {
@@ -761,7 +761,7 @@ def close_signal(
             "risk_reward": sig.get("risk_reward"),
         })
     except Exception:  # noqa: BLE001
-        pass
+        _LOG.exception("ledger event append failed")
 
 
 # Auto-resolution threshold: close signals older than this (live price check).

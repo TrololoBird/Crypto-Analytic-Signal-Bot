@@ -2041,7 +2041,7 @@ def depth_imbalance_by_zone(
     current_price: float,
     zones_pct: list[float] | None = None,
 ) -> dict[str, float]:
-    """Imbalance (-1..1) within each distance band from mid."""
+    """Proximity-weighted imbalance (-1..1) within each distance band from mid."""
     if current_price <= 0:
         return {}
     zones = zones_pct or [0.5, 1.0, 2.0, 5.0]
@@ -2050,8 +2050,15 @@ def depth_imbalance_by_zone(
         band = current_price * z / 100.0
         lo = current_price - band
         hi = current_price + band
-        bid_n = sum(p * q for p, q in bids if lo <= p <= current_price)
-        ask_n = sum(p * q for p, q in asks if current_price <= p <= hi)
+        decay_k = 2.0 / max(z, 0.001)
+        bid_n = sum(
+            p * q * math.exp(-decay_k * abs(current_price - p) / current_price * 100)
+            for p, q in bids if lo <= p <= current_price
+        )
+        ask_n = sum(
+            p * q * math.exp(-decay_k * abs(p - current_price) / current_price * 100)
+            for p, q in asks if current_price <= p <= hi
+        )
         total = bid_n + ask_n
         key = f"imb_{z:g}pct"
         out[key] = round((bid_n - ask_n) / total, 4) if total > 0 else 0.0

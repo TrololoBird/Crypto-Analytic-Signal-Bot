@@ -38,6 +38,7 @@ LOG = logging.getLogger("hunt_core.market.streams")
 _MAX_SYMBOL_STREAMS = 24
 _LIQ_BUFFER_MAX = 8_000
 _AGG_BUFFER_MAX = 2_000
+_WS_WATCH_TIMEOUT_S: float = 30.0
 _KLINE_INTERVAL = "1m"
 _KLINE_5M_INTERVAL = "5m"
 _KLINE_15M_INTERVAL = "15m"
@@ -308,6 +309,8 @@ class HuntCcxtStreams:
         name = type(exc).__name__
         if is_ccxt_rate_limited(exc):
             return True
+        if isinstance(exc, TimeoutError):
+            return True
         return (
             "1006" in text
             or "4004" in text
@@ -526,7 +529,7 @@ class HuntCcxtStreams:
         sym = to_binance_symbol(symbol)
         liq = self.liquidation_rollups(sym, window_seconds=300)
         liq_60 = self.liquidation_rollups(sym, window_seconds=60)
-        fresh = self._last_msg_ms > 0 and time.time() * 1000 - self._last_msg_ms < 60_000
+        fresh = self._last_msg_ms > 0 and time.time() * 1000 - self._last_msg_ms < 20_000
         book = self._live_books.get(sym) or {}
         ticker = self._live_tickers.get(sym) or {}
         funding = self._live_funding.get(sym) or {}
@@ -930,7 +933,7 @@ class HuntCcxtStreams:
                 await asyncio.sleep(0.5)
                 continue
             try:
-                items = await ex.watch_liquidations_for_symbols(syms)
+                items = await asyncio.wait_for(ex.watch_liquidations_for_symbols(syms), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
                 batch = items if isinstance(items, list) else [items]
                 for item in batch:
@@ -953,7 +956,7 @@ class HuntCcxtStreams:
             ccxt_sym = syms[idx % len(syms)]
             idx += 1
             try:
-                items = await ex.watch_liquidations(ccxt_sym)
+                items = await asyncio.wait_for(ex.watch_liquidations(ccxt_sym), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
                 batch = items if isinstance(items, list) else [items]
                 for item in batch:
@@ -970,7 +973,7 @@ class HuntCcxtStreams:
         ex = self._ws_ex()
         while not self._stop.is_set():
             try:
-                prices = await ex.watch_mark_prices()
+                prices = await asyncio.wait_for(ex.watch_mark_prices(), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
                 now_ms = int(time.time() * 1000)
                 items = list(prices.values()) if isinstance(prices, dict) else (prices or [])
@@ -1017,7 +1020,7 @@ class HuntCcxtStreams:
                 await asyncio.sleep(0.5)
                 continue
             try:
-                trades = await ex.watch_trades_for_symbols(syms)
+                trades = await asyncio.wait_for(ex.watch_trades_for_symbols(syms), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
                 for trade in trades if isinstance(trades, list) else [trades]:
                     if not isinstance(trade, dict):
@@ -1043,7 +1046,7 @@ class HuntCcxtStreams:
             try:
                 if self._ws_has(ex, "watchOHLCVForSymbols"):
                     pairs = [(s, _KLINE_INTERVAL) for s in syms]
-                    result = await ex.watch_ohlcv_for_symbols(pairs)
+                    result = await asyncio.wait_for(ex.watch_ohlcv_for_symbols(pairs), timeout=_WS_WATCH_TIMEOUT_S)
                     self._touch()
                     if isinstance(result, dict):
                         for ccxt_sym, tf_map in result.items():
@@ -1055,7 +1058,7 @@ class HuntCcxtStreams:
                                 self._on_ohlcv_update(sym, ohlcv)
                 else:
                     sym = syms[0]
-                    ohlcv = await ex.watch_ohlcv(sym, _KLINE_INTERVAL)
+                    ohlcv = await asyncio.wait_for(ex.watch_ohlcv(sym, _KLINE_INTERVAL), timeout=_WS_WATCH_TIMEOUT_S)
                     self._touch()
                     bin_sym = self._ws_binance_id(ex, sym)
                     if isinstance(ohlcv, list) and bin_sym:
@@ -1078,7 +1081,7 @@ class HuntCcxtStreams:
             try:
                 if self._ws_has(ex, "watchOHLCVForSymbols"):
                     pairs = [(s, _KLINE_5M_INTERVAL) for s in syms]
-                    result = await ex.watch_ohlcv_for_symbols(pairs)
+                    result = await asyncio.wait_for(ex.watch_ohlcv_for_symbols(pairs), timeout=_WS_WATCH_TIMEOUT_S)
                     self._touch()
                     if isinstance(result, dict):
                         for ccxt_sym, tf_map in result.items():
@@ -1090,7 +1093,7 @@ class HuntCcxtStreams:
                                 self._on_ohlcv_update(sym, ohlcv, interval=_KLINE_5M_INTERVAL)
                 else:
                     sym = syms[0]
-                    ohlcv = await ex.watch_ohlcv(sym, _KLINE_5M_INTERVAL)
+                    ohlcv = await asyncio.wait_for(ex.watch_ohlcv(sym, _KLINE_5M_INTERVAL), timeout=_WS_WATCH_TIMEOUT_S)
                     self._touch()
                     bin_sym = self._ws_binance_id(ex, sym)
                     if isinstance(ohlcv, list) and bin_sym:
@@ -1113,7 +1116,7 @@ class HuntCcxtStreams:
             try:
                 if self._ws_has(ex, "watchOHLCVForSymbols"):
                     pairs = [(s, _KLINE_15M_INTERVAL) for s in syms]
-                    result = await ex.watch_ohlcv_for_symbols(pairs)
+                    result = await asyncio.wait_for(ex.watch_ohlcv_for_symbols(pairs), timeout=_WS_WATCH_TIMEOUT_S)
                     self._touch()
                     if isinstance(result, dict):
                         for ccxt_sym, tf_map in result.items():
@@ -1125,7 +1128,7 @@ class HuntCcxtStreams:
                                 self._on_ohlcv_update(sym, ohlcv, interval=_KLINE_15M_INTERVAL)
                 else:
                     sym = syms[0]
-                    ohlcv = await ex.watch_ohlcv(sym, _KLINE_15M_INTERVAL)
+                    ohlcv = await asyncio.wait_for(ex.watch_ohlcv(sym, _KLINE_15M_INTERVAL), timeout=_WS_WATCH_TIMEOUT_S)
                     self._touch()
                     bin_sym = self._ws_binance_id(ex, sym)
                     if isinstance(ohlcv, list) and bin_sym:
@@ -1153,7 +1156,7 @@ class HuntCcxtStreams:
                 # limit=_TOP_BOOK_DEPTH_LEVELS keeps the REST seed snapshot at
                 # weight 2 (vs 20 at the ccxt default 1000) — see factory option
                 # watchOrderBookLimit. We never use deeper levels anyway.
-                book = await ex.watch_order_book_for_symbols(syms, _TOP_BOOK_DEPTH_LEVELS)
+                book = await asyncio.wait_for(ex.watch_order_book_for_symbols(syms, _TOP_BOOK_DEPTH_LEVELS), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
                 if not isinstance(book, dict):
                     continue
@@ -1202,7 +1205,7 @@ class HuntCcxtStreams:
                 await asyncio.sleep(0.5)
                 continue
             try:
-                items = await ex.watch_bids_asks(syms)
+                items = await asyncio.wait_for(ex.watch_bids_asks(syms), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
                 batch = items.values() if isinstance(items, dict) else [items]
                 for item in batch:
@@ -1239,7 +1242,7 @@ class HuntCcxtStreams:
                     tickers = await ex.fetch_tickers(syms)
                     LOG.info("ticker_rest_fallback | reason=ws_reconnect quiet_until=%.1f", self._post_reconnect_quiet_until)
                 else:
-                    tickers = await ex.watch_tickers(syms)
+                    tickers = await asyncio.wait_for(ex.watch_tickers(syms), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
                 items = tickers.values() if isinstance(tickers, dict) else []
                 for item in items:
@@ -1270,7 +1273,7 @@ class HuntCcxtStreams:
                 await asyncio.sleep(0.5)
                 continue
             try:
-                rates = await ex.watch_funding_rates(syms)
+                rates = await asyncio.wait_for(ex.watch_funding_rates(syms), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
                 items = rates.values() if isinstance(rates, dict) else []
                 for item in items:
@@ -1356,7 +1359,7 @@ class HuntCcxtStreams:
                 await asyncio.sleep(2.0)
                 continue
             try:
-                rates = await ex.watch_funding_rates(ccxt_syms)
+                rates = await asyncio.wait_for(ex.watch_funding_rates(ccxt_syms), timeout=_WS_WATCH_TIMEOUT_S)
                 items = rates.values() if isinstance(rates, dict) else []
                 bucket = self._live_funding_by_exchange.setdefault(name, {})
                 for item in items:
@@ -1537,11 +1540,11 @@ class HuntCcxtStreams:
                 continue
             try:
                 if mode == "mux":
-                    items = await ex.watch_liquidations_for_symbols(ccxt_syms)
+                    items = await asyncio.wait_for(ex.watch_liquidations_for_symbols(ccxt_syms), timeout=_WS_WATCH_TIMEOUT_S)
                 else:
                     ccxt_sym = ccxt_syms[sym_idx % len(ccxt_syms)]
                     sym_idx += 1
-                    items = await ex.watch_liquidations(ccxt_sym)
+                    items = await asyncio.wait_for(ex.watch_liquidations(ccxt_sym), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
                 batch = items if isinstance(items, list) else [items]
                 for item in batch:

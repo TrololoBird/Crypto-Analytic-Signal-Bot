@@ -922,6 +922,16 @@ def merge_ws_kline_closed(
     if not isinstance(base, dict) or base.get("status") == "empty":
         tf[tf_key] = overlay
         return
+    # Guard: skip stale WS overlay whose timestamp is older than REST base
+    base_ts = base.get("open_time", 0)
+    overlay_ts = overlay.get("open_time", 0)
+    if base_ts and overlay_ts and overlay_ts < base_ts:
+        import logging
+        logging.getLogger(__name__).debug(
+            "skip stale WS overlay %s %s: overlay_ts=%s < base_ts=%s",
+            symbol, tf_key, overlay_ts, base_ts,
+        )
+        return
     tf[tf_key] = {**base, **overlay}
 
 

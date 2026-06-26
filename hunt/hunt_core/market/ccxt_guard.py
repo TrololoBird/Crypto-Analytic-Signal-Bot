@@ -71,6 +71,8 @@ class CcxtGuard:
 
     policy: BanDetectionPolicy = field(default_factory=BanDetectionPolicy)
     telemetry: CcxtBanTelemetry = field(default_factory=CcxtBanTelemetry)
+    _consecutive_rate_limits: int = 0
+    _last_rate_limit_mono: float = 0.0
 
     def classify(self, exc: BaseException) -> BanKind:
         if is_proxy_transport_error(exc):
@@ -105,13 +107,24 @@ class CcxtGuard:
         if kind == "ip_ban":
             return _DEFAULT_IP_BAN_PAUSE_S
         if kind == "rate_limit":
-            return _DEFAULT_429_PAUSE_S
+            base = _DEFAULT_429_PAUSE_S
+            multiplier = min(2 ** self._consecutive_rate_limits, 16)
+            return min(base * multiplier, _DEFAULT_IP_BAN_PAUSE_S)
         if kind == "transport":
             return 15.0
         return 0.0
 
     def record(self, exc: BaseException, *, context: str = "") -> BanKind:
         kind = self.classify(exc)
+        now = time.monotonic()
+        if kind == "rate_limit":
+            if now - self._last_rate_limit_mono < 300.0:
+                self._consecutive_rate_limits += 1
+            else:
+                self._consecutive_rate_limits = 0
+            self._last_rate_limit_mono = now
+        else:
+            self._consecutive_rate_limits = 0
         pause = self.pause_seconds(exc) if kind != "other" else 0.0
         self.telemetry.record(kind, context=context, error=str(exc), pause_s=pause)
         return kind
