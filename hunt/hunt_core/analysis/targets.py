@@ -74,6 +74,13 @@ def collect_upward_targets(row: dict[str, Any], price: float) -> tuple[list[floa
         except (TypeError, ValueError):
             pass
 
+    # Deduplicate targets within 0.1% of each other (first added wins)
+    deduped: list[float] = []
+    for t in targets:
+        if not any(abs(t - d) / max(d, 1e-8) < 0.001 for d in deduped):
+            deduped.append(t)
+    targets = deduped
+
     return targets, factors
 
 
@@ -150,6 +157,13 @@ def collect_downward_targets(row: dict[str, Any], price: float) -> tuple[list[fl
     cvd = str(market.get("map_cvd_divergence") or "")
     if cvd == "bearish_div":
         factors.append("bear_cvd_div")
+
+    # Deduplicate targets within 0.1% of each other (first added wins)
+    deduped: list[float] = []
+    for t in targets:
+        if not any(abs(t - d) / max(d, 1e-8) < 0.001 for d in deduped):
+            deduped.append(t)
+    targets = deduped
 
     return targets, factors
 
