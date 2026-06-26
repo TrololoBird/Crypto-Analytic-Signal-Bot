@@ -148,7 +148,7 @@ def assess_preparation_readiness(
             direction_hits += 1
             reasons.append("poc_down")
 
-    ready = energy_hits >= 2 and direction_hits >= 2
+    ready = energy_hits >= 1 and direction_hits >= 1
     return ready, reasons[:6]
 
 

@@ -20,9 +20,10 @@ _PUMP_PREP_PHASES = frozenset(
         "recovery",
         "breakout_arming",
         "impulse_initiating",
+        "pre_pump",
     }
 )
-_FADE_PREP_PHASES = frozenset({"exhaustion_at_high", "distribution"})
+_FADE_PREP_PHASES = frozenset({"exhaustion_at_high", "distribution", "pre_dump"})
 
 
 def _vwap_extreme_atr(symbol: str = "") -> float:

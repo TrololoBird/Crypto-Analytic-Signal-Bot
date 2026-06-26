@@ -18,10 +18,12 @@ _WASH_CALIBRATION_FAIL_CLOSED: dict[str, float] = {
     "max_velocity_z": 3.5,
 }
 
-_KINEMATIC_EXEMPT_SHORT_PHASES = frozenset({"exhaustion_at_high", "distribution"})
-# dump_active intentionally excluded — mid-dump chase still subject to kinematic gate.
+_KINEMATIC_EXEMPT_SHORT_PHASES = frozenset({"exhaustion_at_high", "distribution", "pre_dump"})
 _KINEMATIC_EXEMPT_LONG_PHASES = frozenset(
-    {"post_dump_bounce", "recovery", "accumulation"}
+    {"post_dump_bounce", "recovery", "accumulation", "pre_pump"}
+)
+_WASH_EXEMPT_PHASES = frozenset(
+    {"pre_pump", "pre_dump", "accumulation", "breakout_arming"}
 )
 
 
@@ -164,6 +166,11 @@ def wash_block_reason(
     wti_threshold = float(
         wti_threshold if wti_threshold is not None else cuts["wti_threshold"]
     )
+    lc = lifecycle if isinstance(lifecycle, dict) else {}
+    phase = str(lc.get("phase") or "")
+    if phase in _WASH_EXEMPT_PHASES:
+        return None
+
     market = row.get("market") if isinstance(row.get("market"), dict) else {}
     tf15 = (row.get("timeframes") or {}).get("15m") or {}
     quote_vol = _safe_float(
@@ -198,7 +205,6 @@ def wash_block_reason(
     if ms.get("wash_flag") or ms.get("manipulation_wash"):
         return "wash_trading_ms"
 
-    _ = lifecycle
     return None
 
 

@@ -18,19 +18,19 @@ from hunt_core.params.store import universal_section
 class FusionParams:
     """Explicit fusion tunables — documented in docs/FUSION_PARAMS.md."""
 
-    min_n: int = 30
+    min_n: int = 18
     lookback: int = 120
-    q_gate: float = 0.75
+    q_gate: float = 0.60
     q_phase: float = 0.85
     min_active_factors: int = 2
     # Gate: effective threshold = max(symbol quantile, global_gate_floor).
-    global_gate_floor: float = 0.25
-    abs_magnitude_floor: float = 0.15
+    global_gate_floor: float = 0.12
+    abs_magnitude_floor: float = 0.08
     vol_floor_pct: float = 0.15
     fusion_score_scale: float = 25.0
     # CUSUM (standardized returns): k slack in σ; span for EWM anchor.
     cusum_k: float = 0.5
-    cusum_span: int = 96
+    cusum_span: int = 48
     # PRE/MID hysteresis — avoid MID→PRE→MID flicker inside one leg.
     phase_mid_exit_ratio: float = 0.65
     phase_mid_exit_bars: int = 2
@@ -38,8 +38,8 @@ class FusionParams:
     funding_min_n: int = 48
     # Pre-phase gate constants (per-symbol quantile calibration TBD).
     pre_gate_min_energy: int = 1
-    pre_gate_min_structure: float = 0.18
-    pre_gate_min_magnitude: float = 0.15
+    pre_gate_min_structure: float = 0.10
+    pre_gate_min_magnitude: float = 0.08
     # MAD scale floor + robust-z clip (winsorization).
     mad_epsilon: float = 1e-6
     robust_z_clip: float = 12.0

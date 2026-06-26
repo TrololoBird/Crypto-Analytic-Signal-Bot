@@ -156,6 +156,18 @@ def check_delivery_confluence(
         and any("rejection" in str(h) for h in hard)
     ):
         min_struct_eff = 1
+    if (
+        direction == "short"
+        and phase in {"pre_dump", "distribution"}
+        and (p_win is None or p_win >= min_p)
+    ):
+        min_struct_eff = 1
+    if (
+        direction == "long"
+        and phase in {"pre_pump", "accumulation", "breakout_arming"}
+        and (p_win is None or p_win >= min_p)
+    ):
+        min_struct_eff = 1
     if struct_n < min_struct_eff and not (
         has_div and direction == "short" and min_struct_eff <= 1
     ):

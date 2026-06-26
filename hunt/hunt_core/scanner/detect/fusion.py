@@ -129,7 +129,7 @@ def fuse(factors: list[FactorScore]) -> FusionScore:
     n_neg = sum(1 for f in directional if f.score < 0)
     rank_side = (n_pos > n_neg) - (n_pos < n_neg)
     z_sign = (z_dir > 0) - (z_dir < 0)
-    agreement = rank_side == 0 or z_sign == 0 or z_sign == rank_side
+    agreement = rank_side == 0 or z_sign == 0 or z_sign == rank_side or n <= 2
 
     amp = 0.0
     if amplifiers:
