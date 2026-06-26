@@ -385,6 +385,12 @@ class HuntCcxtStreams:
                 return
             LOG.info("hunt_ccxt_reconnect_trigger | label=%s exc=%.120s", label, repr(exc))
             self._schedule_pro_reconnect()
+            # Suspend until the reconnect task cancels us.  Without this sleep the
+            # calling task's while-loop would immediately call watch_*() again on the
+            # dying exchange, causing CCXT Pro to open a new WS connection before
+            # old.close() runs.  Binance then sees duplicate subscriptions from the
+            # same IP and closes one with 1006, creating the next reconnect cycle.
+            await asyncio.sleep(300.0)
             return
         await asyncio.sleep(2.0)
 
