@@ -319,6 +319,27 @@ class HuntCcxtStreams:
             or "ChecksumError" in text
         )
 
+    @staticmethod
+    def _close_stale_public_ws_client(ex: Any, stream_idx: str | None, *, label: str) -> None:
+        """Evict and close the /public/ws/{stream_idx} client (fire-and-forget).
+
+        Called when symbol rotation caused watch_trades_for_symbols /
+        watch_order_book_for_symbols to open a NEW WS connection (because the
+        streamHash includes all symbol names, so a different symbol set → different
+        URL).  The previous connection has futures=0 (nobody awaiting) but Binance
+        still sends data to it, eventually terminating it with 1006.  We pre-empt
+        that by closing it ourselves as soon as the active URL changes.
+        """
+        if stream_idx is None:
+            return
+        target = f"/public/ws/{stream_idx}"
+        for url in list(ex.clients.keys()):
+            if url.endswith(target):
+                cli = ex.clients.pop(url, None)
+                if cli is not None:
+                    asyncio.ensure_future(cli.close())
+                    LOG.info("ws_stale_closed | label=%s url=...%s", label, url[-30:])
+
     def _spawn_pro_tasks(self, specs: list[tuple[str, Any]]) -> list[asyncio.Task[None]]:
         tasks: list[asyncio.Task[None]] = []
         for name, fn in specs:
@@ -384,6 +405,15 @@ class HuntCcxtStreams:
             if time.monotonic() < self._post_reconnect_quiet_until:
                 return
             LOG.info("hunt_ccxt_reconnect_trigger | label=%s exc=%.120s", label, repr(exc))
+            try:
+                ex = self._ws_ex()
+                for url, cli in ex.clients.items():
+                    LOG.debug(
+                        "ws_sub_diag | label=%s url=...%s subs=%d futures=%d",
+                        label, url[-40:], len(cli.subscriptions), len(cli.futures),
+                    )
+            except Exception:
+                pass
             self._schedule_pro_reconnect()
             # Suspend until the reconnect task cancels us.  Without this sleep the
             # calling task's while-loop would immediately call watch_*() again on the
@@ -1050,24 +1080,28 @@ class HuntCcxtStreams:
         """Single multiplexed trades stream for all symbols via watch_trades_for_symbols."""
         ex = self._ws_ex()
         _subscribed: frozenset[str] = frozenset()
+        _active_stream_idx: str | None = None  # current live trades URL stream index
         while not self._stop.is_set():
             syms = self._ccxt_symbols()
             if not syms:
                 await asyncio.sleep(0.5)
                 continue
             syms_set = frozenset(syms)
-            removed = _subscribed - syms_set
-            if removed:
-                try:
-                    await ex.un_watch_trades_for_symbols(list(removed))
-                except asyncio.CancelledError:
-                    raise
-                except Exception as ue:
-                    LOG.debug("trades_unwatch_err | error=%s", ue)
             _subscribed = syms_set
+            # Sort for stable streamHash: same symbol SET → same URL on every rotation,
+            # preventing watch_trades_for_symbols from opening a new WS connection merely
+            # because the list order changed.
+            sorted_syms = sorted(syms_set)
             try:
-                trades = await asyncio.wait_for(ex.watch_trades_for_symbols(syms), timeout=_WS_WATCH_TIMEOUT_S)
+                trades = await asyncio.wait_for(ex.watch_trades_for_symbols(sorted_syms), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
+                # Detect URL change: symbol set rotated → CCXT opened new /public/ws/N.
+                # Close the previous stale connection so Binance doesn't 1006 it later.
+                stream_hash = "multipleTrades::" + ",".join(sorted_syms)
+                new_idx = (getattr(ex, "options", {}) or {}).get("streamBySubscriptionsHash", {}).get(stream_hash)
+                if new_idx is not None and new_idx != _active_stream_idx:
+                    self._close_stale_public_ws_client(ex, _active_stream_idx, label="trades")
+                    _active_stream_idx = new_idx
                 for trade in trades if isinstance(trades, list) else [trades]:
                     if not isinstance(trade, dict):
                         continue
@@ -1079,6 +1113,7 @@ class HuntCcxtStreams:
             except defensive_exc_types(Exception) as exc:
                 if self._ws_transport_fatal(exc):
                     _subscribed = frozenset()
+                    _active_stream_idx = None
                 await self._on_ws_loop_error("trades", exc)
 
     @staticmethod
@@ -1087,12 +1122,14 @@ class HuntCcxtStreams:
         Prevents subscription count from growing past Binance's 200/stream limit which
         causes 1006 closes after ~20 minutes of symbol rotation.
         """
+        LOG.debug("kline_unwatch_attempt | interval=%s count=%d syms=%s", interval, len(removed), sorted(removed)[:5])
         try:
             await ex.un_watch_ohlcv_for_symbols([(s, interval) for s in removed])
+            LOG.debug("kline_unwatch_done | interval=%s count=%d", interval, len(removed))
         except asyncio.CancelledError:
             raise
         except Exception as ue:
-            LOG.debug("kline_unwatch_err | interval=%s error=%s", interval, ue)
+            LOG.warning("kline_unwatch_err | interval=%s error=%s", interval, ue)
 
     async def _watch_ohlcv_mux(self) -> None:
         """Single multiplexed OHLCV stream for all symbols via watch_ohlcv_for_symbols."""
@@ -1233,27 +1270,29 @@ class HuntCcxtStreams:
 
         ex = self._ws_ex()
         _subscribed: frozenset[str] = frozenset()
+        _active_stream_idx: str | None = None  # current live book URL stream index
         while not self._stop.is_set():
             syms = self._ccxt_symbols()
             if not syms:
                 await asyncio.sleep(0.5)
                 continue
             syms_set = frozenset(syms)
-            removed = _subscribed - syms_set
-            if removed:
-                try:
-                    await ex.un_watch_order_book_for_symbols(list(removed))
-                except asyncio.CancelledError:
-                    raise
-                except Exception as ue:
-                    LOG.debug("book_unwatch_err | error=%s", ue)
             _subscribed = syms_set
+            # Sort for stable streamHash: same symbol SET → same URL on every rotation.
+            sorted_syms = sorted(syms_set)
             try:
                 # limit=_TOP_BOOK_DEPTH_LEVELS keeps the REST seed snapshot at
                 # weight 2 (vs 20 at the ccxt default 1000) — see factory option
                 # watchOrderBookLimit. We never use deeper levels anyway.
-                book = await asyncio.wait_for(ex.watch_order_book_for_symbols(syms, _TOP_BOOK_DEPTH_LEVELS), timeout=_WS_WATCH_TIMEOUT_S)
+                book = await asyncio.wait_for(ex.watch_order_book_for_symbols(sorted_syms, _TOP_BOOK_DEPTH_LEVELS), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
+                # Detect URL change: symbol set rotated → CCXT opened new /public/ws/N.
+                # Close the previous stale connection so Binance doesn't 1006 it later.
+                stream_hash = "multipleOrderbook::" + ",".join(sorted_syms)
+                new_idx = (getattr(ex, "options", {}) or {}).get("streamBySubscriptionsHash", {}).get(stream_hash)
+                if new_idx is not None and new_idx != _active_stream_idx:
+                    self._close_stale_public_ws_client(ex, _active_stream_idx, label="book")
+                    _active_stream_idx = new_idx
                 if not isinstance(book, dict):
                     continue
                 sym = self._ws_binance_id(ex, str(book.get("symbol") or ""))
@@ -1295,6 +1334,7 @@ class HuntCcxtStreams:
                 # Watchdog (300 s no-data) catches genuine network outages.
                 if self._ws_transport_fatal(exc):
                     _subscribed = frozenset()  # WS gone; reset subscription tracking
+                    _active_stream_idx = None
                     LOG.debug("hunt_ccxt_book_ws_fail | %s", repr(exc)[:100])
                     await asyncio.sleep(3.0)
                 else:
