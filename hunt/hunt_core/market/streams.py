@@ -383,6 +383,7 @@ class HuntCcxtStreams:
             # blocks the frequent 1006s that fire right after a completed reconnect.
             if time.monotonic() < self._post_reconnect_quiet_until:
                 return
+            LOG.info("hunt_ccxt_reconnect_trigger | label=%s exc=%.120s", label, repr(exc))
             self._schedule_pro_reconnect()
             return
         await asyncio.sleep(2.0)
@@ -507,8 +508,21 @@ class HuntCcxtStreams:
         return entry
 
     def live_bbo(self, symbol: str) -> dict[str, float] | None:
-        """Top-of-book bid/ask from watch_bids_asks (lower CPU than full tickers)."""
-        return self._live_bbo.get(to_binance_symbol(symbol))
+        """Top-of-book bid/ask — served from L1 order-book depth (watchOrderBookForSymbols).
+
+        BBO WS (watchBidsAsks) was removed: per-symbol bookTicker subscriptions for equity
+        tokens (TSLAUSDT, MSFTUSDT etc.) are rejected by Binance with close-code 4004 outside
+        US market hours, causing 3-second connection churn that destabilises other streams.
+        The depth stream already carries L1 bid/ask at equal or better freshness.
+        """
+        sym = to_binance_symbol(symbol)
+        book = self._live_books.get(sym)
+        if book and book.get("bid") and book.get("ask"):
+            bid = float(book["bid"])
+            ask = float(book["ask"])
+            spread_pct = (ask - bid) / bid * 100.0 if bid > 0 else 0.0
+            return {"bid": bid, "ask": ask, "spread_pct": round(spread_pct, 5)}
+        return None
 
     def live_funding(self, symbol: str) -> dict[str, float] | None:
         """Latest funding rate from watch_funding_rates."""
@@ -890,8 +904,8 @@ class HuntCcxtStreams:
             specs.append(("hunt_ccxt_book", self._watch_order_book_mux))
         if self._ws_has(ex, "watchTickers"):
             specs.append(("hunt_ccxt_tickers", self._watch_tickers_mux))
-        if self._ws_has(ex, "watchBidsAsks"):
-            specs.append(("hunt_ccxt_bbo", self._watch_bids_asks_mux))
+        # watchBidsAsks (bookTicker) removed — per-symbol exotic subscriptions cause
+        # 4004 close-code churn; bid/ask served from depth stream via live_bbo().
         if self._ws_has(ex, "watchFundingRates"):
             specs.append(("hunt_ccxt_funding", self._watch_funding_rates_mux))
         cross_ws = os.getenv("HUNT_CROSS_WS", "").strip().lower() in {"1", "true", "yes"}
@@ -947,7 +961,13 @@ class HuntCcxtStreams:
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
-                await self._on_ws_loop_error("liq_mux", exc)
+                # Liquidation stream may reject exotic symbols (4004).
+                # Liquidations are supplementary — do not reconnect exchange.
+                if self._ws_transport_fatal(exc):
+                    LOG.debug("hunt_ccxt_liq_ws_fail | %s", repr(exc)[:100])
+                    await asyncio.sleep(3.0)
+                else:
+                    await self._on_ws_loop_error("liq_mux", exc)
 
     async def _watch_liquidations_symbol(self) -> None:
         """Fallback: round-robin watch_liquidations(symbol) per subscribed symbol."""
@@ -970,7 +990,11 @@ class HuntCcxtStreams:
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
-                await self._on_ws_loop_error("liq_symbol", exc)
+                if self._ws_transport_fatal(exc):
+                    LOG.debug("hunt_ccxt_liq_sym_ws_fail | sym=%s %s", ccxt_sym, repr(exc)[:100])
+                    await asyncio.sleep(3.0)
+                else:
+                    await self._on_ws_loop_error("liq_symbol", exc)
 
     async def _watch_mark_prices(self) -> None:
         if not self.mark_price_enabled:
@@ -1197,7 +1221,16 @@ class HuntCcxtStreams:
                     LOG.debug("hunt_ccxt_book_checksum_reset | error=%s", exc)
                     await self._on_ws_loop_error("book_checksum", exc)
                     continue
-                await self._on_ws_loop_error("book", exc)
+                # Binance closes the shared WS connection when it rejects exotic symbol
+                # subscriptions (@miniTicker etc.).  Book rides the same connection and
+                # gets a 1006; klines recover via CCXT Pro's internal retry, so the
+                # exchange-wide reconnect only adds rate-limit pressure without benefit.
+                # Watchdog (300 s no-data) catches genuine network outages.
+                if self._ws_transport_fatal(exc):
+                    LOG.debug("hunt_ccxt_book_ws_fail | %s", repr(exc)[:100])
+                    await asyncio.sleep(3.0)
+                else:
+                    await self._on_ws_loop_error("book", exc)
 
     async def _watch_bids_asks_mux(self) -> None:
         """BBO spread via watch_bids_asks (lighter than full watch_tickers)."""
@@ -1230,10 +1263,23 @@ class HuntCcxtStreams:
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
-                await self._on_ws_loop_error("bbo", exc)
+                # BBO bookTicker subscription may fail (4004) for some symbols.
+                # Do not reconnect exchange — kline/trades/mark are unaffected.
+                if self._ws_transport_fatal(exc):
+                    LOG.debug("hunt_ccxt_bbo_ws_fail | %s", repr(exc)[:100])
+                    await asyncio.sleep(3.0)
+                else:
+                    await self._on_ws_loop_error("bbo", exc)
 
     async def _watch_tickers_mux(self) -> None:
-        """Rolling 24h stats for all symbols via watch_tickers (REST fallback on reconnect)."""
+        """Rolling 24h stats via REST poll every 60 s.
+
+        watch_tickers(syms) uses per-symbol <sym>@miniTicker subscriptions.  Equity-linked
+        tokens (TSLAUSDT, MSFTUSDT, SPCXUSDT, CBRSUSDT) are rejected by Binance with
+        close-code 4004 outside US market hours, creating a 3-second reconnect churn that
+        destabilises kline/mark/book/trades streams sharing the same IP.  24h stats
+        (volume, change%, high/low) need no sub-minute freshness — REST at 60 s is correct.
+        """
         ex = self._ws_ex()
         while not self._stop.is_set():
             syms = self._ccxt_symbols()
@@ -1241,13 +1287,8 @@ class HuntCcxtStreams:
                 await asyncio.sleep(0.5)
                 continue
             now_ms = int(time.time() * 1000)
-            rest_fallback = time.monotonic() < self._post_reconnect_quiet_until
             try:
-                if rest_fallback:
-                    tickers = await ex.fetch_tickers(syms)
-                    LOG.info("ticker_rest_fallback | reason=ws_reconnect quiet_until=%.1f", self._post_reconnect_quiet_until)
-                else:
-                    tickers = await asyncio.wait_for(ex.watch_tickers(syms), timeout=_WS_WATCH_TIMEOUT_S)
+                tickers = await ex.fetch_tickers(syms)
                 self._touch()
                 items = tickers.values() if isinstance(tickers, dict) else []
                 for item in items:
@@ -1264,10 +1305,17 @@ class HuntCcxtStreams:
                         "low": float(item.get("low") or 0),
                         "ts_ms": now_ms,
                     }
+                await asyncio.sleep(60.0)
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
-                await self._on_ws_loop_error("tickers", exc)
+                if is_ccxt_rate_limited(exc):
+                    self.client.rest_gate.record_error(exc, context="tickers_rest")
+                    LOG.warning("hunt_ccxt_tickers_rest_rate_limited | %s", repr(exc)[:120])
+                    await asyncio.sleep(30.0)
+                else:
+                    LOG.warning("hunt_ccxt_tickers_rest_err | %s", repr(exc)[:120])
+                    await asyncio.sleep(15.0)
 
     async def _watch_funding_rates_mux(self) -> None:
         """Live funding/mark/index prices via watch_funding_rates."""
@@ -1561,9 +1609,14 @@ class HuntCcxtStreams:
             except asyncio.CancelledError:
                 return
             except defensive_exc_types(Exception) as exc:
-                await self._on_ws_loop_error(label, exc)
+                # Secondary (bybit/okx) WS failures must NOT trigger Binance reconnect.
+                # Reset only the affected secondary exchange.
                 if self._ws_transport_fatal(exc):
+                    LOG.debug("hunt_ccxt_secondary_liq_ws_fail | exchange=%s %s", name, repr(exc)[:100])
                     await self._reset_secondary_pro(name)
+                    await asyncio.sleep(3.0)
+                else:
+                    LOG.warning("hunt_ccxt_secondary_liq_err | exchange=%s %s", name, repr(exc)[:100])
 
     async def _watch_secondary_liquidations_mux(self) -> None:
         """Spawn per-exchange liquidation WS for Bybit / OKX."""
