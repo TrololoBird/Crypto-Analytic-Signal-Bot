@@ -1049,11 +1049,22 @@ class HuntCcxtStreams:
     async def _watch_trades_mux(self) -> None:
         """Single multiplexed trades stream for all symbols via watch_trades_for_symbols."""
         ex = self._ws_ex()
+        _subscribed: frozenset[str] = frozenset()
         while not self._stop.is_set():
             syms = self._ccxt_symbols()
             if not syms:
                 await asyncio.sleep(0.5)
                 continue
+            syms_set = frozenset(syms)
+            removed = _subscribed - syms_set
+            if removed:
+                try:
+                    await ex.un_watch_trades_for_symbols(list(removed))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as ue:
+                    LOG.debug("trades_unwatch_err | error=%s", ue)
+            _subscribed = syms_set
             try:
                 trades = await asyncio.wait_for(ex.watch_trades_for_symbols(syms), timeout=_WS_WATCH_TIMEOUT_S)
                 self._touch()
@@ -1066,18 +1077,39 @@ class HuntCcxtStreams:
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
+                if self._ws_transport_fatal(exc):
+                    _subscribed = frozenset()
                 await self._on_ws_loop_error("trades", exc)
+
+    @staticmethod
+    async def _unwatch_removed_ohlcv(ex: Any, removed: frozenset[str], interval: str) -> None:
+        """Send UNSUBSCRIBE for symbols that left the watchlist on the multipleOHLCV stream.
+        Prevents subscription count from growing past Binance's 200/stream limit which
+        causes 1006 closes after ~20 minutes of symbol rotation.
+        """
+        try:
+            await ex.un_watch_ohlcv_for_symbols([(s, interval) for s in removed])
+        except asyncio.CancelledError:
+            raise
+        except Exception as ue:
+            LOG.debug("kline_unwatch_err | interval=%s error=%s", interval, ue)
 
     async def _watch_ohlcv_mux(self) -> None:
         """Single multiplexed OHLCV stream for all symbols via watch_ohlcv_for_symbols."""
         if not self.kline_ws_enabled:
             return
         ex = self._ws_ex()
+        _subscribed: frozenset[str] = frozenset()
         while not self._stop.is_set():
             syms = self._ccxt_symbols()
             if not syms:
                 await asyncio.sleep(0.5)
                 continue
+            syms_set = frozenset(syms)
+            removed = _subscribed - syms_set
+            if removed:
+                await self._unwatch_removed_ohlcv(ex, removed, _KLINE_INTERVAL)
+            _subscribed = syms_set
             try:
                 if self._ws_has(ex, "watchOHLCVForSymbols"):
                     pairs = [(s, _KLINE_INTERVAL) for s in syms]
@@ -1101,6 +1133,8 @@ class HuntCcxtStreams:
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
+                if self._ws_transport_fatal(exc):
+                    _subscribed = frozenset()  # WS gone; reset subscription tracking
                 await self._on_ws_loop_error("kline_ws", exc)
 
     async def _watch_ohlcv_5m_mux(self) -> None:
@@ -1108,11 +1142,17 @@ class HuntCcxtStreams:
         if not self.kline_5m_enabled:
             return
         ex = self._ws_ex()
+        _subscribed: frozenset[str] = frozenset()
         while not self._stop.is_set():
             syms = self._ccxt_symbols()
             if not syms:
                 await asyncio.sleep(0.5)
                 continue
+            syms_set = frozenset(syms)
+            removed = _subscribed - syms_set
+            if removed:
+                await self._unwatch_removed_ohlcv(ex, removed, _KLINE_5M_INTERVAL)
+            _subscribed = syms_set
             try:
                 if self._ws_has(ex, "watchOHLCVForSymbols"):
                     pairs = [(s, _KLINE_5M_INTERVAL) for s in syms]
@@ -1136,6 +1176,8 @@ class HuntCcxtStreams:
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
+                if self._ws_transport_fatal(exc):
+                    _subscribed = frozenset()
                 await self._on_ws_loop_error("kline_ws_5m", exc)
 
     async def _watch_ohlcv_15m_mux(self) -> None:
@@ -1143,11 +1185,17 @@ class HuntCcxtStreams:
         if not self.kline_15m_enabled:
             return
         ex = self._ws_ex()
+        _subscribed: frozenset[str] = frozenset()
         while not self._stop.is_set():
             syms = self._ccxt_symbols()
             if not syms:
                 await asyncio.sleep(0.5)
                 continue
+            syms_set = frozenset(syms)
+            removed = _subscribed - syms_set
+            if removed:
+                await self._unwatch_removed_ohlcv(ex, removed, _KLINE_15M_INTERVAL)
+            _subscribed = syms_set
             try:
                 if self._ws_has(ex, "watchOHLCVForSymbols"):
                     pairs = [(s, _KLINE_15M_INTERVAL) for s in syms]
@@ -1171,6 +1219,8 @@ class HuntCcxtStreams:
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
+                if self._ws_transport_fatal(exc):
+                    _subscribed = frozenset()
                 await self._on_ws_loop_error("kline_ws_15m", exc)
 
     async def _watch_order_book_mux(self) -> None:
@@ -1182,11 +1232,22 @@ class HuntCcxtStreams:
         )
 
         ex = self._ws_ex()
+        _subscribed: frozenset[str] = frozenset()
         while not self._stop.is_set():
             syms = self._ccxt_symbols()
             if not syms:
                 await asyncio.sleep(0.5)
                 continue
+            syms_set = frozenset(syms)
+            removed = _subscribed - syms_set
+            if removed:
+                try:
+                    await ex.un_watch_order_book_for_symbols(list(removed))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as ue:
+                    LOG.debug("book_unwatch_err | error=%s", ue)
+            _subscribed = syms_set
             try:
                 # limit=_TOP_BOOK_DEPTH_LEVELS keeps the REST seed snapshot at
                 # weight 2 (vs 20 at the ccxt default 1000) — see factory option
@@ -1233,6 +1294,7 @@ class HuntCcxtStreams:
                 # exchange-wide reconnect only adds rate-limit pressure without benefit.
                 # Watchdog (300 s no-data) catches genuine network outages.
                 if self._ws_transport_fatal(exc):
+                    _subscribed = frozenset()  # WS gone; reset subscription tracking
                     LOG.debug("hunt_ccxt_book_ws_fail | %s", repr(exc)[:100])
                     await asyncio.sleep(3.0)
                 else:
