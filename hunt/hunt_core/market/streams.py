@@ -1536,6 +1536,10 @@ class HuntCcxtStreams:
                 backoff_s = 5.0
             except asyncio.CancelledError:
                 return
+            except asyncio.TimeoutError:
+                # No funding-rate push in 120 s — normal (OKX pushes only on change,
+                # funding period is 8 h).  WS is alive; just wait for the next event.
+                continue
             except Exception as exc:
                 if self._funding_ws_permanent(exc):
                     self._secondary_funding_disabled.add(name)
@@ -1546,10 +1550,10 @@ class HuntCcxtStreams:
                     )
                     return
                 if self._ws_transport_fatal(exc):
-                    LOG.debug(
-                        "secondary_funding_ws_error | exchange=%s error=%s",
+                    LOG.info(
+                        "secondary_funding_ws_error | exchange=%s error=%.200s",
                         name,
-                        exc,
+                        repr(exc),
                     )
                     await self._reset_secondary_pro(name)
                     backoff_s = 5.0
@@ -1716,11 +1720,15 @@ class HuntCcxtStreams:
                         self._record_liquidation(item, exchange=ex, venue=name)
             except asyncio.CancelledError:
                 return
+            except asyncio.TimeoutError:
+                # No liquidation event in 120 s — normal for low-volume symbols.
+                # WS connection is alive; just continue to the next symbol/iteration.
+                continue
             except defensive_exc_types(Exception) as exc:
                 # Secondary (bybit/okx) WS failures must NOT trigger Binance reconnect.
                 # Reset only the affected secondary exchange.
                 if self._ws_transport_fatal(exc):
-                    LOG.debug("hunt_ccxt_secondary_liq_ws_fail | exchange=%s %s", name, repr(exc)[:100])
+                    LOG.info("hunt_ccxt_secondary_liq_ws_fail | exchange=%s %s", name, repr(exc)[:200])
                     await self._reset_secondary_pro(name)
                     await asyncio.sleep(3.0)
                 else:
