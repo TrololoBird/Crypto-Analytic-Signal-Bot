@@ -180,15 +180,18 @@ def create_pro_secondary_swap(
     timeout_ms: int = 45_000,
 ) -> Any:
     cls = getattr(ccxtpro, exchange_id)
-    return cls(
-        build_network_config(
-            proxy_url=proxy_url,
-            trust_env=trust_env,
-            timeout_ms=timeout_ms,
-            default_type="swap",
-            pro=True,
-        )
+    config = build_network_config(
+        proxy_url=proxy_url,
+        trust_env=trust_env,
+        timeout_ms=timeout_ms,
+        default_type="swap",
+        pro=True,
     )
+    # Bybit requires ping every 20 s; OKX every 30 s — both drop connection at ~60 s idle.
+    # The primary Binance client uses 180 s (Binance is tolerant; shorter caused misses).
+    # Secondary exchanges need a shorter keepAlive to survive.
+    config["streaming"]["keepAlive"] = 20_000
+    return cls(config)
 
 
 def create_sync_binance_future(
