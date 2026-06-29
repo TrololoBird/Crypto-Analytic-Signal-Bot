@@ -56,7 +56,7 @@ from hunt_core.runtime.cycle._cycle_reconcile import (
 from hunt_core.runtime.state import LOG, SNIPER_CONFIG, WatchMode, SymbolStateStore
 from hunt_core.data.universe import PINNED_SYMBOLS, effective_watch_mode
 
-from hunt_core.scanner.detect.routing import resolve_delivery_mode, route_tick
+from hunt_core.hunter.detect.routing import resolve_delivery_mode, route_tick
 from hunt_core.track.events import append_signal_event, record_funnel_stage, record_lifecycle_funnel
 from hunt_core.track.candidates import (
     load_setup_candidates_state,
@@ -266,6 +266,7 @@ async def run_tick(
     feature_lake: FeatureLakeWriter | None = None,
     tier_by_symbol: dict[str, SnapshotTier] | None = None,
     snapshot_parallel: int | None = None,
+    intra_bar: Any | None = None,
 ) -> list[dict[str, Any]]:
     from hunt_core.runtime.cycle import _impl as _tick_impl
 
@@ -376,6 +377,7 @@ async def run_tick(
                         ),
                         tier=sym_tier,
                         symbol_state=symbol_state,
+                        intra_bar=intra_bar,
                     ),
                     timeout=SYMBOL_TICK_TIMEOUT_S,
                 )
@@ -492,12 +494,12 @@ async def run_tick(
                     attach_cross_fields(row, cx)
                 if not row.get("error"):
                     row["plane"] = "hunt"
-                    from hunt_core.runtime.tick_jsonl import (
+                    from hunt_core.data.tick_jsonl import (
                         ensure_fusion_lifecycle_fields,
                         resolve_row_mtf,
                     )
 
-                    active = row.get("long") if (row.get("long") or {}).get("confirmed") else row.get("dump")
+                    active = row.get("long") if (row.get("long") or {}).get("impulse_confirmed") else row.get("dump")
                     row["lifecycle"] = ensure_fusion_lifecycle_fields(
                         row.get("lifecycle") if isinstance(row.get("lifecycle"), dict) else None,
                         setup=active if isinstance(active, dict) else None,
@@ -516,7 +518,7 @@ async def run_tick(
                 dump = row.get("dump") or {}
                 long_setup = row.get("long") or {}
                 from hunt_core.data.frame_cache import get_frame_cache
-                from hunt_core.scanner.detect.setup_fields import setup_conviction_pct
+                from hunt_core.hunter.detect.setup_fields import setup_conviction_pct
 
                 lifecycle_raw = row.get("lifecycle") or (dump.get("lifecycle") if dump else None)
                 get_frame_cache().mark_priority(
@@ -557,7 +559,7 @@ async def run_tick(
                         lifecycle_bias=last_bias[symbol],
                     )
                     row["watch_mode"] = mode
-                from hunt_core.scanner.detect.setup_fields import setup_conviction_pct
+                from hunt_core.hunter.detect.setup_fields import setup_conviction_pct
 
                 def _tick_conviction(setup: dict[str, Any]) -> float:
                     if not setup:
@@ -573,7 +575,7 @@ async def run_tick(
                 def _tick_gate(setup: dict[str, Any]) -> str:
                     if not setup:
                         return "idle"
-                    if setup.get("confirmed"):
+                    if setup.get("impulse_confirmed"):
                         return "confirmed"
                     reason = str(setup.get("gate_reason") or "").strip()
                     return reason or str(setup.get("phase") or "forming")
@@ -586,23 +588,23 @@ async def run_tick(
                     hunt_phase=(lifecycle_raw or {}).get("phase"),
                     short_score=_tick_conviction(dump),
                     short_phase=dump.get("phase") or "—",
-                    short_confirmed=bool(dump.get("confirmed")),
+                    short_confirmed=bool(dump.get("impulse_confirmed")),
                     short_gate=_tick_gate(dump),
                     short_magnitude=dump.get("magnitude") if isinstance(dump, dict) else None,
                     short_gate_threshold=dump.get("gate_threshold") if isinstance(dump, dict) else None,
                     long_score=_tick_conviction(long_setup),
                     long_phase=long_setup.get("phase") or "—",
-                    long_confirmed=bool(long_setup.get("confirmed")),
+                    long_confirmed=bool(long_setup.get("impulse_confirmed")),
                     long_gate=_tick_gate(long_setup),
                     long_magnitude=long_setup.get("magnitude") if isinstance(long_setup, dict) else None,
                     long_gate_threshold=long_setup.get("gate_threshold") if isinstance(long_setup, dict) else None,
                     data_missing=(row.get("data_quality") or {}).get("fields_missing") or [],
                 )
                 skip_short = dump.get("hunt_skipped") or (
-                    dump and not dump.get("confirmed") and dump.get("gate_reason")
+                    dump and not dump.get("impulse_confirmed") and dump.get("gate_reason")
                 )
                 skip_long = long_setup.get("hunt_skipped") or (
-                    long_setup and not long_setup.get("confirmed") and long_setup.get("gate_reason")
+                    long_setup and not long_setup.get("impulse_confirmed") and long_setup.get("gate_reason")
                 )
                 if skip_short or skip_long:
                     LOG.info(
@@ -656,7 +658,7 @@ async def run_tick(
                         now=now,
                         squeeze=sq if cand_dir == "short" or sq else None,
                         ignition=ignited,
-                        forming=not bool(cand_setup.get("confirmed")),
+                        forming=not bool(cand_setup.get("impulse_confirmed")),
                     )
                 kline_events = await _reconcile_inwatch_active(
                     client, tracker_state, symbol=symbol, now=now
@@ -769,7 +771,7 @@ async def run_tick(
                     ndir = str(pend.get("direction") or "short")
                     nsetup = dump if ndir == "short" else long_setup
                     lc_dict = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
-                    from hunt_core.scanner.detect.setup_fields import setup_conviction_pct, setup_meets_strength
+                    from hunt_core.hunter.detect.setup_fields import setup_conviction_pct, setup_meets_strength
 
                     nconviction = setup_conviction_pct(nsetup or {}, direction=ndir)
                     nphase = str((nsetup or {}).get("phase") or "")
@@ -787,7 +789,7 @@ async def run_tick(
                     forming_ready = (
                         notify_on_forming
                         and nsetup
-                        and not bool(nsetup.get("confirmed"))
+                        and not bool(nsetup.get("impulse_confirmed"))
                         and nconviction >= min_conviction
                         and nphase in forming_phases
                         and str(lc_dict.get("phase") or "")
@@ -795,7 +797,7 @@ async def run_tick(
                     )
                     phase_ready = (
                         nsetup
-                        and not bool(nsetup.get("confirmed"))
+                        and not bool(nsetup.get("impulse_confirmed"))
                         and nphase == await_phase
                         and nconviction >= min_conviction
                     )
@@ -810,7 +812,7 @@ async def run_tick(
                                 "min_conviction": min_conviction,
                             },
                         )
-                    if nsetup and bool(nsetup.get("confirmed")):
+                    if nsetup and bool(nsetup.get("impulse_confirmed")):
                         if hunt_auto_confirm_blocked(symbol):
                             append_signal_event(
                                 "blocked",
@@ -911,8 +913,8 @@ async def run_tick(
                             continue
                         if not setup:
                             continue
-                        if setup.get("confirmed") and setup.get("signal_type") in (
-                            "pre_phase", "mid_phase",
+                        if setup.get("impulse_confirmed") and setup.get("signal_type") in (
+                            "pre_phase", "pre_phase_blocked", "mid_phase",
                         ):
                             try:
                                 delivered = await _evaluate_auto_delivery(
@@ -947,14 +949,14 @@ async def run_tick(
                             lifecycle_raw=lifecycle_raw,
                             now=now,
                         )
-                        from hunt_core.scanner.detect.setup_fields import ev_primary_delivery_qualified
+                        from hunt_core.hunter.detect.setup_fields import ev_primary_delivery_qualified
 
                         _ev_primary_live = ev_primary_delivery_qualified(
                             setup,
                             direction=direction,
                             symbol=symbol,
                         )
-                        from hunt_core.scanner.detect.delivery_support import mission_delivery_block
+                        from hunt_core.hunter.detect.delivery_support import mission_delivery_block
 
                         _lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
                         _lc_phase = str(_lc.get("phase") or "")
@@ -1338,7 +1340,7 @@ async def run_tick(
                             row=row,
                             sniper_config=SNIPER_CONFIG,
                         ).ok:
-                            from hunt_core.scanner.detect.setup_fields import setup_conviction_pct, setup_meets_strength
+                            from hunt_core.hunter.detect.setup_fields import setup_conviction_pct, setup_meets_strength
 
                             lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
                             conviction = setup_conviction_pct(setup, direction=direction)

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import statistics
-from collections import deque
+from collections import deque, OrderedDict
 from dataclasses import dataclass, fields
 from functools import lru_cache
 from typing import Any
@@ -32,8 +32,10 @@ class IntraBarConfig:
     momentum_z_min: float = 2.0
     dom_imbalance_min: float = 0.60
     confidence_threshold: float = 0.0
-    min_trades_for_burst: int = 5
+    min_trades_for_burst: int = 2
     cooldown_seconds: int = 300
+    max_symbols: int = 100
+    dom_ema_alpha: float = 0.3
 
 
 def _merge_intra_bar(raw: dict[str, Any]) -> IntraBarConfig:
@@ -65,7 +67,7 @@ def clear_intra_bar_config_cache() -> None:
 @dataclass(frozen=True)
 class IntraBarSignal:
     symbol: str
-    side: str  # "long" | "short"
+    side: str
     confidence: float
     momentum_z: float
     trade_burst: float
@@ -83,16 +85,19 @@ class _SymbolState:
     __slots__ = (
         "prices",
         "trade_deltas",
-        "dom_imbalance",
+        "trade_buffer",
+        "dom_ema",
+        "dom_ema_initialized",
         "last_price",
         "last_ts",
     )
 
     def __init__(self, momentum_window: int, trade_window: int) -> None:
         self.prices: deque[float] = deque(maxlen=momentum_window)
-        # Each element is net delta of buy_vol - sell_vol for a snapshot
         self.trade_deltas: deque[float] = deque(maxlen=trade_window)
-        self.dom_imbalance: float = 0.0
+        self.trade_buffer: list[float] = []
+        self.dom_ema: float = 0.0
+        self.dom_ema_initialized: bool = False
         self.last_price: float = 0.0
         self.last_ts: float = 0.0
 
@@ -106,6 +111,7 @@ class IntraBarState:
     """Per-symbol rolling intra-bar state. NOT a singleton — instantiate once in runtime.
 
     Feed WS events into the three ``process_*`` methods, then poll ``signals()``.
+    Trade events are buffered and aggregated on flush to avoid per-trade CPU overhead.
 
     Thread-safe for asyncio (single event loop). No persistence.
     """
@@ -116,10 +122,23 @@ class IntraBarState:
         initial_symbols: list[str] | None = None,
     ) -> None:
         self._cfg = cfg if cfg is not None else intra_bar_config()
-        self._symbols: dict[str, _SymbolState] = {}
+        self._symbols: dict[str, _SymbolState] = OrderedDict()
+        self._lru: deque[str] = deque()
         if initial_symbols:
             for sym in initial_symbols:
                 self._ensure(sym)
+
+    def _evict_lru(self) -> None:
+        while len(self._symbols) > self._cfg.max_symbols:
+            oldest = self._lru.popleft()
+            self._symbols.pop(oldest, None)
+
+    def _touch_lru(self, symbol: str) -> None:
+        try:
+            self._lru.remove(symbol)
+        except ValueError:
+            pass
+        self._lru.append(symbol)
 
     def _ensure(self, symbol: str) -> _SymbolState:
         sym = symbol.upper().strip()
@@ -128,10 +147,14 @@ class IntraBarState:
                 self._cfg.momentum_window,
                 self._cfg.trade_window,
             )
+            self._evict_lru()
+        self._touch_lru(sym)
         return self._symbols[sym]
 
     def process_m1_close(self, symbol: str, price: float, ts: float) -> None:
-        """Feed a 1m kline close price (or any tick-level price update)."""
+        if price <= 0 or ts <= 0:
+            _LOG.warning("intra_bar_skip_m1_close | symbol=%s price=%s ts=%s", symbol, price, ts)
+            return
         st = self._ensure(symbol)
         st.prices.append(price)
         st.last_price = price
@@ -144,13 +167,25 @@ class IntraBarState:
         qty: float,
         ts: float,
     ) -> None:
-        """Feed a raw trade event. ``side`` must be ``"buy"`` or ``"sell"``.
-        Tracks net buy-volume delta (buy_vol - sell_vol) per trade event.
-        """
+        """Buffer trade delta. Aggregated on next ``_flush_trade_buffer`` call."""
+        side_norm = str(side).strip().lower()
+        if side_norm not in ("buy", "sell"):
+            _LOG.warning("intra_bar_skip_trade | symbol=%s unknown_side=%s", symbol, side)
+            return
+        if qty <= 0:
+            return
         st = self._ensure(symbol)
-        delta = qty if side == "buy" else -qty
-        st.trade_deltas.append(delta)
+        delta = qty if side_norm == "buy" else -qty
+        st.trade_buffer.append(delta)
         st.last_ts = ts
+
+    def _flush_trade_buffer(self, symbol: str) -> None:
+        st = self._symbols.get(symbol.upper().strip())
+        if st is None or not st.trade_buffer:
+            return
+        agg = sum(st.trade_buffer)
+        st.trade_buffer.clear()
+        st.trade_deltas.append(agg)
 
     def process_orderbook(
         self,
@@ -158,62 +193,70 @@ class IntraBarState:
         bid_qty: float,
         ask_qty: float,
     ) -> None:
-        """Feed a top-of-book depth snapshot.
-        imbalance = (bid_qty - ask_qty) / (bid_qty + ask_qty).
-        Positive = bid heavier (bullish), negative = ask heavier (bearish).
+        """Update DOM via EMA: new = alpha * imb + (1-alpha) * ema.
+        First call initialises EMA directly (no previous value).
         """
+        try:
+            bid_qty = float(bid_qty or 0)
+            ask_qty = float(ask_qty or 0)
+        except (TypeError, ValueError):
+            _LOG.warning("intra_bar_skip_orderbook | symbol=%s non_float", symbol)
+            return
         total = bid_qty + ask_qty
         if total <= 0:
             return
         st = self._ensure(symbol)
-        st.dom_imbalance = (bid_qty - ask_qty) / total
+        imb = (bid_qty - ask_qty) / total
+        if not st.dom_ema_initialized:
+            st.dom_ema = imb
+            st.dom_ema_initialized = True
+        else:
+            alpha = self._cfg.dom_ema_alpha
+            st.dom_ema = alpha * imb + (1.0 - alpha) * st.dom_ema
 
     def compute(self, symbol: str) -> IntraBarSignal | None:
-        """Run the three sub-signals for one symbol. Returns None if any window is cold."""
         st = self._symbols.get(symbol.upper().strip())
         if st is None:
             return None
         cfg = self._cfg
+
+        self._flush_trade_buffer(symbol)
+
         prices = list(st.prices)
         deltas = list(st.trade_deltas)
 
         if len(prices) < 3 or st.last_price <= 0:
             return None
 
-        # -- momentum z-score (standardised log-return from window mean) --
         mean_p = statistics.mean(prices)
         if mean_p <= 0:
             return None
         sd_p = statistics.stdev(prices) if len(prices) > 1 else 0.0
         momentum_z = ((st.last_price - mean_p) / sd_p) if sd_p > 0 else 0.0
 
-        # -- trade burst (net buy-volume delta ratio, robust to uniform windows) --
         trade_burst = 0.0
         if len(deltas) >= cfg.min_trades_for_burst:
             total_abs = sum(abs(d) for d in deltas)
             if total_abs > 0:
-                trade_burst = sum(deltas) / total_abs  # -1..1
+                trade_burst = sum(deltas) / total_abs
 
-        # -- DOM imbalance (positive = bid heavier = bullish) --
-        dom_imb = st.dom_imbalance
+        dom_imb = st.dom_ema
 
-        # -- consensus logic: all three must agree on direction --
-        bull = momentum_z > 0 and trade_burst > cfg.dom_imbalance_min and dom_imb > 0.0
-        bear = momentum_z < 0 and trade_burst < -cfg.dom_imbalance_min and dom_imb < 0.0
+        direction_bull = momentum_z > 0 and trade_burst > cfg.dom_imbalance_min and dom_imb > 0.0
+        direction_bear = momentum_z < 0 and trade_burst < -cfg.dom_imbalance_min and dom_imb < 0.0
 
-        if not bull and not bear:
+        if not direction_bull and not direction_bear:
             return None
 
-        side = "long" if bull else "short"
-        # direction-agnostic confidence: average of absolute signal strengths, scaled 0-1
+        side = "long" if direction_bull else "short"
         raw_conf = (
-            abs(momentum_z) / 5.0  # z=5 → 1.0
+            abs(momentum_z) / 5.0
             + abs(trade_burst) / 5.0
-            + abs(dom_imb) / 0.67  # imbalance 0.67 → 1.0 (bid 5× ask = 0.67)
+            + abs(dom_imb) / 0.67
         ) / 3.0
         confidence = min(raw_conf, 1.0)
 
-        signal = IntraBarSignal(
+        return IntraBarSignal(
             symbol=symbol.upper().strip(),
             side=side,
             confidence=confidence,
@@ -223,7 +266,6 @@ class IntraBarState:
             ts=st.last_ts,
             price=st.last_price,
         )
-        return signal
 
     def signals(
         self,
@@ -231,8 +273,6 @@ class IntraBarState:
         *,
         min_confidence: float | None = None,
     ) -> list[IntraBarSignal]:
-        """Compute signals for all tracked symbols (or a subset) and return those
-        above the confidence threshold. All signals are logged regardless."""
         cfg = self._cfg
         threshold = min_confidence if min_confidence is not None else cfg.confidence_threshold
         out: list[IntraBarSignal] = []

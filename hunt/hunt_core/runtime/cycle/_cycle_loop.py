@@ -11,7 +11,7 @@ from typing import Any
 from hunt_core import clock
 from hunt_core.data.collect import TickBatchCache, safe_fetch
 from hunt_core.data.lake import FeatureLakeWriter, buffer_tick_rows, flush_lake
-from hunt_core.data.scanner import (
+from hunt_core.hunter.prescan import (
     PrescanDebounceQueue,
     PrescanEngine,
     apply_quality_gates,
@@ -26,7 +26,7 @@ from hunt_core.domain.config import (
     TICK_ROTATE_INTERVAL_S,
     TICK_ROTATE_MIN_BYTES,
 )
-from hunt_core.domain.market_regime import (
+from hunt_core.regime.market_regime import (
     REGIME_REFRESH_S,
     apply_snapshot,
     load_regime_file,
@@ -45,11 +45,11 @@ from hunt_core.market import (
 )
 from hunt_core.params.store import migrate_calibration_split, prescan_thresholds
 from hunt_core.runtime.cycle._cycle_tick import run_tick
+from hunt_core.data.symbol_blacklist import is_blacklisted
 from hunt_core.runtime.state import (
     LOG,
     OUT_PATH,
     SYMBOL_WATCH_MODES,
-    is_blacklisted,
     new_session_state,
     should_stop,
 )
@@ -205,6 +205,10 @@ async def run_loop(
     last_bias: dict[str, str] = {}
     last_lifecycle_phase: dict[str, str] = {}
     symbol_state = new_session_state()
+    from hunt_core.hunter.detect.intra_bar_state import IntraBarState
+    intra_bar_state = IntraBarState(initial_symbols=list(cli_symbols))
+    ws_feed._intra_bar = intra_bar_state
+
     from hunt_core.data.frame_cache import reset_frame_cache
 
     reset_frame_cache()
@@ -289,13 +293,13 @@ async def run_loop(
 
     deep_task: asyncio.Task[None] | None = None
     if not once and os.getenv("HUNT_DEEP_PINNED_LOOP", "1").strip().lower() not in {"0", "false", "no"}:
-        from hunt_core.runtime.deep_assembly import deep_pinned_loop
+        from hunt_core.runtime.analyst_assembly import analyst_pinned_loop
 
         deep_task = asyncio.create_task(
-            deep_pinned_loop(client, broadcaster, send_telegram=send_telegram, ws_feed=ws_feed),
-            name="deep_pinned_loop",
+            analyst_pinned_loop(client, broadcaster, send_telegram=send_telegram, ws_feed=ws_feed),
+            name="analyst_pinned_loop",
         )
-        LOG.info("deep_pinned_loop_scheduled")
+        LOG.info("analyst_pinned_loop_scheduled")
 
     expansion_review_task: asyncio.Task[None] | None = None
     from hunt_core.expansion.config import load_expansion_config
@@ -310,7 +314,7 @@ async def run_loop(
             LOG.exception("expansion_fsm_load_failed")
 
     if not once and exp_cfg.enabled and exp_cfg.lab_runtime and exp_cfg.review_loop:
-        from hunt_core.runtime.deep_assembly import expansion_outcome_review_loop
+        from hunt_core.runtime.analyst_assembly import expansion_outcome_review_loop
 
         expansion_review_task = asyncio.create_task(
             expansion_outcome_review_loop(client),
@@ -320,7 +324,7 @@ async def run_loop(
 
     expansion_universe_task: asyncio.Task[None] | None = None
     if not once and exp_cfg.enabled and exp_cfg.lab_runtime and exp_cfg.tg_universe_scan and send_telegram:
-        from hunt_core.runtime.expansion_universe_scan import expansion_universe_scan_loop
+        from hunt_core.expansion.universe_scan import expansion_universe_scan_loop
 
         expansion_universe_task = asyncio.create_task(
             expansion_universe_scan_loop(broadcaster, send_telegram=send_telegram),
@@ -331,6 +335,16 @@ async def run_loop(
             interval_s=exp_cfg.tg_universe_interval_s,
             top_n=exp_cfg.tg_universe_top_n,
         )
+
+    calibration_task: asyncio.Task[None] | None = None
+    if not once:
+        from hunt_core.runtime.analyst_assembly import calibration_refresh_loop
+
+        calibration_task = asyncio.create_task(
+            calibration_refresh_loop(),
+            name="calibration_refresh_loop",
+        )
+        LOG.info("calibration_refresh_scheduled", interval_s=6 * 3600)
 
     # Hang watchdog: if a cycle stalls (e.g. an unbounded loop in scan/levels on
     # degenerate data), faulthandler dumps every Python thread's stack — it works
@@ -362,7 +376,7 @@ async def run_loop(
 
                 if not once and time.monotonic() - last_scan >= SCAN_INTERVAL_S:
                     try:
-                        from hunt_core.data.scanner import run_scan
+                        from hunt_core.hunter.prescan import run_scan
 
                         summary = await run_scan(
                             limit=30, min_score=45.0, client=client
@@ -514,7 +528,7 @@ async def run_loop(
                         )
                         or prescan_thresholds()["max_change_pct_for_merge"]
                     )
-                    from hunt_core.data.scanner import prescan_merge_eligible
+                    from hunt_core.hunter.prescan import prescan_merge_eligible
 
                     prescan_filtered: list[Any] = []
                     prescan_skipped_late = 0
@@ -698,7 +712,9 @@ async def run_loop(
                     )
                 async with _TICK_LOCK:
                     rows = await run_tick(
-                        hunt_active, **{k: v for k, v in tick_ctx.items() if k != "active"}
+                        hunt_active,
+                        **{k: v for k, v in tick_ctx.items() if k != "active"},
+                        intra_bar=intra_bar_state,
                     )
                 if (
                     not once
@@ -826,6 +842,12 @@ async def run_loop(
             expansion_universe_task.cancel()
             try:
                 await expansion_universe_task
+            except asyncio.CancelledError:
+                pass
+        if calibration_task is not None:
+            calibration_task.cancel()
+            try:
+                await calibration_task
             except asyncio.CancelledError:
                 pass
         if exp_cfg.lab_runtime:

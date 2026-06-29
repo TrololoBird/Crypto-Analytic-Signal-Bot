@@ -19,10 +19,10 @@ def run_fusion_detection(
     hunt_l: float,
 ) -> tuple[Any, str, str, dict[str, Any]]:
     """Build live fusion detection from closed 15m feature vector."""
-    from hunt_core.scanner.detect.live import build_live_detection
-    from hunt_core.scanner.gate._lifecycle import fusion_lifecycle_dict
+    from hunt_core.hunter.detect.live import build_live_detection
+    from hunt_core.hunter.gate._lifecycle import fusion_lifecycle_dict
     from hunt_core.features.feature_engine import build_feature_vector
-    from hunt_core.runtime.tick_jsonl import ensure_fusion_lifecycle_fields
+    from hunt_core.data.tick_jsonl import ensure_fusion_lifecycle_fields
 
     leg_gain_pct = round((hunt_h - hunt_l) / hunt_l * 100.0, 1) if hunt_l > 0 else 0.0
     fall_from_high_pct = round((hunt_h - price) / hunt_h * 100.0, 2) if hunt_h > 0 else 0.0
@@ -67,22 +67,23 @@ def apply_fusion_setups(
     lifecycle_dict: dict[str, Any],
     result: dict[str, Any],
     symbol: str,
+    intra_bar: Any | None = None,
 ) -> None:
     """Write dump/long setup dicts from fusion detection onto the tick row."""
-    from hunt_core.scanner.detect.delivery_setup import build_delivery_setup
+    from hunt_core.hunter.detect.delivery_setup import build_delivery_setup
 
     def _stub_setup(direction: str) -> dict[str, Any]:
         return {
             "symbol": symbol,
             "direction": direction,
-            "confirmed": False,
+            "impulse_confirmed": False,
             "phase": phase_val,
             "lifecycle_phase": phase_val,
             "lifecycle": lifecycle_dict,
         }
 
     if detection is not None and side in {"long", "short"}:
-        active = build_delivery_setup(detection, result)
+        active = build_delivery_setup(detection, result, intra_bar=intra_bar)
         if side == "short":
             result["dump"] = active
             result["long"] = _stub_setup("long")
@@ -92,7 +93,7 @@ def apply_fusion_setups(
     else:
         stub = {
             "symbol": symbol,
-            "confirmed": False,
+            "impulse_confirmed": False,
             "phase": phase_val,
             "lifecycle_phase": phase_val,
             "lifecycle": lifecycle_dict,

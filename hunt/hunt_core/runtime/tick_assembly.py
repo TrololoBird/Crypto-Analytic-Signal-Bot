@@ -45,7 +45,6 @@ from hunt_core.features.snapshot import (
     col as _col,
     data_quality_report,
     enrich_work_research_frames,
-    format_squeeze_telegram,
     impulse_context,
     kline_integrity_reject,
     lite_prepared,
@@ -58,7 +57,7 @@ from hunt_core.features.snapshot import (
     tf_snapshot_for_symbol,
     tf_snapshot_lite,
 )
-from hunt_core.scanner.detect.delivery_support import liquidity_skip_reason
+from hunt_core.hunter.detect.delivery_support import liquidity_skip_reason
 from hunt_core.runtime.state import current_symbol_state
 from hunt_core.data.universe import PINNED_SYMBOLS
 
@@ -100,13 +99,13 @@ def _apply_dump_confirm_sticky(
         if setup.get("levels_viable") is False or setup.get("levels_veto"):
             return False, ["veto_levels:" + ",".join(setup.get("levels_veto") or ["not_viable"])]
         store.confirm_sticky[sym] = {
-            "confirmed": True,
+            "impulse_confirmed": True,
             "hard": list(confirm_hard),
             "ticks": 0,
         }
         return confirmed, confirm_hard
     latched = store.confirm_sticky.get(sym)
-    if not isinstance(latched, dict) or not latched.get("confirmed"):
+    if not isinstance(latched, dict) or not latched.get("impulse_confirmed"):
         return confirmed, confirm_hard
     ticks = int(latched.get("ticks") or 0) + 1
     latched["ticks"] = ticks
@@ -118,7 +117,7 @@ def _apply_dump_confirm_sticky(
 
 
 from hunt_core.data_readiness import assess_symbol_data_readiness
-from hunt_core.domain.market_regime import symbol_regime_features
+from hunt_core.regime.market_regime import symbol_regime_features
 from hunt_core.domain.schemas import SymbolFrames, UniverseSymbol
 from hunt_core.features.fib import leg_fib_levels
 from hunt_core.market import (
@@ -302,6 +301,7 @@ async def snapshot_symbol(
     enrichment_pack_override: dict[str, Any] | None = None,
     btc_work_1m: Any | None = None,
     hunt_fusion: bool = True,
+    intra_bar: Any | None = None,
 ) -> dict[str, Any]:
     readiness_result = None
     meta = exchange_by_sym.get(symbol)
@@ -1017,14 +1017,14 @@ async def snapshot_symbol(
     apply_cross_exchange_flat(result)
 
     if not hunt_fusion:
-        from hunt_core.runtime.tick_jsonl import ensure_fusion_lifecycle_fields
+        from hunt_core.data.tick_jsonl import ensure_fusion_lifecycle_fields
 
         result["plane"] = "deep"
         neutral_lc = ensure_fusion_lifecycle_fields({"phase": "neutral", "phase_fusion": "neutral"})
         result["lifecycle"] = neutral_lc
         stub = {
             "symbol": symbol,
-            "confirmed": False,
+            "impulse_confirmed": False,
             "phase": "neutral",
             "lifecycle_phase": "neutral",
             "lifecycle": neutral_lc,
@@ -1053,6 +1053,7 @@ async def snapshot_symbol(
             lifecycle_dict=lifecycle_dict,
             result=result,
             symbol=symbol,
+            intra_bar=intra_bar,
         )
         if detection is not None:
             result["factor_panel"] = {
@@ -1097,7 +1098,7 @@ async def snapshot_symbol(
         )
         if mtf_obj is not None:
             result["mtf"] = mtf_obj
-            from hunt_core.runtime.tick_jsonl import mtf_to_json_dict
+            from hunt_core.data.tick_jsonl import mtf_to_json_dict
 
             summary = mtf_to_json_dict(mtf_obj)
             if isinstance(summary, dict):
@@ -1130,7 +1131,7 @@ async def snapshot_symbol(
         LOG.warning("structure_state_snapshot_failed | symbol=%s error=%s", symbol, exc)
 
     try:
-        from hunt_core.maps.forecast import stamp_forecasts_on_row
+        from hunt_core.analysis.forecast import stamp_forecasts_on_row
 
         if ws_feed is not None:
             from hunt_core.market import apply_live_price_to_row
@@ -1148,7 +1149,7 @@ async def snapshot_symbol(
 
     try:
         from hunt_core.analysis.expansion_engine.config import load_expansion_config
-        from hunt_core.runtime.deep_assembly import stamp_expansion_on_row
+        from hunt_core.runtime.analyst_assembly import stamp_expansion_on_row
 
         exp_cfg = load_expansion_config()
         if exp_cfg.enabled and exp_cfg.watch_stamp and tier in exp_cfg.watch_stamp_tiers:

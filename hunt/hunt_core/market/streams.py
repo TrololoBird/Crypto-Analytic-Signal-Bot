@@ -25,6 +25,7 @@ from hunt_core.market.ccxt_guard import (
     is_ccxt_rate_limited,
     liquidation_ws_mode,
 )
+from hunt_core.hunter.detect.intra_bar_state import IntraBarState
 from hunt_core.market.symbols import (
     from_ccxt_symbol,
     to_binance_symbol,
@@ -211,6 +212,7 @@ class HuntCcxtStreams:
     _last_pro_reset: float = 0.0
     _reconnect_task: asyncio.Task[None] | None = field(default=None, repr=False)
     _reconnect_count: int = 0
+    _intra_bar: IntraBarState | None = None
 
     def ws_health_metrics(self) -> dict[str, Any]:
         """Expose WS transport health for cycle heartbeat / integrity checks."""
@@ -466,16 +468,6 @@ class HuntCcxtStreams:
         if total <= 0:
             return None
         return round(buy / total, 3)
-
-    def agg_trade_delta(
-        self,
-        symbol: str,
-        *,
-        window_seconds: int = 60,
-        use_nq: bool | None = None,
-    ) -> float | None:
-        """Deprecated alias — use agg_trade_buy_ratio (buy share, not delta)."""
-        return self.agg_trade_buy_ratio(symbol, window_seconds=window_seconds, use_nq=use_nq)
 
     def agg_rpi_skew(self, symbol: str, *, window_seconds: int = 60) -> float | None:
         sym = to_binance_symbol(symbol)
@@ -848,6 +840,9 @@ class HuntCcxtStreams:
                 price=px,
             )
         )
+        ib = self._intra_bar
+        if ib is not None and qty > 0:
+            ib.process_trade(sym, "buy" if is_buy else "sell", qty, ts_ms / 1000.0)
 
     def _on_closed_kline(self, sym: str, candle: list[Any], *, interval: str = _KLINE_INTERVAL) -> None:
         try:
@@ -878,6 +873,9 @@ class HuntCcxtStreams:
             self._kline_waiting_15m[sym] = bar
         else:
             self._kline_waiting[sym] = bar
+            ib = self._intra_bar
+            if ib is not None:
+                ib.process_m1_close(sym, c, open_ms / 1000.0)
 
     def _on_ohlcv_update(
         self,
@@ -1318,6 +1316,9 @@ class HuntCcxtStreams:
                     "ws_depth_imbalance": di_top20,
                     "microprice_bias": mp,
                 }
+                ib = self._intra_bar
+                if ib is not None and bid_q is not None and ask_q is not None:
+                    ib.process_orderbook(sym, float(bid_q), float(ask_q))
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:

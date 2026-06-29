@@ -261,8 +261,10 @@ trade_window = 10
 momentum_z_min = 2.0
 dom_imbalance_min = 0.60
 confidence_threshold = 0.0
-min_trades_for_burst = 5
+min_trades_for_burst = 1
 cooldown_seconds = 300
+max_symbols = 100
+dom_ema_alpha = 0.3
 
 [fusion]
 # Official fusion tunables — see docs/FUSION_PARAMS.md (threshold-free detection is impossible).
