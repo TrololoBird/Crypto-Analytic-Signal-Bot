@@ -3,7 +3,7 @@
 # Скопируй нужное в config.toml [universe] / env при кастомизации.
 # Основной runtime читает корневой config.toml.
 
-[scanner]
+[hunter]
 min_quote_volume_usd = 10_000_000
 min_open_interest_usd = 500_000
 min_listing_age_days = 7
@@ -74,9 +74,9 @@ modes = { BTCUSDT = "both", ETHUSDT = "both", SOLUSDT = "both", XRPUSDT = "both"
 deep_continuous = true
 hunt_confirm = false
 # Deep /signal uses HUNT_FULL_PREPARE=1 + microstructure for these anchors.
-deep_analysis = { BTCUSDT = true, ETHUSDT = true, SOLUSDT = true, XRPUSDT = true, XAUUSDT = true, XAGUSDT = true, PAXGUSDT = true }
+analyst = { BTCUSDT = true, ETHUSDT = true, SOLUSDT = true, XRPUSDT = true, XAUUSDT = true, XAGUSDT = true, PAXGUSDT = true }
 
-[deep.pinned]
+[analyst.pinned]
 interval_s = 300
 tg_on_change = true
 tg_stale_hours = 4
@@ -118,7 +118,7 @@ tg_universe_interval_s = 900
 tg_universe_top_n = 5
 tg_universe_min_opp = 0.35
 
-[deep.verdict_v2]
+[analyst]
 enabled = true
 horizon_primary = "B"
 pattern_ambiguity_spread = 0.08
@@ -133,7 +133,7 @@ signal_queue_tg_batch = true
 signal_queue_tg_min_rank = 2
 signal_queue_ttl_hours = 2.5
 
-[deep.verdict_v2.signal_gates]
+[analyst.signal_gates]
 strength_min = 0.45
 fragility_max = 0.65
 trade_quality_min = 0.45
@@ -141,34 +141,36 @@ rr_primary_min = 0.65
 data_coverage_min = 0.50
 require_timing_c = true
 
-[deep.verdict_v2.trade_plan]
+[analyst.trade_plan]
 entry_atr_pad = 0.25
-stop_atr_fallback = 1.5
 min_rr_tp1 = 1.0
 
-[deep.verdict_v2.priorities_a]
+[analyst.priorities_a]
 macro_trend = 0.28
 structural = 0.24
 positioning = 0.22
 derivatives = 0.16
+cross_consensus = 0.04
 flow = 0.10
 execution_pressure = 0.0
 
-[deep.verdict_v2.priorities_b]
+[analyst.priorities_b]
 macro_trend = 0.18
 structural = 0.18
 positioning = 0.22
 derivatives = 0.15
+cross_consensus = 0.08
 flow = 0.15
 execution_pressure = 0.06
 
-[deep.verdict_v2.priorities_c]
-macro_trend = 0.08
-structural = 0.10
-positioning = 0.20
-derivatives = 0.12
-flow = 0.22
-execution_pressure = 0.18
+[analyst.priorities_c]
+macro_trend = 0.22
+structural = 0.20
+positioning = 0.18
+derivatives = 0.15
+cross_consensus = 0.12
+flow = 0.08
+execution_pressure = 0.05
 
 [market_regime]
 refresh_hours = 4
@@ -249,6 +251,18 @@ vp_periods = ["1h", "4h", "1d", "1w"]
 vp_buckets = 24
 vp_value_area_pct = 0.70
 
+[intra_bar]
+# Intra-bar PRE-pump/PRE-dump detection thresholds (WS sub-15m).
+# Rolling windows for momentum z-score, trade burst, and DOM imbalance.
+# Silence is default: 95%+ ticks should produce no signal.
+momentum_window = 20
+trade_window = 20
+momentum_z_min = 2.0
+trade_burst_sigma = 3.0
+dom_imbalance_min = 0.60
+confidence_threshold = 0.50
+min_trades_for_burst = 5
+
 [fusion]
 # Official fusion tunables — see docs/FUSION_PARAMS.md (threshold-free detection is impossible).
 min_n = 18
@@ -256,7 +270,7 @@ lookback = 120
 q_gate = 0.60
 q_phase = 0.85
 min_active_factors = 2
-global_gate_floor = 0.12
+global_gate_floor = 0.06
 abs_magnitude_floor = 0.08
 vol_floor_pct = 0.15
 fusion_score_scale = 25.0
@@ -266,8 +280,8 @@ phase_mid_exit_ratio = 0.65
 phase_mid_exit_bars = 2
 funding_min_n = 48
 pre_gate_min_energy = 1
-pre_gate_min_structure = 0.10
-pre_gate_min_magnitude = 0.08
+pre_gate_min_structure = 0.04
+pre_gate_min_magnitude = 0.06
 mad_epsilon = 0.000001
 robust_z_clip = 12.0
 horizon_bars = 16

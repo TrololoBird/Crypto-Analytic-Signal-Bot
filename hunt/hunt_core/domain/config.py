@@ -122,7 +122,7 @@ class AssetConfig(_StrictModel):
     context_timeframes: tuple[Literal["5m", "15m", "1h", "4h"], ...] = ("1h", "4h")
     excluded_strategies: tuple[str, ...] = ()
     allowed_strategies: tuple[str, ...] = ()
-    deep_analysis: bool = False
+    analyst: bool = False
 
 
 class SetupConfig(_StrictModel):
@@ -263,7 +263,7 @@ def _merge_hunt_defaults(payload: dict[str, Any], hunt_defaults: Mapping[str, An
             assets = {}
             payload["assets"] = assets
         symbols = pinned.get("symbols") or []
-        deep = pinned.get("deep_analysis") if isinstance(pinned.get("deep_analysis"), dict) else {}
+        deep = pinned.get("analyst") if isinstance(pinned.get("analyst"), dict) else {}
         modes = pinned.get("modes") if isinstance(pinned.get("modes"), dict) else {}
         for sym in symbols:
             s = str(sym).strip().upper()
@@ -274,7 +274,7 @@ def _merge_hunt_defaults(payload: dict[str, Any], hunt_defaults: Mapping[str, An
                 if s in modes:
                     block.setdefault("primary_timeframe", "15m")
                 if deep.get(s):
-                    block["deep_analysis"] = True
+                    block["analyst"] = True
 
 
 def load_settings(config_path: str | Path = "config.toml") -> HuntSettings:
@@ -327,7 +327,7 @@ def load_config_defaults_toml() -> dict[str, Any]:
         return {}
 
     out: dict[str, Any] = {}
-    scanner = raw.get("scanner")
+    scanner = raw.get("hunter")
     if isinstance(scanner, dict):
         out["scanner"] = {
             k: v
@@ -397,7 +397,7 @@ def load_config_defaults_toml() -> dict[str, Any]:
         if lc_block:
             out["lifecycle"] = lc_block
 
-    for section in ("collect", "scoring", "tracker", "delivery"):
+    for section in ("collect", "scoring", "tracker", "delivery", "intra_bar"):
         block = raw.get(section)
         if isinstance(block, dict):
             out[section] = {k: v for k, v in block.items() if v is not None}
