@@ -255,13 +255,14 @@ vp_value_area_pct = 0.70
 # Intra-bar PRE-pump/PRE-dump detection thresholds (WS sub-15m).
 # Rolling windows for momentum z-score, trade burst, and DOM imbalance.
 # Silence is default: 95%+ ticks should produce no signal.
-momentum_window = 20
-trade_window = 20
+# confidence_threshold=0 logs all signals for calibration (Stage 1).
+momentum_window = 10
+trade_window = 10
 momentum_z_min = 2.0
-trade_burst_sigma = 3.0
 dom_imbalance_min = 0.60
-confidence_threshold = 0.50
+confidence_threshold = 0.0
 min_trades_for_burst = 5
+cooldown_seconds = 300
 
 [fusion]
 # Official fusion tunables — see docs/FUSION_PARAMS.md (threshold-free detection is impossible).

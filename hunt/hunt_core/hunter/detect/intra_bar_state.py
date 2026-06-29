@@ -27,13 +27,13 @@ _LOG = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class IntraBarConfig:
-    momentum_window: int = 20
-    trade_window: int = 20
+    momentum_window: int = 10
+    trade_window: int = 10
     momentum_z_min: float = 2.0
-    trade_burst_sigma: float = 3.0
     dom_imbalance_min: float = 0.60
-    confidence_threshold: float = 0.50
+    confidence_threshold: float = 0.0
     min_trades_for_burst: int = 5
+    cooldown_seconds: int = 300
 
 
 def _merge_intra_bar(raw: dict[str, Any]) -> IntraBarConfig:
