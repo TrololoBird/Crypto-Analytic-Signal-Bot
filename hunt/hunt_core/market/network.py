@@ -504,6 +504,89 @@ async def detect_local_proxies() -> list[str]:
     return found
 
 
+# ── Local proxy service auto-start (Layer 3-4 fallback) ─────────────────────
+
+
+async def _try_autostart_tor() -> str | None:
+    """Find Tor binary, start it if not running, return SOCKS5 URL or None."""
+    import shutil
+
+    # Already running?
+    if await _tcp_check("127.0.0.1", 9050):
+        return "socks5://127.0.0.1:9050"
+
+    tor_path = shutil.which("tor")
+    if tor_path is None:
+        common = ["/usr/bin/tor", "/usr/local/bin/tor", "/opt/homebrew/bin/tor"]
+        for p in common:
+            if os.path.isfile(p) and os.access(p, os.X_OK):
+                tor_path = p
+                break
+    if tor_path is None:
+        return None
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            tor_path, "--SocksPort", "9050", "--quiet",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        for _ in range(30):
+            await asyncio.sleep(0.5)
+            if await _tcp_check("127.0.0.1", 9050):
+                return "socks5://127.0.0.1:9050"
+        proc.terminate()
+        await proc.wait()
+        return None
+    except Exception:
+        return None
+
+
+async def _try_autostart_warp() -> str | None:
+    """If warp-cli is installed, configure proxy mode and return SOCKS5 URL."""
+    import shutil
+
+    # Already running?
+    for port in (40000, 40001):
+        if await _tcp_check("127.0.0.1", port):
+            return f"socks5://127.0.0.1:{port}"
+
+    warp_cli = shutil.which("warp-cli")
+    if warp_cli is None:
+        return None
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            warp_cli, "set-mode", "proxy",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        proc = await asyncio.create_subprocess_exec(
+            warp_cli, "connect",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        await asyncio.sleep(3)
+        if await _tcp_check("127.0.0.1", 40000):
+            return "socks5://127.0.0.1:40000"
+    except Exception:
+        pass
+    return None
+
+
+async def autostart_local_proxy() -> str | None:
+    """Try to auto-start a local proxy service (Tor → WARP). Returns URL or None."""
+    result = await _try_autostart_tor()
+    if result:
+        LOG.info("hunt proxy autostart | service=tor url=%s", mask_proxy_url(result))
+        return result
+    result = await _try_autostart_warp()
+    if result:
+        LOG.info("hunt proxy autostart | service=warp url=%s", mask_proxy_url(result))
+        return result
+    return None
+
+
 # ── Proxy source lists ──────────────────────────────────────────────────────
 
 _LOCAL_CANDIDATES = (
@@ -591,6 +674,36 @@ async def _fetch_public_candidates() -> list[str]:
             except Exception:
                 continue
             for item in _parse_host_port_lines(text, default_scheme=default_scheme):
+                if item not in seen:
+                    seen.add(item)
+                    merged.append(item)
+    return merged[:_MAX_PUBLIC_CANDIDATES]
+
+
+async def _scrape_web_proxy_lists() -> list[str]:
+    """Scrape proxy list websites (HTML-based, more curated than GitHub lists)."""
+    _WEB_SOURCES: tuple[str, ...] = (
+        "https://free-proxy-list.net/",
+        "https://www.sslproxies.org/",
+        "https://www.us-proxy.org/",
+        "https://www.proxy-list.download/api/v1/get?type=http",
+        "https://www.proxy-list.download/api/v1/get?type=https",
+        "https://www.proxy-list.download/api/v1/get?type=socks5",
+    )
+    merged: list[str] = []
+    seen: set[str] = set()
+    timeout = aiohttp.ClientTimeout(total=12.0, connect=8.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        for url in _WEB_SOURCES:
+            try:
+                async with session.get(url, headers={"User-Agent": "curl/8.0"}) as resp:
+                    if resp.status != 200:
+                        continue
+                    text = await resp.text()
+            except Exception:
+                continue
+            items = _parse_host_port_lines(text, default_scheme="http")
+            for item in items:
                 if item not in seen:
                     seen.add(item)
                     merged.append(item)
@@ -761,7 +874,7 @@ async def auto_discover_proxies(*, include_public: bool = False) -> list[str]:
 
 
 async def _auto_discover_proxies_impl(*, include_public: bool = False) -> list[str]:
-    # Phase 0: if direct access works, skip proxy discovery entirely
+    # Layer 0: direct access → skip all proxy logic
     if await probe_ccxt_direct():
         LOG.info("hunt proxy direct ok | skip_discovery")
         return []
@@ -769,89 +882,106 @@ async def _auto_discover_proxies_impl(*, include_public: bool = False) -> list[s
     working: list[str] = []
     seen: set[str] = set()
 
-    # Phase 1: cached proxies (fastest path)
-    cached = proxy_cache_get_working()
-    for url, lat in cached:
-        if url not in seen:
-            seen.add(url)
-            ok, _ = await _lightweight_ping(url)
-            if ok:
-                working.append(url)
+    async def _try_url(url: str) -> bool:
+        nonlocal working
+        if url in seen:
+            return False
+        seen.add(url)
+        if await _probe_ccxt_markets(url):
+            working.append(url)
+            return True
+        return False
 
-    # Phase 2: local proxies
-    local = await detect_local_proxies()
-    for url in local:
-        if url not in seen:
-            seen.add(url)
-            if await _probe_ccxt_markets(url):
-                working.append(url)
-        if len(working) >= _MAX_WORKING:
-            return working
+    async def _try_probe(url: str, source: str) -> bool:
+        if await _try_url(url):
+            LOG.info("hunt proxy found | source=%s url=%s", source, mask_proxy_url(url))
+            return True
+        LOG.debug("hunt proxy fail | source=%s url=%s", source, mask_proxy_url(url))
+        return False
 
-    # Phase 3: env var proxy
+    # ── Layer 1: env var proxy (fast, no I/O) ──
     env_proxy = resolve_proxy_url(config_url=None, trust_env=True)
-    if env_proxy and env_proxy not in seen:
-        seen.add(env_proxy)
-        if await _probe_ccxt_markets(env_proxy):
-            working.append(env_proxy)
+    if env_proxy and await _try_probe(env_proxy, "env"):
+        return working
     if len(working) >= _MAX_WORKING:
         return working
 
-    # Phase 4: local candidates
+    # ── Layer 2: detect already-running local proxy services ──
+    local = await detect_local_proxies()
+    for url in local:
+        if await _try_probe(url, "local"):
+            return working
+        if len(working) >= _MAX_WORKING:
+            return working
+
+    # ── Layer 3: auto-start local proxy (Tor) ──
+    tor_url = await _try_autostart_tor()
+    if tor_url and await _try_probe(tor_url, "autostart_tor"):
+        return working
+    if len(working) >= _MAX_WORKING:
+        return working
+
+    # ── Layer 4: auto-start local proxy (WARP) ──
+    warp_url = await _try_autostart_warp()
+    if warp_url and await _try_probe(warp_url, "autostart_warp"):
+        return working
+    if len(working) >= _MAX_WORKING:
+        return working
+
+    # ── Layer 5: cached proxies ──
+    for url, _ in proxy_cache_get_working():
+        if await _try_probe(url, "cache"):
+            return working
+        if len(working) >= _MAX_WORKING:
+            return working
+
+    # ── Layer 6: fixed local candidates ──
     for candidate in _LOCAL_CANDIDATES:
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        if await _probe_ccxt_markets(candidate):
-            working.append(candidate)
+        if await _try_probe(candidate, "local_candidate"):
+            return working
         if len(working) >= _MAX_WORKING:
             return working
 
     if not include_public:
         return working
 
-    # Phase 5: public proxy lists
+    # ── Layer 7: web-scraped proxy lists ──
+    web_candidates = await _scrape_web_proxy_lists()
+    if web_candidates:
+        screen_sem = asyncio.Semaphore(_SCREEN_CONCURRENCY)
+        tcp_ok = await asyncio.gather(
+            *[_tcp_screen(u, screen_sem) for u in web_candidates],
+        )
+        tcp_alive = [u for u in tcp_ok if u]
+        LOG.info("hunt proxy web screen | scraped=%d tcp_alive=%d", len(web_candidates), len(tcp_alive))
+        ccxt_sem = asyncio.Semaphore(min(40, len(tcp_alive)))
+        ccxt_ok = await asyncio.gather(
+            *[_quick_proxy_screen(u, ccxt_sem) for u in tcp_alive],
+        )
+        for url in [u for u in ccxt_ok if u][:_SCREEN_KEEP]:
+            if await _try_probe(url, "web_scrape"):
+                return working
+
+    # ── Layer 8: public proxy lists (GitHub) ──
     raw_candidates = await _fetch_public_candidates()
-    if not raw_candidates:
-        return working
-
-    # Fast TCP pre-screen: just check if host:port is reachable
-    screen_sem = asyncio.Semaphore(_SCREEN_CONCURRENCY)
-    tcp_results = await asyncio.gather(
-        *[_tcp_screen(u, screen_sem) for u in raw_candidates],
-    )
-    tcp_survivors = [u for u in tcp_results if u]
-
-    LOG.info(
-        "hunt proxy tcp screen | candidates=%d survivors=%d",
-        len(raw_candidates),
-        len(tcp_survivors),
-    )
-
-    if not tcp_survivors:
-        return working
-
-    # CCXT load_markets screen on TCP survivors
-    ccxt_sem = asyncio.Semaphore(min(40, len(tcp_survivors)))
-    screened = await asyncio.gather(
-        *[_quick_proxy_screen(u, ccxt_sem) for u in tcp_survivors],
-    )
-    survivors = [u for u in screened if u][:_SCREEN_KEEP]
-
-    LOG.info(
-        "hunt proxy ccxt screen | tcp_survivors=%d reachable=%d",
-        len(tcp_survivors),
-        len(survivors),
-    )
-
-    for url in survivors:
-        if url not in seen:
-            seen.add(url)
-            working.append(url)
-            _, lat = await _lightweight_ping(url)
-            proxy_cache_mark_ok(url, lat or 50.0)
-        if len(working) >= _MAX_WORKING:
-            break
+    if raw_candidates:
+        screen_sem = asyncio.Semaphore(_SCREEN_CONCURRENCY)
+        tcp_ok = await asyncio.gather(
+            *[_tcp_screen(u, screen_sem) for u in raw_candidates],
+        )
+        tcp_alive = [u for u in tcp_ok if u]
+        LOG.info("hunt proxy github screen | candidates=%d tcp_alive=%d", len(raw_candidates), len(tcp_alive))
+        if tcp_alive:
+            ccxt_sem = asyncio.Semaphore(min(40, len(tcp_alive)))
+            ccxt_ok = await asyncio.gather(
+                *[_quick_proxy_screen(u, ccxt_sem) for u in tcp_alive],
+            )
+            for url in [u for u in ccxt_ok if u][:_SCREEN_KEEP]:
+                if url not in seen:
+                    seen.add(url)
+                    working.append(url)
+                    _, lat = await _lightweight_ping(url)
+                    proxy_cache_mark_ok(url, lat or 50.0)
 
     return working
 
@@ -956,6 +1086,7 @@ async def discover_and_persist(
 __all__ = [
     "BanDetectionPolicy",
     "ProxyPool",
+    "autostart_local_proxy",
     "detect_local_proxies",
     "discover_and_persist",
     "filter_working_proxies",
