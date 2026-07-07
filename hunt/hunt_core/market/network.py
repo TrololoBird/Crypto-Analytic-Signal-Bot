@@ -6,8 +6,10 @@ import asyncio
 import json
 import logging
 import os
+import platform
 import random
 import re
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -575,7 +577,8 @@ async def _try_autostart_warp() -> str | None:
 
 
 async def autostart_local_proxy() -> str | None:
-    """Try to auto-start a local proxy service (Tor → WARP). Returns URL or None."""
+    """Try to auto-start a local proxy service (system Tor → WARP → Tor portable).
+    Returns SOCKS5 URL or None."""
     result = await _try_autostart_tor()
     if result:
         LOG.info("hunt proxy autostart | service=tor url=%s", mask_proxy_url(result))
@@ -584,7 +587,199 @@ async def autostart_local_proxy() -> str | None:
     if result:
         LOG.info("hunt proxy autostart | service=warp url=%s", mask_proxy_url(result))
         return result
+    result = await _download_and_run_tor()
+    if result:
+        return result
     return None
+
+
+# ── Tor portable download & run ─────────────────────────────────────────────
+
+_TOR_PORT = 19050
+_TOR_CACHE_DIR = "tor_portable"
+
+
+def _tor_platform_key() -> str | None:
+    s = platform.system().lower()
+    m = platform.machine().lower()
+    if s == "linux":
+        if "aarch64" in m or "arm64" in m:
+            return "linux-aarch64"
+        return "linux-x86_64"
+    if s == "darwin":
+        return "macos-arm64" if m == "arm64" else "macos-x86_64"
+    if s == "windows":
+        return "windows-x86_64"
+    return None
+
+
+_TOR_EXPERT_URLS: dict[str, str] = {
+    "linux-x86_64": "tor-expert-bundle-linux-x86_64-{ver}.tar.xz",
+    "linux-aarch64": "tor-expert-bundle-linux-aarch64-{ver}.tar.xz",
+    "macos-x86_64": "tor-expert-bundle-macos-x86_64-{ver}.tar.xz",
+    "macos-arm64": "tor-expert-bundle-macos-arm64-{ver}.tar.xz",
+    "windows-x86_64": "tor-expert-bundle-windows-x86_64-{ver}.zip",
+}
+
+
+async def _fetch_latest_tor_version() -> str | None:
+    """Try to scrape the latest Tor stable version from the project website."""
+    try:
+        timeout = aiohttp.ClientTimeout(total=10.0, connect=6.0)
+        async with aiohttp.ClientSession(timeout=timeout) as sess:
+            async with sess.get("https://www.torproject.org/download/tor/") as resp:
+                if resp.status != 200:
+                    return None
+                text = await resp.text()
+        candidates = re.findall(r"tor-expert-bundle-[a-z]+(?:-[a-z0-9_]+)?-(\d+\.\d+(?:\.\d+)?)", text)
+        if candidates:
+            versions = sorted(set(candidates), key=lambda x: [int(p) for p in x.split(".")])
+            LOG.debug("hunt tor latest_version | ver=%s", versions[-1])
+            return versions[-1]
+    except Exception:
+        pass
+    return None
+
+
+async def _download_tor_portable(target_dir: Path) -> str | None:
+    """Download Tor Expert Bundle, extract the tor binary, return path to it."""
+    pk = _tor_platform_key()
+    if pk is None:
+        LOG.warning("hunt tor unsupported_platform | platform=%s", sys.platform)
+        return None
+
+    ver = await _fetch_latest_tor_version()
+    if ver is None:
+        ver = "14.0"
+        LOG.debug("hunt tor using_fallback_version | ver=%s", ver)
+
+    suffix = _TOR_EXPERT_URLS.get(pk)
+    if suffix is None:
+        return None
+    filename = suffix.format(ver=ver)
+
+    base_urls = (
+        "https://www.torproject.org/dist/torbrowser",
+        "https://dist.torproject.org/torbrowser",
+    )
+    dl_url: str | None = None
+    for base in base_urls:
+        url = f"{base}/{ver}/{filename}"
+        try:
+            timeout = aiohttp.ClientTimeout(total=8.0, connect=6.0)
+            async with aiohttp.ClientSession(timeout=timeout) as sess:
+                async with sess.head(url) as resp:
+                    if resp.status == 200:
+                        dl_url = url
+                        break
+        except Exception:
+            continue
+
+    if dl_url is None:
+        LOG.warning("hunt tor download_unavailable | ver=%s platform=%s", ver, pk)
+        return None
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    dest = target_dir / filename
+    try:
+        timeout = aiohttp.ClientTimeout(total=120.0, connect=15.0)
+        async with aiohttp.ClientSession(timeout=timeout) as sess:
+            LOG.info("hunt tor downloading | url=%s size_mb=?", dl_url)
+            async with sess.get(dl_url) as resp:
+                if resp.status != 200:
+                    return None
+                total = 0
+                chunk_size = 64 * 1024
+                with open(dest, "wb") as f:
+                    async for chunk in resp.content.iter_chunked(chunk_size):
+                        f.write(chunk)
+                        total += len(chunk)
+        LOG.info("hunt tor downloaded | path=%s size_mb=%.1f", dest, total / 1_048_576)
+    except Exception as exc:
+        LOG.warning("hunt tor download_failed | error=%s", type(exc).__name__)
+        if dest.exists():
+            dest.unlink()
+        return None
+
+    import tarfile, zipfile
+
+    bin_name = "tor.exe" if pk.startswith("windows") else "tor"
+    extracted_path = target_dir / bin_name
+    try:
+        if filename.endswith(".tar.xz") or filename.endswith(".tar.gz"):
+            import tarfile
+            with tarfile.open(dest, "r:*") as tar:
+                for member in tar.getmembers():
+                    if member.name.endswith(f"/{bin_name}") or member.name == bin_name:
+                        tar.extract(member, path=target_dir, filter="data")
+                        raw = target_dir / member.name
+                        if raw != extracted_path:
+                            if extracted_path.exists():
+                                extracted_path.unlink()
+                            raw.rename(extracted_path)
+                        break
+        elif filename.endswith(".zip"):
+            import zipfile
+            with zipfile.ZipFile(dest) as z:
+                for name in z.namelist():
+                    if name.endswith(f"/{bin_name}") or name == bin_name:
+                        z.extract(name, target_dir)
+                        raw = target_dir / name
+                        if raw != extracted_path:
+                            if extracted_path.exists():
+                                extracted_path.unlink()
+                            raw.rename(extracted_path)
+                        break
+        if extracted_path.exists():
+            extracted_path.chmod(0o755)
+            LOG.info("hunt tor ready | path=%s", extracted_path)
+            return str(extracted_path)
+    except Exception as exc:
+        LOG.warning("hunt tor extract_failed | error=%s", type(exc).__name__)
+    return None
+
+
+async def _download_and_run_tor() -> str | None:
+    """Download Tor portable (if not cached), start it, return SOCKS5 URL."""
+    from hunt_core.paths import DATA
+
+    if await _tcp_check("127.0.0.1", _TOR_PORT):
+        return f"socks5://127.0.0.1:{_TOR_PORT}"
+
+    cache_dir = DATA / _TOR_CACHE_DIR
+    tor_binary = cache_dir / ("tor.exe" if sys.platform == "win32" else "tor")
+
+    if not tor_binary.exists():
+        path = await _download_tor_portable(cache_dir)
+        if path is None:
+            return None
+        tor_binary = Path(path)
+
+    if not tor_binary.exists() or not os.access(str(tor_binary), os.X_OK):
+        return None
+
+    try:
+        data_dir = cache_dir / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+        proc = await asyncio.create_subprocess_exec(
+            str(tor_binary),
+            "--SocksPort", str(_TOR_PORT),
+            "--DataDirectory", str(data_dir),
+            "--quiet",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        for _ in range(40):
+            await asyncio.sleep(0.5)
+            if await _tcp_check("127.0.0.1", _TOR_PORT):
+                LOG.info("hunt proxy autostart | service=tor_portable socks5://127.0.0.1:%d", _TOR_PORT)
+                return f"socks5://127.0.0.1:{_TOR_PORT}"
+        proc.terminate()
+        await proc.wait()
+        return None
+    except Exception:
+        return None
 
 
 # ── Proxy source lists ──────────────────────────────────────────────────────
@@ -938,6 +1133,13 @@ async def _auto_discover_proxies_impl(*, include_public: bool = False) -> list[s
     # ── Layer 4: auto-start local proxy (WARP) ──
     warp_url = await _try_autostart_warp()
     if warp_url and await _try_probe(warp_url, "autostart_warp"):
+        return working
+    if len(working) >= _MAX_WORKING:
+        return working
+
+    # ── Layer 4b: download and run Tor portable ──
+    tor_portable_url = await _download_and_run_tor()
+    if tor_portable_url and await _try_probe(tor_portable_url, "tor_portable"):
         return working
     if len(working) >= _MAX_WORKING:
         return working
