@@ -59,6 +59,7 @@ _CACHE_TTL: dict[str, int] = {
     "leverage_tiers": 3600,
     "secondary_funding": 600,
     "secondary_oi": 600,
+    "agg_trades": 10,
 }
 
 
@@ -101,6 +102,7 @@ class HuntCcxtClient:
         self._top_position_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._global_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._taker_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
+        self._agg_trade_cache: dict[tuple[str, int], tuple[float, AggTradeSnapshot]] = {}
         self._funding_rate_cache: dict[str, tuple[float, float]] = {}
         self._funding_history_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._funding_info_all_cache: tuple[float, dict[str, dict[str, float | int]]] | None = None
@@ -574,8 +576,7 @@ class HuntCcxtClient:
                 weight=40,
             )
         except Exception:
-            # REST failed — serve stale cache if available rather than returning
-            # an empty list (which causes ticker_field_missing for all symbols).
+            LOG.warning("fetch_ticker_24h_failed | serving stale cache")
             if self._ticker_24h_cache is not None:
                 return self._ticker_24h_cache[1]
             raise
@@ -783,13 +784,20 @@ class HuntCcxtClient:
             return cached[1]  # type: ignore[index]
         try:
             await self.load_markets()
-            payload = await self._direct_binance_fetch(
+            if not self._ccxt_has(self._ex, "fetchOpenInterestHistory"):
+                raise ccxt.NotSupported(f"fetchOpenInterestHistory unavailable on {self._ex.id}")
+            # fetchOpenInterestHistory -> Binance GET /futures/data/openInterestHist,
+            # a /futures/data/* endpoint under the SEPARATE 1000-req/5min IP limit --
+            # NOT the general 2400-weight/1min budget. Was routed through
+            # _direct_binance_fetch's acquire_binance_weight(weight=1), which has zero
+            # awareness of that narrow window, so this call was effectively unpaced
+            # against the limit that actually governs it (root cause of an observed
+            # 418 IP ban despite the general weight budget never being near capacity).
+            payload = await self._fapi_call(
                 lambda: self._ex.fetch_open_interest_history(
                     self._ccxt_sym(sym), timeframe=period, limit=2
                 ),
                 context=f"oi_change:{sym}:{period}",
-                weight=1,
-                method="fetchOpenInterestHistory",
             )
             series = [float(item["openInterestAmount"]) for item in payload
                       if item.get("openInterestAmount") is not None]
@@ -912,13 +920,15 @@ class HuntCcxtClient:
             return cached[1]  # type: ignore[index]
         try:
             await self.load_markets()
-            payload = await self._direct_binance_fetch(
+            if not self._ccxt_has(self._ex, "fetchOpenInterestHistory"):
+                raise ccxt.NotSupported(f"fetchOpenInterestHistory unavailable on {self._ex.id}")
+            # /futures/data/openInterestHist -- see fetch_open_interest_change for why
+            # this must go through the narrow fapi_data window, not general weight.
+            payload = await self._fapi_call(
                 lambda: self._ex.fetch_open_interest_history(
                     self._ccxt_sym(sym), timeframe=period, limit=int(limit)
                 ),
                 context=f"oi_series:{sym}:{period}",
-                weight=1,
-                method="fetchOpenInterestHistory",
             )
             series = [float(item["openInterestAmount"]) for item in payload
                       if item.get("openInterestAmount") is not None]
@@ -954,13 +964,15 @@ class HuntCcxtClient:
             return cached[1]  # type: ignore[index]
         try:
             await self.load_markets()
-            payload = await self._direct_binance_fetch(
+            if not self._ccxt_has(self._ex, "fetchLongShortRatioHistory"):
+                raise ccxt.NotSupported(f"fetchLongShortRatioHistory unavailable on {self._ex.id}")
+            # /futures/data/globalLongShortAccountRatio -- see fetch_open_interest_change
+            # for why this must go through the narrow fapi_data window, not general weight.
+            payload = await self._fapi_call(
                 lambda: self._ex.fetch_long_short_ratio_history(
                     self._ccxt_sym(sym), timeframe=period, limit=int(limit)
                 ),
                 context=f"gls_series:{sym}:{period}",
-                weight=1,
-                method="fetchLongShortRatioHistory",
             )
             series = [float(item["longShortRatio"]) for item in payload
                       if item.get("longShortRatio") is not None]
@@ -1209,6 +1221,11 @@ class HuntCcxtClient:
 
     async def fetch_agg_trade_snapshot(self, symbol: str, *, limit: int = 100) -> AggTradeSnapshot:
         sym = self._bin_sym(symbol)
+        cache_key = (sym, int(limit))
+        cached = self._agg_trade_cache.get(cache_key)
+        if self._cache_fresh(cached, _CACHE_TTL["agg_trades"]):
+            return cached[1]  # type: ignore[index]
+        now = time.monotonic()
         await self.load_markets()
         trades = await self._direct_binance_fetch(
             lambda: self._ex.fetch_trades(
@@ -1228,13 +1245,15 @@ class HuntCcxtClient:
                 sell_qty += qty
         total = buy_qty + sell_qty
         delta_ratio = (buy_qty - sell_qty) / total if total > 0 else None
-        return AggTradeSnapshot(
+        snapshot = AggTradeSnapshot(
             symbol=sym,
             trade_count=len(trades),
             buy_qty=buy_qty,
             sell_qty=sell_qty,
             delta_ratio=delta_ratio,
         )
+        self._agg_trade_cache[cache_key] = (now, snapshot)
+        return snapshot
 
     def get_cached_open_interest(self, symbol: str, max_age_s: float = 1800.0) -> float | None:
         cached = self._open_interest_cache.get(self._bin_sym(symbol))
@@ -1425,7 +1444,13 @@ class HuntCcxtClient:
         stats = {
             "latest_basis_pct": basis_pct,
             "premium_slope_5m": premium_slope,
-            "premium_zscore_5m": prev[1].get("premium_zscore_5m") if prev else None,
+            # Not recomputed here (WS path only has mark/index price, not the
+            # basis history needed for a z-score) -- must NOT carry the prior
+            # REST-computed value forward, because doing so under a refreshed
+            # cache timestamp made a stale z-score look fresh under the 30min
+            # TTL check in get_cached_basis_stats(). Fresh values are supplied
+            # by the periodic REST refresh (fetch_basis / fetch_basis_from_ohlcv).
+            "premium_zscore_5m": None,
             "mark_index_spread_bps": basis_pct * 100.0,
         }
         self._basis_cache[cache_key] = (now, basis_pct)

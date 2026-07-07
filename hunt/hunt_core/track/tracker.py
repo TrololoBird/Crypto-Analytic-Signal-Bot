@@ -170,6 +170,30 @@ def signal_confirm_announced(
     return bool(active.get("telegram_sent")) or bool(active.get("entry_message_id"))
 
 
+def has_active_signal(
+    state: dict[str, Any],
+    *,
+    symbol: str,
+    direction: str | None = None,
+) -> bool:
+    """True if an unresolved (not TP/SL-closed) signal is open for the symbol.
+
+    Dedup guard for the emission path: a setup whose prior signal is still open
+    must NOT re-fire — the opportunity has not resolved, so a second identical
+    (or opposite) signal is either a duplicate or a self-contradiction, not a new
+    trade. ``direction=None`` checks both sides (blocks long while short is open).
+    """
+    signals = state.get("signals") if isinstance(state, dict) else None
+    if not isinstance(signals, dict):
+        return False
+    dirs = (direction.lower(),) if direction else ("long", "short")
+    for d in dirs:
+        active = signals.get(_key(symbol, d))
+        if isinstance(active, dict) and _is_signal_active(active):
+            return True
+    return False
+
+
 def _has_structural_trigger(setup: dict[str, Any]) -> bool:
     """True when confirm_hard includes a closed-bar structural break."""
     for raw in setup.get("confirm_hard") or []:
@@ -204,6 +228,7 @@ def _delivered_levels_snapshot(
         "sl": setup.get("stop_loss"),
         "tp1": setup.get("tp1"),
         "tp2": setup.get("tp2"),
+        "tp3": setup.get("tp3"),
         "rr": setup.get("risk_reward"),
     }
 
@@ -438,7 +463,6 @@ def register_signal_open(
     dir_l = direction.lower()
     score_key = "dump_score" if dir_l == "short" else "long_score"
     fuel_key = "dump_fuel" if dir_l == "short" else "long_fuel"
-    from hunt_core.scanner.detect.setup_fields import setup_conviction_pct, setup_p_win
 
     # One direction per symbol: a fresh confirmed opposite setup supersedes
     # the stale one (simultaneous SYM:long + SYM:short is a contradiction).
@@ -477,6 +501,7 @@ def register_signal_open(
         "structural_trigger": _has_structural_trigger(setup),
         "tp1": setup.get("tp1"),
         "tp2": setup.get("tp2"),
+        "tp3": setup.get("tp3"),
         "risk_reward": setup.get("risk_reward"),
         "level_mode": setup.get("level_mode"),
         "entry_zone": list(ez) if isinstance(ez, (list, tuple)) else [price, price],
@@ -491,8 +516,6 @@ def register_signal_open(
         "lifecycle_bias": (lifecycle or {}).get("recommended_bias"),
         "score": setup.get(score_key),
         "fuel": setup.get(fuel_key),
-        "p_win": setup_p_win(setup),
-        "conviction": setup_conviction_pct(setup, direction=dir_l),
         "delivery_tier": setup.get("delivery_tier") or "triggered",
         "support_break_level": setup.get("support_break_level"),
         "invalidation_above": setup.get("invalidation_above"),
@@ -704,6 +727,8 @@ def close_signal(
             if outcome_archive_key(rec) == leg_key:
                 return
     history.append(record)
+    if len(history) > 1000:
+        del history[:len(history) - 1000]
     if archive:
         try:
             from hunt_core.track.outcomes import append_outcome_record, kpi_bucket
@@ -948,7 +973,7 @@ def latch_setup_if_active(
     if not (active.get("telegram_sent") or active.get("entry_message_id")):
         return setup
     out = dict(setup)
-    out["confirmed"] = True
+    out["impulse_confirmed"] = True
     out["confirm_latched"] = True
     out["phase"] = "long_confirmed" if direction == "long" else "dump_confirmed"
     if active.get("level_expired"):

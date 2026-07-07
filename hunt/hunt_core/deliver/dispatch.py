@@ -189,12 +189,12 @@ def _record_delivery_funnel(
             "symbol": symbol,
             "score": setup.get(score_key),
             "magnitude": setup.get("magnitude"),
-            "p_win": setup.get("p_win"),
+            "confidence_score": setup.get("confidence_score"),
             "phase": setup.get("phase") or setup.get("lifecycle_phase"),
             "delivery_tier": tier,
             "risk_reward": setup.get("risk_reward"),
             "gate_code": gate.code or "ok",
-            "confirmed": bool(setup.get("confirmed")),
+            "impulse_confirmed": bool(setup.get("impulse_confirmed")),
             "lane": setup.get("delivery_lane"),
         },
     )
@@ -224,7 +224,7 @@ def evaluate_delivery(
     """Deliver a confirmed fusion setup: authorities → gate pipeline → geometry contract."""
     from hunt_core.deliver.arbiter import evaluate_confirm_authorities
     from hunt_core.deliver.lab import route_delivery_lane
-    from hunt_core.scanner.gate.delivery import run_gate_pipeline
+    from hunt_core.scanner.gate import run_gate_pipeline
     from hunt_core.levels.levels import reanchor_setup_levels
     from hunt_core.market import apply_live_price_to_row
 
@@ -247,7 +247,7 @@ def evaluate_delivery(
     blockers = [gate_result.code] if gate_result.code else []
 
     if not isinstance(row.get("manipulation_fusion"), dict):
-        from hunt_core.analysis.manipulation_fusion import stamp_fusion_on_row
+        from hunt_core.toolkit.manipulation_fusion import stamp_fusion_on_row
 
         stamp_fusion_on_row(row)
 
@@ -327,7 +327,7 @@ def evaluate_forming_gate(
     """Only confirmed fusion setups deliver; there is no forming/armed lane."""
     if not isinstance(setup, dict):
         return GateResult(ok=False, code="invalid_setup", message="invalid_setup")
-    if setup.get("confirmed") or setup.get("intrabar_confirmed"):
+    if setup.get("impulse_confirmed") or setup.get("intrabar_confirmed"):
         return GateResult(ok=True)
     return GateResult(ok=False, code="not_confirmed", message="not_confirmed")
 
@@ -393,10 +393,10 @@ def format_delivery_telegram(
     sym = str(row.get("symbol") or "")
     if isinstance(tf, dict) and tf and price > 0 and sym:
         try:
-            from hunt_core.analysis.confluence_grid import build_confluence_grid, format_grid_telegram
+            from hunt_core.deliver.confluence_grid import build_confluence_grid, format_grid_telegram
 
             grid = build_confluence_grid(row)
-            footer = format_grid_telegram(grid)
+            footer = format_grid_telegram(grid, price=price)
             if footer:
                 body = f"{body}\n\n{footer}"
         except Exception as exc:
@@ -636,26 +636,38 @@ def format_delivery_card(
     armed = str(delivery_tier).lower() == "armed"
     fuel_key = "dump_fuel" if direction == "short" else "long_fuel"
     score_key = "dump_score" if direction == "short" else "long_score"
-    p_win = setup.get("delivery_p_win") or setup.get("p_win")
-    if p_win is not None:
+    confidence_score = setup.get("delivery_confidence_score") or setup.get("confidence_score")
+    if confidence_score is not None:
         try:
-            conviction = min(100, max(0, int(round(float(p_win) * 100))))
+            conviction = min(100, max(0, int(round(float(confidence_score) * 100))))
         except (TypeError, ValueError):
             conviction = 0
     else:
         fuel = float(setup.get(fuel_key) or setup.get(score_key) or 0)
         conviction = min(100, max(0, int(round(fuel))))
-    fuel_for_rating = float(p_win or 0) * 100 if p_win is not None else float(
+    fuel_for_rating = float(confidence_score or 0) * 100 if confidence_score is not None else float(
         setup.get(fuel_key) or setup.get(score_key) or 0
     )
     rating = signal_strength_rating(fuel_for_rating, lc_phase)
 
-    if armed:
-        verdict = "⏳ <b>ARMED · limit setup</b> — жди retest зоны"
+    signal_type = setup.get("signal_type") or "none"
+    if signal_type == "pre_phase":
+        phase_badge = "🚀 PRE-PUMP" if direction == "long" else "💀 PRE-DUMP"
+        order_type = "LIMIT (зонa entry)"
+    elif signal_type == "mid_phase":
+        phase_badge = "⚡ MID" if direction == "long" else "⚡ MID"
+        order_type = "MARKET (подтверждение)"
+    elif armed:
+        phase_badge = "⏳ ARMED"
+        order_type = "LIMIT (retest зоны)"
     elif setup.get("intrabar_confirmed"):
-        verdict = f"{badge} <b>IGNITION · {dir_label}</b> — intrabar confirm"
+        phase_badge = "🔥 IGNITION"
+        order_type = "MARKET (intrabar)"
     else:
-        verdict = f"{badge} <b>CONFIRM · {dir_label}</b>"
+        phase_badge = f"{badge} CONFIRM"
+        order_type = "LIMIT (зонa entry)"
+
+    verdict = f"{phase_badge} · {dir_label} · {order_type}"
 
     ez = setup.get("entry_zone") or [price, price]
     try:
@@ -703,14 +715,23 @@ def format_delivery_card(
 
     squeeze = _squeeze_note(row, direction=direction)
 
+    # Top factor drivers
+    factors_dict = setup.get("factors") or {}
+    top_factors = []
+    for fn, fs in sorted(factors_dict.items(), key=lambda x: abs(float(x[1])), reverse=True)[:5]:
+        top_factors.append(f"{fn}({fs:+.2f})")
+    factors_line = "  ".join(top_factors) if top_factors else ""
+
     lines = [
         f"{badge} <b>{sym}</b> · {dir_label} · conviction <code>{conviction}</code> · {rating}",
         "━━━━━━━━━━━━━━━━━━━━━━",
         verdict,
         f"Фаза: {html.escape(phase_human(lc_phase))}",
-        "",
-        "📋 <b>Сделка</b> (худший fill)",
     ]
+    if factors_line:
+        lines.append(f"Факторы: <code>{factors_line}</code>")
+    lines.append("")
+    lines.append("📋 <b>Сделка</b> (худший fill)")
     if degenerate_zone:
         lines.append("⚠️ <i>Entry zone не задана (degenerate)</i>")
     lines.extend([
@@ -771,15 +792,18 @@ def format_delivery_card(
             lines.append("")
             lines.append(of_block)
 
-    from hunt_core.contract import compute_setup_risk_reward
+    from hunt_core.contract import compute_setup_risk_reward, compute_setup_risk_reward_net
 
     rr = compute_setup_risk_reward(setup, direction=direction)
     if rr is not None:
         rr_f = float(rr)
-        rr_line = f"R:R (худший вход) <code>{rr_f:.2f}</code>"
+        rr_line = f"R:R gross (худший вход) <code>{rr_f:.2f}</code>"
         if rr_f < 1.5:
             rr_line += " ⚠️"
         lines.append(rr_line)
+        rr_net = compute_setup_risk_reward_net(setup, direction=direction)
+        if rr_net is not None:
+            lines.append(f"R:R net (комиссия+слиппедж, без funding) <code>{rr_net:.2f}</code>")
 
     hist = format_history_telegram(row.get("pump_history"))
     if hist:
@@ -793,7 +817,7 @@ def format_delivery_card(
     )
 
     if row.get("maps") and not row.get("maps_forecast"):
-        from hunt_core.maps.forecast import build_maps_forecast
+        from hunt_core.toolkit.forecast import build_maps_forecast
 
         fc = build_maps_forecast(row)
         if fc:
@@ -817,6 +841,10 @@ def format_delivery_card(
     else:
         lines.append("")
         lines.append("<i>Signal-only · closed 5m/1m confirm · открывай сделку вручную</i>")
+
+    from hunt_core.deliver._labels import EXPERIMENTAL_DISCLAIMER_RU  # noqa: PLC0415
+
+    lines.append(EXPERIMENTAL_DISCLAIMER_RU)
 
     sym_cmd = str(row.get("symbol") or "").upper()
     if sym_cmd:

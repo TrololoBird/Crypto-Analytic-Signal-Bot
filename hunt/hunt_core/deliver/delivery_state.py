@@ -10,6 +10,9 @@ from hunt_core.paths import DELIVERY_STATE, LAB_OUTCOME_LEDGER
 STATE_PATH = DELIVERY_STATE
 LAB_LEDGER_PATH = LAB_OUTCOME_LEDGER
 DEFAULT_COOLDOWN_MINUTES = 45
+# Cross-path per-symbol cooldown (direction-agnostic) — prevents conflicting signals
+# from intra-bar, deep analyst, and scanner paths firing within minutes of each other.
+CROSS_PATH_COOLDOWN_MINUTES = 15
 
 
 def _cross_key(symbol: str, direction: str) -> str:

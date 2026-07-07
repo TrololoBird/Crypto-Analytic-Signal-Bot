@@ -215,8 +215,11 @@ SL_MAX_PCT = 8.0
 MIN_RR = 1.5
 # Memecoin 1m wick floor — sl_tp2_cap cannot squeeze SL below this (SPACE/EPIC post-mortem).
 SHORT_MIN_SL_DIST_PCT = 1.0
+# Long min SL distance (was missing — caused 0.25% SL on SPY, died in 1s).
+LONG_MIN_SL_DIST_PCT = 1.0
 _ANCHOR_SYMBOLS = frozenset({"BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT"})
 _ANCHOR_SHORT_MIN_SL_DIST_PCT = 0.40
+_ANCHOR_LONG_MIN_SL_DIST_PCT = 0.40
 _BOUNCE_MIN_RR = 0.5
 _PUMP_START_MIN_RR = 0.85
 # Fade-at-top shorts: industry bench ≥1:2 before delivery (exhaustion ARMED).
@@ -328,7 +331,10 @@ def _effective_short_leg_low(
         leg = ih - impulse_low
         # ESPORTS: full leg → TP1 0.193, low 0.195 missed by ~1.2% — use 98% leg depth.
         return max(impulse_low, ih - leg * 0.98)
-    return local_support if local_support > 0 else price * 0.85
+    # No real leg-low candidate (no impulse_low, no local_support) — return 0
+    # rather than a fabricated price*0.85 floor. Callers must veto on this
+    # instead of computing fib retracement off a synthetic level.
+    return local_support if local_support > 0 else 0.0
 
 
 def _short_min_sl_dist_pct(symbol: str) -> float:
@@ -336,6 +342,13 @@ def _short_min_sl_dist_pct(symbol: str) -> float:
     if sym in _ANCHOR_SYMBOLS:
         return _ANCHOR_SHORT_MIN_SL_DIST_PCT
     return SHORT_MIN_SL_DIST_PCT
+
+
+def _long_min_sl_dist_pct(symbol: str) -> float:
+    sym = str(symbol or "").upper().replace("-", "").replace("/", "")
+    if sym in _ANCHOR_SYMBOLS:
+        return _ANCHOR_LONG_MIN_SL_DIST_PCT
+    return LONG_MIN_SL_DIST_PCT
 
 
 def _apply_fast_flush_tp1_buffer(
@@ -382,6 +395,12 @@ TP1_MIN_ATR = 0.8
 TP1_MAX_ATR = 2.5
 TP2_MIN_ATR = 1.5
 TP2_MAX_ATR = 5.5
+# TP1/TP2 ATR windows overlap in [1.5, 2.5]. Excluding candidates only by
+# price (not distance) let a liquidity level sitting fractionally past TP1
+# win the TP2 slot, producing a near-duplicate TP2 (observed live: TP1/TP2
+# within 0.1-0.6% of each other on most delivered signals). Require TP2 to
+# clear TP1 by a minimum ATR gap before it is eligible.
+MIN_TP2_GAP_ATR = 1.0
 # Absolute distance caps as % of price. Post-pump ATR is stale-inflated, so the
 # ATR-only TP2 cap (5.5xATR) can place TP2 absurdly far (e.g. SKYAI TP2 -56.5%).
 # These bound TP distance regardless of ATR; deep dump-continuation uses its own
@@ -389,7 +408,7 @@ TP2_MAX_ATR = 5.5
 TP2_MAX_PCT = 20.0
 # Cap TP1 distance — liquidity ladder can place long TP1 absurdly far (EVAA +45%).
 TP1_MAX_PCT = 15.0
-TP1_MIN_PCT = 0.4
+TP1_MIN_PCT = 5.0
 _POC_HEADWIND_PCT = 0.5
 _POC_SUPPORT_SOURCES = frozenset({"poc", "val", "poc_15m"})
 
@@ -510,8 +529,6 @@ def build_liquidity_context(
     """Collect liquidity magnets from regime, cross micro, book, pivots."""
     reg = regime or {}
     cx = cross_micro or {}
-    vp1h = cx.get("volume_profile_1h") if isinstance(cx.get("volume_profile_1h"), dict) else {}
-    vp15 = cx.get("volume_profile_15m") if isinstance(cx.get("volume_profile_15m"), dict) else {}
     walls = book_walls or cx.get("book_walls") or {}
     if not isinstance(walls, dict):
         walls = {}
@@ -522,11 +539,17 @@ def build_liquidity_context(
     def _pivot(key: str, alt: str = "") -> float | None:
         return _f_pos(snap.get(key)) or _f_pos(snap.get(alt))
 
+    # Level B: single shared POC/VAH/VAL resolver so Scanner and Deep can never
+    # place the "same" volume-profile level at different prices.
+    from hunt_core.levels.structural_facts import resolve_volume_profile_from_parts
+
+    vp = resolve_volume_profile_from_parts(cross_micro=cx, regime=reg, market=None)
+
     return LiquidityContext(
-        poc=_f_pos(vp1h.get("poc")) or _f_pos(reg.get("poc_1h")),
-        vah=_f_pos(vp1h.get("vah")) or _f_pos(reg.get("vah_1h")),
-        val=_f_pos(vp1h.get("val")) or _f_pos(reg.get("val_1h")),
-        poc_15m=_f_pos(vp15.get("poc")) or _f_pos(reg.get("poc_15m")),
+        poc=vp.poc,
+        vah=vp.vah,
+        val=vp.val,
+        poc_15m=vp.poc_15m,
         bid_walls=_wall_prices(walls, "bid", mark=price),
         ask_walls=_wall_prices(walls, "ask", mark=price),
         pivot_pp=_pivot("pivot_point", "pp"),
@@ -835,13 +858,13 @@ def apply_liquidity_tp_ladder_short(
         atr=atr,
         tp_slot=2,
         source_tf=src_tf,
-        exclude_above=tp1_c.price,
+        exclude_above=tp1_c.price - atr * MIN_TP2_GAP_ATR,
         poc_direction=poc_dir,
     )
     tp1 = tp1_c.price
     tp2 = tp2_c.price if tp2_c and tp2_c.price >= fib_tp2 else fib_tp2
-    if tp2 >= tp1:
-        tp2 = round(min(tp1 - atr * 0.5, fib_tp2), 6)
+    if tp2 >= tp1 - atr * MIN_TP2_GAP_ATR:
+        tp2 = round(min(tp1 - atr * MIN_TP2_GAP_ATR, fib_tp2), 6)
 
     mode = f"{mode_prefix}liquidity" if tp1_c.source != "fib" else f"{mode_prefix}fib"
     tp2_tf = tp2_c.target_tf if tp2_c and tp2_c.price >= fib_tp2 else src_tf
@@ -891,12 +914,12 @@ def apply_liquidity_tp_ladder_long(
         atr=atr,
         tp_slot=2,
         source_tf=src_tf,
-        exclude_below=tp1_c.price,
+        exclude_below=tp1_c.price + atr * MIN_TP2_GAP_ATR,
     )
     tp1 = tp1_c.price
     tp2 = tp2_c.price if tp2_c and tp2_c.price > tp1 else fib_tp2
-    if tp2 <= tp1:
-        tp2 = round(max(tp1 + atr * 0.8, fib_tp2), 6)
+    if tp2 <= tp1 + atr * MIN_TP2_GAP_ATR:
+        tp2 = round(max(tp1 + atr * MIN_TP2_GAP_ATR, fib_tp2), 6)
 
     mode = "liquidity" if tp1_c.source != "fib" else "fib"
     tp2_tf = tp2_c.target_tf if tp2_c and tp2_c.price > tp1 else src_tf
@@ -954,6 +977,8 @@ def structural_short_levels(
     else:
         ih = max(impulse_high, price, local_resistance)
     il_tp = _effective_short_leg_low(ih, price, impulse_low, local_support)
+    if il_tp <= 0:
+        veto.append("no_structural_leg_short")
     fib_tp = fib_retracement_levels(ih, il_tp) if ih > il_tp else fib
 
     # Entry anchors to current price; zone width hard-capped — a wide zone means
@@ -1027,8 +1052,8 @@ def structural_short_levels(
     tp1_min_depth = round(worst * (1.0 - TP1_MIN_PCT / 100.0), 6)
     if tp1 > tp1_min_depth:
         tp1 = tp1_min_depth
-    if tp2 >= tp1:  # keep ordering tp2 < tp1 < worst after clamps
-        tp2 = round(min(tp2, tp1 * 0.999), 6)
+    if tp2 >= tp1 - atr * MIN_TP2_GAP_ATR:  # keep tp2 a real second target, not a near-duplicate of tp1
+        tp2 = round(min(tp2, tp1 - atr * MIN_TP2_GAP_ATR), 6)
     if tp1 >= worst:
         veto.append("tp1_at_or_above_entry")
     elif tp1 >= entry_lo:
@@ -1075,11 +1100,16 @@ def structural_short_levels(
         stop = round(min(max(stop, floor_stop), effective_cap), 6)
 
     rr = _contract_rr(entry_lo, entry_hi, stop, tp1, direction="short")
+    # Capture-the-move R:R: gate on the deepest available target (tp2), not tp1
+    # alone. TP1 is a scale-out partial; a strong ride-the-dump setup must not be
+    # vetoed just because its near partial is <1R (project doctrine: 5-40% moves).
+    rr_deep = _contract_rr(entry_lo, entry_hi, stop, tp2, direction="short")
+    rr_gate = max(rr, rr_deep)
     target_rr = _phase_min_rr_short(lifecycle_phase)
     if tp_mode == "continuation_pct":
         target_rr = min(target_rr, 0.85)
     risk = max(0.0, stop - worst)
-    if rr < target_rr and risk > 0 and tp_mode != "continuation_pct":
+    if rr_gate < target_rr and risk > 0 and tp_mode != "continuation_pct":
         veto.append("rr_below_min")
 
     sl_dist_pct = round((stop - worst) / worst * 100.0, 2)
@@ -1102,7 +1132,11 @@ def structural_short_levels(
         dist = price - entry_hi
         entry_type = "pullback_limit" if dist < atr * 0.5 else "limit"
     else:
-        entry_type = "market"
+        # Short zone sits ABOVE current price — a market short would fill at the
+        # low current price, not the zone, invalidating SL/TP geometry. Wait for
+        # a rally up into the zone → limit, never market.
+        dist = entry_lo - price
+        entry_type = "pullback_limit" if atr > 0 and dist < atr * 0.5 else "limit"
 
     risk_d = max(stop - worst, 1e-9)
     rr_tp1 = round((worst - tp1) / risk_d, 2) if risk_d > 0 else 0.0
@@ -1174,6 +1208,8 @@ def structural_long_levels(
     sl_tp2_cap = adapt.sl_tp2_cap_ratio
     ih = max(impulse_high, local_resistance, price)
     il = min(impulse_low, local_support, price) if impulse_low > 0 else local_support
+    if il <= 0:
+        veto.append("no_structural_leg_long")
 
     support_zone = _f(fib.get("ret_382"), il)
     entry_lo = round(max(min(price * 0.998, support_zone * 1.002), price - atr * ENTRY_ZONE_BOUNCE_ATR), 6)
@@ -1199,12 +1235,14 @@ def structural_long_levels(
     if tp2 <= tp1:
         leg = ih - il
         tp2 = round(ih + leg * 0.272, 6) if leg > 0 else round(ih * 1.03, 6)
-    # Squeeze at/above impulse high — TPs must be above price (STG/EPIC lesson).
+    # Squeeze at/above impulse high (STG/EPIC lesson): no known structure sits
+    # above price here, so there is no real target to project. Veto instead of
+    # inventing one from ATR distance (zero-degradation policy) — the fib-based
+    # tp1/tp2 above are left as-is; they are discarded since viable=False.
     if price >= ih * 0.97:
-        tp1 = round(max(tp1, price + atr * 1.8), 6)
-        tp2 = round(max(tp2, price + atr * 3.5, ih * 1.02), 6)
+        veto.append("no_structure_above_price_squeeze")
     elif tp1 <= entry_hi:
-        tp1 = round(entry_hi + atr * 1.5, 6)
+        veto.append("tp1_inside_entry_zone_no_structure")
 
     fib_tp1, fib_tp2 = tp1, tp2
     tp1, tp1_label, tp2, tp2_label, tp_mode, tp1_target_tf, tp2_target_tf = apply_liquidity_tp_ladder_long(
@@ -1241,8 +1279,8 @@ def structural_long_levels(
         tp1 = tp1_max_px
         if tp1_label and "cap" not in tp1_label:
             tp1_label = f"{tp1_label} ·cap" if tp1_label else "cap"
-    if tp2 <= tp1:  # keep ordering worst < tp1 < tp2 after clamps
-        tp2 = round(max(tp2, tp1 * 1.001), 6)
+    if tp2 <= tp1 + atr * MIN_TP2_GAP_ATR:  # keep tp2 a real second target, not a near-duplicate of tp1
+        tp2 = round(max(tp2, tp1 + atr * MIN_TP2_GAP_ATR), 6)
     if tp1 <= worst:
         veto.append("tp1_at_or_below_entry")
 
@@ -1251,6 +1289,9 @@ def structural_long_levels(
     stop = min(pivot * 0.985, entry_lo - atr * 1.1)
     stop = max(stop, entry_lo - atr * sl_max_atr)
     floor_stop = entry_lo - sl_atr * SL_MIN_ATR
+    base_min_sl = _long_min_sl_dist_pct(symbol)
+    abs_floor_stop = worst * (1.0 - base_min_sl / 100.0)
+    floor_stop = min(floor_stop, abs_floor_stop)
     tp2_dist = tp2 - worst
     cap_stop = worst - tp2_dist * sl_tp2_cap if tp2_dist > 0 else floor_stop
     if floor_stop < cap_stop:
@@ -1260,11 +1301,16 @@ def structural_long_levels(
         veto.append("sl_non_positive")
 
     rr = _contract_rr(entry_lo, entry_hi, stop, tp1, direction="long")
+    # Capture-the-move R:R (symmetric to short path): gate on the deepest
+    # available target (tp2), not tp1 alone, so a fast partial TP1 doesn't reject
+    # an otherwise strong ride-the-pump setup.
+    rr_deep = _contract_rr(entry_lo, entry_hi, stop, tp2, direction="long")
+    rr_gate = max(rr, rr_deep)
     sl_dist_pct = round((worst - stop) / worst * 100.0, 2)
     min_rr = _phase_min_rr_long(lifecycle_phase)
     if sl_dist_pct > sl_max_pct and abs(stop - local_support) > atr * 1.5:
         veto.append("sl_nominal_too_wide")
-    if rr < min_rr:
+    if rr_gate < min_rr:
         veto.append("rr_below_min")
 
     tp3 = _f(fib.get("ext_1618"))
@@ -1280,7 +1326,11 @@ def structural_long_levels(
         dist = entry_lo - price
         entry_type = "pullback_limit" if dist < atr * 0.5 else "limit"
     else:
-        entry_type = "market"
+        # Long zone sits BELOW current price — a market buy would chase far above
+        # the planned zone, fabricating the displayed R:R. Wait for a pullback
+        # down into the zone → limit, never market.
+        dist = price - entry_hi
+        entry_type = "pullback_limit" if atr > 0 and dist < atr * 0.5 else "limit"
 
     risk = max(worst - stop, 1e-9)
     rr_tp1 = round((tp1 - worst) / risk, 2) if risk > 0 else 0.0
@@ -1354,18 +1404,39 @@ def continuation_short_targets(
             "level_mode": "leg_fib",
         }
 
-    il = impulse_low if impulse_low > 0 else price * 0.85
+    # No fabricated leg-low: without a real impulse_low, this function has no
+    # structural anchor to project a fresh mid-dump target from. Keep the
+    # already-computed fib-leg targets (still real structure, just "stale")
+    # instead of substituting price*0.85 (zero-degradation policy).
+    if impulse_low <= 0:
+        return {
+            "tp1": leg_tp1,
+            "tp2": leg_tp2,
+            "tp1_label": "38.2% fib",
+            "tp2_label": "50% fib",
+            "level_mode": "leg_fib",
+        }
+    il = impulse_low
     # Deep dump_active continuation: % targets prevent ATR-too-small problem on micro-caps.
     # For these tokens ATR15m << 1% → ATR×N targets 0.5-1% below entry = near-zero RR.
-    # Fixed 3.5%/7% gives realistic targets consistent with dump momentum (proven 15%+ fall).
+    # Fixed 3.5%/7% gives realistic targets consistent with dump momentum (proven 15%+ fall,
+    # calibrated from live post-mortems, not a synthetic-data fallback).
     if phase == "dump_active" and fall >= 15.0:
         tp1 = round(price * 0.965, 6)
         tp2 = round(price * 0.93, 6)
         if il > 0 and il < price * 0.97:
             tp2 = round(min(price * 0.93, il * 1.01), 6)
     else:
-        tp1 = round(price - atr * 1.5, 6)
-        tp2 = round(max(il, price - atr * 3.0), 6)
+        # No calibrated momentum heuristic applies here and no fresh structural
+        # anchor exists beyond the original leg — keep the fib-leg targets
+        # rather than project a pure ATR distance with no structural grounding.
+        return {
+            "tp1": leg_tp1,
+            "tp2": leg_tp2,
+            "tp1_label": "38.2% fib",
+            "tp2_label": "50% fib",
+            "level_mode": "leg_fib",
+        }
     if tp1 >= price:
         tp1 = round(price - atr, 6)
     if tp2 >= tp1:
@@ -1504,6 +1575,14 @@ def reanchor_setup_levels(
             "stop_loss": levels["stop_loss"],
             "tp1": levels["tp1"],
             "tp2": levels["tp2"],
+            # tp3 (61.8% fib extension — the deepest structural target) was
+            # computed by structural_short_levels/structural_long_levels but
+            # silently dropped here, so every downstream consumer (intra_bar
+            # PRE-dump/PRE-pump delivery, tracker) only ever saw TP1/TP2 —
+            # both shallow retracement levels. For a signal whose whole thesis
+            # is "capture a large dump/pump move" (project doctrine: 5-40%),
+            # discarding the one target actually sized for that is a real gap.
+            "tp3": levels.get("tp3"),
             "tp1_label": levels.get("tp1_label", ""),
             "tp2_label": levels.get("tp2_label", ""),
             "risk_reward": levels.get("risk_reward"),

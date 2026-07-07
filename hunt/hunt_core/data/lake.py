@@ -22,7 +22,7 @@ _cooldown_flush: tuple[dict[str, str], Path] | None = None
 
 def buffer_tick_rows(rows: list[dict[str, Any]]) -> None:
     from hunt_core.diagnostics.tick_diagnostics import append_tick_diagnostics
-    from hunt_core.runtime.tick_jsonl import serialize_tick_row
+    from hunt_core.data.tick_jsonl import serialize_tick_row
 
     for row in rows:
         append_tick_diagnostics(row)
@@ -50,12 +50,60 @@ def buffer_cooldown_state(state: dict[str, str], path: Path) -> None:
     _cooldown_flush = (state, path)
 
 
+def _merge_tracker_state(on_disk: dict[str, Any], buffered: dict[str, Any]) -> dict[str, Any]:
+    """Merge a buffered tracker-state mutation into whatever is on disk right now.
+
+    Three independent call sites (``_cycle_tick.py``'s per-symbol tick loop,
+    ``_cycle_loop.py``'s intra-bar delivery loop, ``_cycle_reconcile.py``) each
+    call ``load_tracker_state()`` for their OWN in-memory copy, mutate it, and
+    later buffer+flush that copy — with no lock and no re-read before writing.
+    A blind overwrite here meant whichever of the three flushed last won
+    entirely, silently erasing every other loop's concurrent changes since its
+    load. Confirmed in practice: 8 intra-bar signals registered in-memory
+    (verified against the buffer right after registration), only 1 survived to
+    disk — the per-tick loop's own stale copy, flushed afterward, overwrote the
+    other 7. Per-key merge on the known mutable collections shrinks the lost-
+    update window to "two writers touch the exact same key in the same beat"
+    instead of "any two flushes anywhere stomp each other".
+    """
+    if not isinstance(on_disk, dict) or not on_disk:
+        return buffered
+    if not isinstance(buffered, dict):
+        return on_disk
+    merged: dict[str, Any] = dict(on_disk)
+    for key in ("signals", "followup_sent"):
+        merged[key] = {**(on_disk.get(key) or {}), **(buffered.get(key) or {})}
+    disk_hist = on_disk.get("closed_history") or []
+    buf_hist = buffered.get("closed_history") or []
+    if buf_hist or disk_hist:
+        seen: set[str] = set()
+        combined: list[Any] = []
+        for rec in list(disk_hist) + list(buf_hist):
+            ident = json.dumps(rec, sort_keys=True, default=str) if isinstance(rec, dict) else str(rec)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            combined.append(rec)
+        merged["closed_history"] = combined
+    for key, val in buffered.items():
+        if key in ("signals", "followup_sent", "closed_history"):
+            continue
+        merged[key] = val
+    return merged
+
+
 def flush_tracker_state() -> bool:
     global _tracker_flush
     if _tracker_flush is None:
         return False
     state, path = _tracker_flush
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file():
+        try:
+            on_disk = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            on_disk = {}
+        state = _merge_tracker_state(on_disk, state)
     path.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
     _tracker_flush = None
     return True
@@ -158,7 +206,7 @@ def get_feature_lake_writer() -> FeatureLakeWriter:
 
 
 def serialize_tick_row(row: dict[str, Any]) -> str:
-    from hunt_core.runtime.tick_jsonl import serialize_tick_row as _serialize
+    from hunt_core.data.tick_jsonl import serialize_tick_row as _serialize
 
     return _serialize(row)
 

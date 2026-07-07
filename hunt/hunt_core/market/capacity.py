@@ -19,14 +19,27 @@ SnapshotTier = Literal["full", "fast"]
 BINANCE_WEIGHT_LIMIT_1M = 2400
 BINANCE_WEIGHT_PACE_TARGET = int(os.getenv("HUNT_BINANCE_WEIGHT_PACE", "1500") or 1500)
 BINANCE_FAPI_DATA_LIMIT_5M = 1000
-BINANCE_FAPI_DATA_PACE_5M = int(os.getenv("HUNT_BINANCE_FAPI_PACE", "900") or 900)
+# Was 900 (10% headroom) -- an actual 418 ban was observed on this exact
+# endpoint category (fapiDataGetBasis) with this margin. This limiter only
+# paces THIS process's own requests; it has no visibility into other
+# processes sharing the same egress IP, so real-world headroom needs to be
+# wider than the in-process math alone would suggest. 700 = 30% headroom.
+BINANCE_FAPI_DATA_PACE_5M = int(os.getenv("HUNT_BINANCE_FAPI_PACE", "700") or 700)
 
 # Conservative per-symbol estimates (first tick / cold cache).
 EST_BATCH_OVERHEAD_WEIGHT = 65  # ticker_24h + premium + funding batch
 EST_WEIGHT_FULL_SYMBOL = 100  # klines + weighted REST pack
 EST_WEIGHT_FAST_SYMBOL = 35
-EST_FAPI_CALLS_FULL = 12
-EST_FAPI_CALLS_FAST = 6
+# Recounted directly from rest_pack_specs() (hunt_core/data/collect.py) after
+# fixing 3 methods that were bypassing the fapi_data pacer (oi_chg, oi_series,
+# gls_series routed through the general weight budget instead): full tier
+# actually issues 14 /futures/data/* calls/symbol/tick (oi_chg_1h, ls_5m,
+# ls_1h, top_ls_1h/5m, global_ls_1h/5m, taker_15m/1h/5m, basis_5m, oi_series,
+# gls_series), fast tier issues 10. Previous 12/6 undercounted even before
+# that fix -- telemetry-only (see estimated_fapi_calls), doesn't gate
+# behavior, but was silently misleading monitoring.
+EST_FAPI_CALLS_FULL = 14
+EST_FAPI_CALLS_FAST = 10
 
 # --- Secondary venues (public REST, conservative defaults) --------------------
 SECONDARY_REQ_LIMITS: dict[str, tuple[int, float]] = {

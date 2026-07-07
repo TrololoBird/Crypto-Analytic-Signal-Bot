@@ -241,7 +241,21 @@ def evaluate_levels(
     announced = bool(active.get("telegram_sent")) or bool(active.get("entry_message_id"))
 
     tr = tracker_thresholds(symbol)
-    orphan_ttl_h = float(tr.get("orphan_ttl_hours", 24.0))
+    base_orphan_ttl_h = float(tr.get("orphan_ttl_hours", 24.0))
+    orphan_ttl_h = 12.0 if direction == "short" else max(base_orphan_ttl_h * 2.0, 48.0)
+    # Extend TTL if price has moved >50% toward TP1
+    tp1 = float(active.get("tp1") or active.get("take_profit_1") or 0)
+    entry = float(active.get("entry_price") or active.get("entry_reference") or 0)
+    price = float(price or 0)
+    if tp1 > 0 and entry > 0 and price > 0:
+        if direction == "long" and price > entry and tp1 > entry:
+            progress = (price - entry) / (tp1 - entry)
+            if progress > 0.5:
+                orphan_ttl_h = max(orphan_ttl_h, orphan_ttl_h + 12.0)
+        elif direction == "short" and price < entry and tp1 < entry:
+            progress = (entry - price) / (entry - tp1)
+            if progress > 0.5:
+                orphan_ttl_h = max(orphan_ttl_h, orphan_ttl_h + 12.0)
     last_rec_raw = active.get("last_reconcile_ts") or active.get("opened_at")
     try:
         last_rec = datetime.fromisoformat(str(last_rec_raw))

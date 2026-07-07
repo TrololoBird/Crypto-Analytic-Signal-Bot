@@ -46,14 +46,7 @@ def compute_setup_id(
 
 def _thesis_from_row(row: dict[str, Any], summary: dict[str, Any]) -> tuple[str, str, float]:
     direction = str(summary.get("action") or "wait").lower()
-    v2 = row.get("verdict_v2")
-    catalyst = getattr(v2, "catalyst", None) if v2 else None
-    path = getattr(v2, "expected_path", None) if v2 else None
     thesis_kind = ""
-    if catalyst is not None:
-        thesis_kind = str(getattr(catalyst, "primary", "") or getattr(catalyst, "label", ""))
-    if not thesis_kind and path is not None:
-        thesis_kind = str(getattr(path, "type", "") or "")
     anchor = summary.get("catalyst_level")
     if anchor is None:
         lo = float(summary.get("entry_lo") or 0)
@@ -71,7 +64,7 @@ def _plan_from_summary(summary: dict[str, Any]) -> dict[str, Any]:
     return {
         "entry_lo": summary.get("entry_lo"),
         "entry_hi": summary.get("entry_hi"),
-        "stop_loss": summary.get("stop_loss"),
+        "stop_loss": summary.get("stop_loss") or summary.get("stop"),
         "tp1": summary.get("tp1"),
         "tp2": summary.get("tp2"),
         "tp3": summary.get("tp3"),
@@ -153,7 +146,7 @@ def process_lifecycle_tick(
     commit: bool = True,
 ) -> LifecycleTransition:
     """Evaluate one tick — emit only on real setup state advance; WAIT → silence."""
-    summary = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else {}
+    summary = row.get("prizrak_summary") if isinstance(row.get("prizrak_summary"), dict) else {}
     action = str(summary.get("action") or "wait").lower()
     sym = str(row.get("symbol") or "").upper()
     as_of = str(row.get("as_of") or row.get("ts") or datetime.now(UTC).isoformat())
@@ -196,6 +189,9 @@ def process_lifecycle_tick(
         return LifecycleTransition(event="none", suppress_reason="setup_cooldown")
 
     plan = _plan_from_summary(summary)
+    from datetime import UTC, datetime, timedelta
+    ttl = 120  # default: 2-minute opportunity window
+    expires_at = (datetime.now(UTC) + timedelta(seconds=ttl)).isoformat()
     signal = Signal(
         symbol=sym,
         module=module,
@@ -207,48 +203,27 @@ def process_lifecycle_tick(
         created_at=as_of,
         activated_at=as_of if event == "activated" else "",
         as_of=as_of,
+        ttl_seconds=ttl,
+        expires_at=expires_at,
         provenance={"path": summary.get("path"), "strength": summary.get("strength")},
     )
+    # Attach scenario metadata when available
+    scenario = row.get("scenario")
+    if scenario is not None:
+        sc_setup_id = getattr(scenario, "setup_id", "")
+        sc_lifecycle = getattr(scenario, "lifecycle", "")
+        if sc_setup_id:
+            signal.provenance["scenario_setup_id"] = sc_setup_id
+        if sc_lifecycle:
+            signal.provenance["scenario_lifecycle"] = sc_lifecycle
+        _LOG.info(
+            "signal %s/%s: scenario attached (setup_id=%s, lifecycle=%s)",
+            sym, setup_id, sc_setup_id, sc_lifecycle,
+        )
+
     if commit:
         store.record_emit(signal, event=event)
         store.save()
     return LifecycleTransition(event=event, signal=signal)
 
 
-def build_scanner_signal(
-    *,
-    symbol: str,
-    direction: str,
-    setup_id: str,
-    thesis: str,
-    plan: dict[str, Any],
-    as_of: str,
-    store: SignalLifecycleStore | None = None,
-) -> LifecycleTransition:
-    """Scanner Module 2 — emit when energy+direction resolve (pre-move)."""
-    store = store or SignalLifecycleStore.load()
-    sid = setup_id or compute_setup_id(
-        thesis_kind=thesis,
-        anchor_level=float(plan.get("trigger_level") or plan.get("entry_lo") or 0),
-        direction=direction,
-    )
-    prev = store.last_state(sid)
-    if prev in {"signal", "activated", "tracking"}:
-        return LifecycleTransition(event="none", suppress_reason="already_emitted")
-    if not store._cooldown_ok(sid):
-        return LifecycleTransition(event="none", suppress_reason="setup_cooldown")
-    signal = Signal(
-        symbol=str(symbol).upper(),
-        module=2,
-        direction=direction.lower(),
-        setup_id=sid,
-        thesis=thesis,
-        plan=plan,
-        state="signal",
-        created_at=as_of,
-        as_of=as_of,
-        provenance={"module": "scanner"},
-    )
-    store.record_emit(signal, event="signal")
-    store.save()
-    return LifecycleTransition(event="signal", signal=signal)

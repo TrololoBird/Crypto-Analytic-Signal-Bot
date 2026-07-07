@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from hunt_core.analysis.adx_thresholds import ADX_RANGE_MAX, ADX_TREND_MIN
+from hunt_core.toolkit.adx_thresholds import ADX_RANGE_MAX, ADX_TREND_MIN
 
 ADX_TREND = ADX_TREND_MIN
 ADX_RANGE = ADX_RANGE_MAX

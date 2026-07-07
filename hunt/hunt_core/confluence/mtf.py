@@ -11,6 +11,11 @@ class TFSignal:
     rsi14: float
     adx14: float
     label: str
+    # Level-A zero-degradation: distinguish a real ranging read ("neutral", EMAs
+    # present but interwoven) from "we could not determine trend because the
+    # timeframe lacks enough history to warm the EMA stack" (insufficient_history).
+    # Both used to surface identically as "нейтр", hiding data degradation.
+    data_quality: Literal["ok", "insufficient_history"] = "ok"
 
 
 @dataclass
@@ -46,7 +51,7 @@ def _trend_from_snap(snap: dict[str, Any]) -> Literal["bull", "bear", "neutral"]
     # The cached value may be "mixed" (neutral) even when close < ema20 < ema50
     # (post-pump dump: ema200 still below due to pre-pump history, so the full
     # 4-EMA bear stack fails despite a clear 3-EMA bearish alignment).
-    from hunt_core.analysis.trend import trend_from_snapshot
+    from hunt_core.toolkit.trend import trend_from_snapshot
 
     recomputed = trend_from_snapshot(snap, require_adx=False)
     if recomputed in ("bull", "bear"):
@@ -60,10 +65,28 @@ def _trend_from_snap(snap: dict[str, Any]) -> Literal["bull", "bear", "neutral"]
     return "neutral"
 
 
+def _tf_data_quality(snap: dict[str, Any]) -> Literal["ok", "insufficient_history"]:
+    """A TF whose snapshot lacks a warmed EMA stack cannot yield a real trend.
+
+    The HTF frames fall back to ``tf_snapshot_lite`` (status="lite", no ema20/ema50)
+    when there are too few bars to warm EMA200 in ``_prepare_frame``. Treat any
+    snapshot without at least ema20+ema50 as insufficient history, not "ranging".
+    """
+    if str(snap.get("status") or "") == "lite":
+        return "insufficient_history"
+    e20 = snap.get("ema20")
+    e50 = snap.get("ema50")
+    if e20 is None or e50 is None or float(e20 or 0) <= 0 or float(e50 or 0) <= 0:
+        return "insufficient_history"
+    return "ok"
+
+
 def _tf_label(snap: dict[str, Any], trend: str) -> str:
     adx = float(snap.get("adx14") or 0)
     sup = snap.get("supertrend_dir")
     rsi = float(snap.get("rsi14") or 50)
+    if _tf_data_quality(snap) == "insufficient_history":
+        return "недостаточно истории"
     if trend == "bull":
         if adx >= 25:
             return "Сильный бычий тренд"
@@ -114,12 +137,14 @@ def build_mtf_confluence(
         trend = _trend_from_snap(snap)
         rsi = float(snap.get("rsi14") or 50)
         adx = float(snap.get("adx14") or 0)
+        dq = _tf_data_quality(snap)
         tf_signals[key] = TFSignal(
             tf=key,
             trend=trend,
             rsi14=rsi,
             adx14=adx,
             label=_tf_label(snap, trend),
+            data_quality=dq,
         )
 
     # ATR from best available TF for level placement
@@ -162,7 +187,7 @@ def build_mtf_confluence(
         score = round(htf_ratio * 0.60 + ltf_edge * 0.40, 3)
 
         # Structural geometry from targets — no ATR fallback
-        from hunt_core.analysis.targets import (
+        from hunt_core.toolkit.targets import (
             collect_downward_targets as _cdt,
             collect_upward_targets as _cut,
         )
@@ -233,6 +258,58 @@ def build_mtf_confluence(
     )
 
 
+# Level C — MTF-first direction. Higher timeframes carry more directional weight.
+# 1W/1D define the regime; 4H is a swing modifier. LTF (1h/15m) is timing only and
+# deliberately excluded from the bias.
+_HTF_BIAS_WEIGHTS = {"1w": 0.45, "1d": 0.35, "4h": 0.20}
+_HTF_BIAS_THRESHOLD = 0.30  # net weighted alignment needed to call a directional bias
+
+
+def htf_bias_from_signals(
+    tf_signals: dict[str, TFSignal],
+) -> dict[str, Any]:
+    """Aggregate 1W/1D/4H into a single directional bias (Level C).
+
+    Only timeframes with ``data_quality == "ok"`` and a determinate bull/bear trend
+    vote. Returns the net weighted score, the resolved bias, and how much HTF weight
+    was actually available (so callers can tell "conflicting" from "no HTF data").
+    """
+    net = 0.0
+    weight_available = 0.0
+    votes: dict[str, str] = {}
+    for tf_key, w in _HTF_BIAS_WEIGHTS.items():
+        sig = tf_signals.get(tf_key)
+        if sig is None or sig.data_quality != "ok":
+            continue
+        weight_available += w
+        if sig.trend == "bull":
+            net += w
+            votes[tf_key] = "bull"
+        elif sig.trend == "bear":
+            net -= w
+            votes[tf_key] = "bear"
+        else:
+            votes[tf_key] = "neutral"
+    # Normalise against the weight that was actually available so a single valid
+    # HTF (e.g. only 4H warmed on a young listing) can still express a bias, but a
+    # symbol with no warmed HTF resolves to "unknown", never a false "neutral".
+    norm = (net / weight_available) if weight_available > 0 else 0.0
+    if weight_available <= 0.0:
+        bias = "unknown"
+    elif norm >= _HTF_BIAS_THRESHOLD:
+        bias = "long"
+    elif norm <= -_HTF_BIAS_THRESHOLD:
+        bias = "short"
+    else:
+        bias = "neutral"
+    return {
+        "bias": bias,
+        "score": round(norm, 3),
+        "weight_available": round(weight_available, 3),
+        "votes": votes,
+    }
+
+
 def _scenario_to_dict(sc: ScenarioScore) -> dict[str, Any]:
     return {
         "direction": sc.direction,
@@ -260,6 +337,11 @@ def mtf_confluence_to_dict(mtf: MTFConfluence) -> dict[str, Any]:
         "short_htf_count": int(mtf.short_scenario.htf_count),
         "long_htf_total": int(mtf.long_scenario.htf_total),
         "short_htf_total": int(mtf.short_scenario.htf_total),
+        "tf_trends": {
+            k: {"trend": s.trend, "data_quality": s.data_quality, "label": s.label}
+            for k, s in mtf.tf_signals.items()
+        },
+        "htf_bias": htf_bias_from_signals(mtf.tf_signals),
     }
 
 

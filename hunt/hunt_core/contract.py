@@ -10,10 +10,8 @@ individual detectors do not drift into point entries or partial target gaps.
 """
 from __future__ import annotations
 
-import ast
 import logging
 import math
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from hunt_core.errors import DEFENSIVE_EXC
@@ -374,7 +372,7 @@ class DumpBlock(TypedDict, total=False):
     fuel: float | None
     triggers: list[str]
     confirm_hard: list[str]
-    confirmed: bool
+    impulse_confirmed: bool
     entry_zone: list[float] | None
     support_break_level: float | None
     stop_loss: float | None
@@ -386,7 +384,7 @@ class DumpBlock(TypedDict, total=False):
 
 
 class LongBlock(TypedDict, total=False):
-    confirmed: bool
+    impulse_confirmed: bool
     score: float | None
     fuel: float | None
     entry_zone: list[float] | None
@@ -802,9 +800,9 @@ def compute_setup_ev(
     """Phase 3B EV: P from catalog evidence + worst_entry_edge geometry."""
     norm_dir = normalize_direction(direction)
     if norm_dir is None:
-        return {"ev": None, "p_win": None, "reason": "invalid_direction"}
+        return {"ev": None, "confidence_score": None, "reason": "invalid_direction"}
     setup = dict(levels_dict)
-    p = _normalized_float(evidence.get("p_win") or evidence.get("probability"))
+    p = _normalized_float(evidence.get("confidence_score") or evidence.get("probability"))
     if p is None:
         strength = _normalized_float(evidence.get("strength"))
         if strength is not None:
@@ -813,7 +811,7 @@ def compute_setup_ev(
     sl = _normalized_float(setup.get("stop_loss"))
     tp1 = _normalized_float(setup.get("tp1"))
     if p is None or entry is None or sl is None or tp1 is None:
-        return {"ev": None, "p_win": p, "reason": "incomplete_levels"}
+        return {"ev": None, "confidence_score": p, "reason": "incomplete_levels"}
     if norm_dir == "short":
         risk = sl - entry
         reward = entry - tp1
@@ -821,7 +819,7 @@ def compute_setup_ev(
         risk = entry - sl
         reward = tp1 - entry
     if risk <= RISK_REWARD_EPSILON or reward <= 0:
-        return {"ev": None, "p_win": round(p, 3), "reason": "degenerate_geometry"}
+        return {"ev": None, "confidence_score": round(p, 3), "reason": "degenerate_geometry"}
     struct = structure if isinstance(structure, dict) else {}
     if struct.get("at_level"):
         p = min(0.85, p + 0.05)
@@ -834,7 +832,7 @@ def compute_setup_ev(
     ev = round(p * reward - (1.0 - p) * risk, 6)
     return {
         "ev": ev,
-        "p_win": round(p, 3),
+        "confidence_score": round(p, 3),
         "reward": reward,
         "risk": risk,
         "rr": round(reward / risk, 2),
@@ -856,11 +854,11 @@ def compute_rule_based_ev(
     sl = _normalized_float(setup.get("stop_loss"))
     tp1 = _normalized_float(setup.get("tp1"))
     if rr is None or entry is None or sl is None or tp1 is None:
-        return {"ev": None, "p_win": None, "reason": "incomplete_levels"}
+        return {"ev": None, "confidence_score": None, "reason": "incomplete_levels"}
     risk = abs(sl - entry) if direction == "short" else abs(entry - sl)
     reward = abs(entry - tp1) if direction == "short" else abs(tp1 - entry)
     if risk <= 0 or reward <= 0:
-        return {"ev": None, "p_win": None, "reason": "degenerate_geometry"}
+        return {"ev": None, "confidence_score": None, "reason": "degenerate_geometry"}
     struct = structure if isinstance(structure, dict) else {}
     p = 0.45
     if struct.get("at_level"):
@@ -875,7 +873,7 @@ def compute_rule_based_ev(
         p += min(0.15, ign / 100.0 * 0.15)
     p = min(0.85, max(0.15, p))
     ev = round(p * reward - (1.0 - p) * risk, 6)
-    return {"ev": ev, "p_win": round(p, 3), "reward": reward, "risk": risk, "rr": rr}
+    return {"ev": ev, "confidence_score": round(p, 3), "reward": reward, "risk": risk, "rr": rr}
 
 
 def compute_setup_risk_reward(setup: Mapping[str, Any], *, direction: str) -> float | None:
@@ -895,6 +893,53 @@ def compute_setup_risk_reward(setup: Mapping[str, Any], *, direction: str) -> fl
     if risk <= RISK_REWARD_EPSILON or reward <= 0:
         return stored
     return round(reward / risk, 2)
+
+
+# Binance USDS-M taker fee (public schedule, base tier, no BNB discount assumed)
+# and a conservative slippage allowance -- both CALIBRATABLE, not measured per-symbol.
+# Funding carry is NOT modeled here (holding duration is unknown at signal time,
+# not just unmodeled by oversight) -- net R:R below is a cost floor, not a full estimate.
+NET_RR_TAKER_FEE_PCT = 0.0005
+NET_RR_SLIPPAGE_PCT = 0.001
+NET_RR_DEFAULT_ENTRIES = 1  # averaging entries multiply the cost, see n_entries
+
+
+def compute_setup_risk_reward_net(
+    setup: Mapping[str, Any],
+    *,
+    direction: str,
+    n_entries: int = NET_RR_DEFAULT_ENTRIES,
+    taker_fee_pct: float = NET_RR_TAKER_FEE_PCT,
+    slippage_pct: float = NET_RR_SLIPPAGE_PCT,
+) -> float | None:
+    """R:R net of taker fees + slippage (round-trip, scaled by averaging entries).
+
+    Additive alongside compute_setup_risk_reward (gross) -- does not replace it
+    and is not wired into any existing gate threshold. Funding carry is excluded
+    (see module note); this is a cost FLOOR, real net R:R for a held position is
+    likely lower still.
+    """
+    entry = worst_entry_edge(setup, direction=direction)
+    sl = _normalized_float(setup.get("stop_loss"))
+    tp1 = _normalized_float(setup.get("tp1"))
+    if entry is None or sl is None or tp1 is None or entry <= 0:
+        return None
+    if direction == "short":
+        risk = sl - entry
+        reward = entry - tp1
+    else:
+        risk = entry - sl
+        reward = tp1 - entry
+    if risk <= RISK_REWARD_EPSILON or reward <= 0:
+        return None
+    n = max(1, int(n_entries))
+    # round-trip cost per entry-exit pair, in price units, scaled by number of fills
+    cost_per_unit = entry * (taker_fee_pct * 2 + slippage_pct) * n
+    net_reward = reward - cost_per_unit
+    net_risk = risk + cost_per_unit
+    if net_reward <= 0 or net_risk <= 0:
+        return 0.0
+    return round(net_reward / net_risk, 2)
 
 
 def _normalized_bool(value: Any, *, default: bool | None = None) -> bool | None:
@@ -1118,49 +1163,3 @@ def build_setup_delivery_contract(
         opened_at=str(row.get("ts") or ""),
     )
 
-
-# --- Runtime Contract ---
-
-RUNTIME_CALL_PATH_FILES: tuple[Path, ...] = (
-    Path("main.py"),
-    Path("bot/cli.py"),
-    Path("bot/__init__.py"),
-    Path("bot/runtime/bot.py"),
-)
-
-RUNTIME_PUBLIC_IMPORT_CONTRACT: tuple[str, ...] = (
-    "SignalBot",
-    "BotSettings",
-    "load_settings",
-)
-
-SCAFFOLD_IMPORT_BLOCKLIST: tuple[str, ...] = (
-    "scaffold",
-    "experimental",
-    "prototype",
-)
-
-
-def imported_module_names(file_path: Path) -> set[str]:
-    tree = ast.parse(file_path.read_text(encoding="utf-8"))
-    imported_names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported_names.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported_names.add(node.module)
-    return imported_names
-
-
-def assert_runtime_import_contract(imported_names: set[str]) -> None:
-    for blocked in SCAFFOLD_IMPORT_BLOCKLIST:
-        if any(blocked in name for name in imported_names):
-            msg = f"runtime import contract violation: blocked import fragment {blocked!r}"
-            raise ValueError(msg)
-
-
-def assert_runtime_call_path_is_clean() -> None:
-    imported_names: set[str] = set()
-    for file_path in RUNTIME_CALL_PATH_FILES:
-        imported_names.update(imported_module_names(file_path))
-    assert_runtime_import_contract(imported_names)

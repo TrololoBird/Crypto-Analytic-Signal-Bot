@@ -549,8 +549,6 @@ def build_liquidation_map(
         forward_blend=cfg.forward_blend_ratio,
         leverage_weights=cfg.leverage_weights,
     )
-    if heatmap is None:
-        return None
 
     forward_zones: list[dict[str, Any]] = []
     effective_lev = lev_tiers or _DEFAULT_LEVERAGE_TIERS
@@ -588,54 +586,94 @@ def build_liquidation_map(
                 }
             )
 
-    realized_zones = [
-        {
-            "price_center": z.price_center,
-            "intensity": z.intensity,
-            "side_bias": z.side_bias,
-            "event_count": z.event_count,
-            "source": "realized",
-        }
-        for z in heatmap.density_zones
-        if z.event_count > 0
-    ]
+    # Build forward-only heatmap when no realized events but forward zones exist
+    if heatmap is None and forward_zones:
+        span = current_price * cfg.price_range_pct / 100.0
+        price_min = current_price - span
+        bucket_size = (2.0 * span) / max(1, cfg.n_buckets)
+        fwd_cluster_map = entry_anchored_forward_zones(
+            oi_bars or [],
+            current_price=current_price,
+            n_buckets=cfg.n_buckets,
+            price_range_pct=cfg.price_range_pct,
+            leverage_tiers=effective_lev,
+            maintenance_margin_rates=mm_rates,
+            leverage_weights=cfg.leverage_weights,
+            global_ls_ratio=global_ls_ratio,
+        )
+        heatmap = _build_heatmap_from_map(
+            fwd_cluster_map,
+            current_price=current_price,
+            price_min=price_min,
+            bucket_size=bucket_size,
+            n_buckets=cfg.n_buckets,
+            forward_confidence=_resolved_forward_confidence(symbol, event_count=0, forward_blend=cfg.forward_blend_ratio),
+            realized_events=0,
+            zone_source="forward_only",
+        )
+    if heatmap is None and not forward_zones:
+        return None
 
+    realized_zones: list[dict[str, Any]] = []
     long_pct_oi = None
     short_pct_oi = None
-    if oi_usd and oi_usd > 0:
-        long_pct_oi = round(heatmap.total_long_at_risk / oi_usd * 100.0, 3)
-        short_pct_oi = round(heatmap.total_short_at_risk / oi_usd * 100.0, 3)
-
     magnet_long = None
     magnet_short = None
-    if heatmap.nearest_long_liquidation and current_price > 0:
-        magnet_long = round(
-            (current_price - heatmap.nearest_long_liquidation) / current_price * 100.0, 3
-        )
-    if heatmap.nearest_short_liquidation and current_price > 0:
-        magnet_short = round(
-            (heatmap.nearest_short_liquidation - current_price) / current_price * 100.0, 3
-        )
+    if heatmap is not None:
+        realized_zones = [
+            {
+                "price_center": z.price_center,
+                "intensity": z.intensity,
+                "side_bias": z.side_bias,
+                "event_count": z.event_count,
+                "source": "realized",
+            }
+            for z in heatmap.density_zones
+            if z.event_count > 0
+        ]
+
+        if oi_usd and oi_usd > 0:
+            long_pct_oi = round(heatmap.total_long_at_risk / oi_usd * 100.0, 3)
+            short_pct_oi = round(heatmap.total_short_at_risk / oi_usd * 100.0, 3)
+
+        # Magnet pull is a price-anchored claim ("liquidations sit here") — only
+        # publish it from realized events. Leverage-tier-estimated bands are
+        # directional hints, not price claims, and must not leak into
+        # score-shifting fields that consumers read without checking
+        # liq_synthetic_only (analyst/engines/core.py, patterns.py, deliver/_sections.py).
+        if heatmap.realized_event_count > 0:
+            if heatmap.nearest_long_liquidation and current_price > 0:
+                magnet_long = round(
+                    (current_price - heatmap.nearest_long_liquidation) / current_price * 100.0, 3
+                )
+            if heatmap.nearest_short_liquidation and current_price > 0:
+                magnet_short = round(
+                    (heatmap.nearest_short_liquidation - current_price) / current_price * 100.0, 3
+                )
 
     hm = LiquidationHeatmap(
-        clusters=heatmap.clusters,
-        density_zones=heatmap.density_zones,
-        nearest_long_liquidation=heatmap.nearest_long_liquidation,
-        nearest_short_liquidation=heatmap.nearest_short_liquidation,
-        cascade_risk_direction=heatmap.cascade_risk_direction,
-        total_long_at_risk=heatmap.total_long_at_risk,
-        total_short_at_risk=heatmap.total_short_at_risk,
-        forward_confidence=heatmap.forward_confidence,
+        clusters=heatmap.clusters if heatmap else (),
+        density_zones=heatmap.density_zones if heatmap else (),
+        nearest_long_liquidation=heatmap.nearest_long_liquidation if heatmap else None,
+        nearest_short_liquidation=heatmap.nearest_short_liquidation if heatmap else None,
+        cascade_risk_direction=heatmap.cascade_risk_direction if heatmap else None,
+        total_long_at_risk=heatmap.total_long_at_risk if heatmap else 0.0,
+        total_short_at_risk=heatmap.total_short_at_risk if heatmap else 0.0,
+        forward_confidence=heatmap.forward_confidence if heatmap else 0.0,
         venues=tuple(venues),
-        realized_event_count=heatmap.realized_event_count,
+        realized_event_count=heatmap.realized_event_count if heatmap else 0,
     )
-    # Squeeze fuel: prefer the more informative top-trader L/S ratio, fall back to global.
     ls_for_fuel = top_ls_ratio if top_ls_ratio is not None else global_ls_ratio
+    # Same rationale as magnet_pull above: at-risk notional from a synthetic-only
+    # heatmap is a leverage-tier estimate, not observed exposure — exclude it from
+    # the fuel score rather than let it silently drive setup/gate scoring.
+    fuel_long_risk = heatmap.total_long_at_risk if heatmap and heatmap.realized_event_count > 0 else 0.0
+    fuel_short_risk = heatmap.total_short_at_risk if heatmap and heatmap.realized_event_count > 0 else 0.0
     long_fuel, short_fuel = squeeze_fuel_scores(
         funding_rate=funding_rate,
         ls_ratio=ls_for_fuel,
-        total_long_at_risk=heatmap.total_long_at_risk,
-        total_short_at_risk=heatmap.total_short_at_risk,
+        total_long_at_risk=fuel_long_risk,
+        total_short_at_risk=fuel_short_risk,
     )
     return LiquidationMap(
         heatmap=hm,

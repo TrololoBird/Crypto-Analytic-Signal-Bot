@@ -15,6 +15,24 @@ _FEATURE_STACK: tuple[str, ...] = (
 )
 
 
+def _patch_aiohttp_resolver() -> None:
+    """Replace pycares AsyncResolver with ThreadedResolver to prevent DNS hangs.
+
+    pycares has a known deadlock on macOS + Python 3.14 where
+    _run_safe_shutdown_loop blocks forever, freezing all aiohttp
+    connections (Telegram, CCXT REST/WS).  ThreadedResolver avoids
+    pycares entirely by using the OS thread pool.
+    """
+    try:
+        import aiohttp.resolver
+
+        if aiohttp.resolver.DefaultResolver is aiohttp.resolver.AsyncResolver:
+            aiohttp.resolver.DefaultResolver = aiohttp.resolver.ThreadedResolver
+            aiohttp.resolver.AsyncResolver = aiohttp.resolver.ThreadedResolver
+    except (ImportError, AttributeError):
+        pass
+
+
 def bootstrap() -> Path:
     hunt_root = Path(__file__).resolve().parents[1]
     repo = hunt_root.parent
@@ -22,6 +40,7 @@ def bootstrap() -> Path:
         if p not in sys.path:
             sys.path.insert(0, p)
     os.environ.setdefault("POLARS_STREAMING", "1")
+    _patch_aiohttp_resolver()
     return repo
 
 

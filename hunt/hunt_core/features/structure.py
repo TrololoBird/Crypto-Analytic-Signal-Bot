@@ -275,6 +275,26 @@ def _detect_bos_choch(
 
 def _key_levels(tf: dict[str, Any], market: dict[str, Any] | None) -> dict[str, float | None]:
     poc = vah = val = None
+    resistance: float | None = None
+    support: float | None = None
+    last_swing_high: float | None = None
+    last_swing_low: float | None = None
+
+    # Swing structure: prioritize HTF (4h → 1h → 15m)
+    for key in ("4h_closed", "4h", "1h_closed", "1h", "15m_closed", "15m"):
+        block = _tf_block(tf, key)
+        if not block:
+            continue
+        sh = _f(block.get("pp_short_zone_hi")) or _f(block.get("donchian_high20"))
+        if sh > 0 and last_swing_high is None:
+            last_swing_high = sh
+        sl = _f(block.get("pp_long_zone_lo")) or _f(block.get("donchian_low20"))
+        if sl > 0 and last_swing_low is None:
+            last_swing_low = sl
+
+    resistance = last_swing_high
+    support = last_swing_low
+
     for key in ("1h_closed", "1h", "15m_closed", "15m"):
         block = _tf_block(tf, key)
         if not block:
@@ -309,6 +329,10 @@ def _key_levels(tf: dict[str, Any], market: dict[str, Any] | None) -> dict[str, 
         "poc": round(poc, 6) if poc else None,
         "vah": round(vah, 6) if vah else None,
         "val": round(val, 6) if val else None,
+        "resistance": round(resistance, 6) if resistance else None,
+        "support": round(support, 6) if support else None,
+        "last_swing_high": round(last_swing_high, 6) if last_swing_high else None,
+        "last_swing_low": round(last_swing_low, 6) if last_swing_low else None,
     }
 
 

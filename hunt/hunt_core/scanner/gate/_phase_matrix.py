@@ -8,6 +8,11 @@ from hunt_core.params.store import phase_matrix_thresholds
 from hunt_core.paths import SIGNAL_STATE
 from hunt_core.track.outcomes import entry_lifecycle_phase, outcome_kind
 
+# Module-local cache for callers that don't pass SymbolStateStore
+# (avoids importing runtime.state).
+_local_phase_mtime: float = -1.0
+_local_phase_disabled: dict[tuple[str, str], Any] = {}
+
 # NOTE: hunt_core.track.tracker is imported lazily inside the functions below.
 # It pulls scan -> gate, so a top-level import here would create a circular
 # import whenever _phase_matrix loads before track.tracker finishes (now that
@@ -155,14 +160,20 @@ def disabled_phase_pairs(
     force: bool = False,
     state: Any | None = None,
 ) -> dict[tuple[str, str], PhaseStats]:
-    from hunt_core.runtime.state import current_symbol_state
-
-    store = state or current_symbol_state()
+    if state is not None:
+        store = state
+        mtime = SIGNAL_STATE.stat().st_mtime if SIGNAL_STATE.is_file() else 0.0
+        if force or mtime != store.phase_matrix_mtime:
+            store.phase_matrix_disabled = _rebuild_cache()
+            store.phase_matrix_mtime = mtime
+        return dict(store.phase_matrix_disabled)
+    global _local_phase_mtime
     mtime = SIGNAL_STATE.stat().st_mtime if SIGNAL_STATE.is_file() else 0.0
-    if force or mtime != store.phase_matrix_mtime:
-        store.phase_matrix_disabled = _rebuild_cache()
-        store.phase_matrix_mtime = mtime
-    return dict(store.phase_matrix_disabled)
+    if force or mtime != _local_phase_mtime:
+        _local_phase_disabled.clear()
+        _local_phase_disabled.update(_rebuild_cache())
+        _local_phase_mtime = mtime
+    return dict(_local_phase_disabled)
 
 
 def phase_matrix_gate(

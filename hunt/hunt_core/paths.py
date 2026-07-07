@@ -14,12 +14,7 @@ TELEGRAM_COOLDOWN = DATA / "dump_watch_telegram_state.json"
 HUNT_SCAN_JSONL = DATA / "hunt_scan.jsonl"
 TICK_JSONL = HUNT_SCAN_JSONL
 WATCH_LOG = DATA / "hunt_watch.log"
-DEEP_TICKS_JSONL = DATA / "deep_ticks.jsonl"
-EXPANSION_SCAN_JSONL = DATA / "expansion_scan.jsonl"
-EXPANSION_OUTCOMES_JSONL = DATA / "expansion_outcomes.jsonl"
-EXPANSION_CALIBRATION_JSON = DATA / "expansion_calibration.json"
-EXPANSION_ALERT_STATE = DATA / "expansion_alert_state.json"
-EXPANSION_RUNTIME_STATE_JSON = DATA / "expansion_runtime_state.json"
+ANALYST_TICKS_JSONL = DATA / "analyst_ticks.jsonl"
 PUMP_HISTORY = DATA / "pump_history.json"
 EWMA_THRESHOLDS = DATA / "ewma_thresholds.json"
 # One-time migration source (removed after migrate_calibration_split).
@@ -40,15 +35,14 @@ GATE_EDGE_OUTCOMES = DATA / "gate_edge_outcomes.jsonl"
 INTEL_DOSSIER_MD = DATA / "intel_dossier.md"
 INTEL_DOSSIER_JSON = DATA / "intel_dossier.json"
 INTEL_REPORT = DATA / "intel_report.json"
-DEEP_WATCH_GLOB = "deep_watch_*.jsonl"
+ANALYST_WATCH_GLOB = "analyst_watch_*.jsonl"
 LAKE = DATA / "lake"
 LAKE_DB = LAKE / "hunt_lake.sqlite"
 LAKE_PARQUET = LAKE / "parquet"
 MAPS_LAKE_JSONL = LAKE / "maps_bundles.jsonl"
-VERDICT_V2_PATTERN_AUDIT_JSONL = DATA / "verdict_v2_patterns.jsonl"
-VERDICT_V2_CALIBRATION_JSON = DATA / "verdict_v2_calibration.json"
-VERDICT_V2_GATE_OVERRIDES_JSON = DATA / "verdict_v2_gate_overrides.json"
-VERDICT_V2_SIGNAL_QUEUE_JSON = DATA / "verdict_v2_signal_queue.json"
+ANALYST_PATTERN_AUDIT_JSONL = DATA / "analyst_patterns.jsonl"
+ANALYST_CALIBRATION_JSON = DATA / "analyst_calibration.json"
+ANALYST_SIGNAL_QUEUE_JSON = DATA / "analyst_signal_queue.json"
 UNIFIED_LABELS = DATA / "unified_labels.jsonl"
 BASELINE_DIR = DATA / "baseline"
 LAB_OUTCOME_LEDGER = DATA / "hunt_lab_outcome_ledger.jsonl"
@@ -59,25 +53,24 @@ UNIVERSE_AUDIT_JSONL = DATA / "universe_audit.jsonl"
 RR_GEOMETRY_AUDIT_JSONL = DATA / "rr_geometry_audit.jsonl"
 EVIDENCE_TRACE_JSONL = DATA / "evidence_trace.jsonl"
 RECONCILE_PATH_SHADOW_JSONL = DATA / "reconcile_path_shadow.jsonl"
+CALIBRATION_CACHE = DATA / "calibration_cache.json"
+INFRA_SNAPSHOTS = DATA / "infra_snapshots"
 
 __all__ = [
     "ADAPTIVE_THRESHOLDS",
     "BACKTEST_OUTCOMES",
+    "CALIBRATION_CACHE",
     "BACKTEST_OUTCOMES_ENRICHED",
     "BASELINE_DIR",
     "DATA",
     "DATA_PLANE_AUDIT_JSONL",
-    "DEEP_TICKS_JSONL",
-    "DEEP_WATCH_GLOB",
+    "ANALYST_TICKS_JSONL",
+    "ANALYST_WATCH_GLOB",
     "DELIVERY_STATE",
-    "EXPANSION_ALERT_STATE",
-    "EXPANSION_CALIBRATION_JSON",
-    "EXPANSION_OUTCOMES_JSONL",
-    "EXPANSION_RUNTIME_STATE_JSON",
-    "EXPANSION_SCAN_JSONL",
     "EWMA_THRESHOLDS",
     "GATE_EDGE_OUTCOMES",
     "HUNT_CALIBRATION",
+    "INFRA_SNAPSHOTS",
     "HUNT_SCAN_JSONL",
     "INTEL_DOSSIER_JSON",
     "INTEL_DOSSIER_MD",
@@ -108,10 +101,9 @@ __all__ = [
     "TICK_JSONL",
     "UNIFIED_LABELS",
     "UNIVERSE_AUDIT_JSONL",
-    "VERDICT_V2_CALIBRATION_JSON",
-    "VERDICT_V2_GATE_OVERRIDES_JSON",
-    "VERDICT_V2_PATTERN_AUDIT_JSONL",
-    "VERDICT_V2_SIGNAL_QUEUE_JSON",
+    "ANALYST_CALIBRATION_JSON",
+    "ANALYST_PATTERN_AUDIT_JSONL",
+    "ANALYST_SIGNAL_QUEUE_JSON",
     "WATCHLIST",
     "WATCH_LOG",
 ]

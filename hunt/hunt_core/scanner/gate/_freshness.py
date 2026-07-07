@@ -186,12 +186,13 @@ def classify_delivery_tier(
     """Return tier when setup may ship; None when delivery is stale or monitor-only."""
     lc = lifecycle if isinstance(lifecycle, dict) else row.get("lifecycle")
     lc_dict = lc if isinstance(lc, dict) else {}
-    setup_confirmed = bool(setup.get("confirmed") or setup.get("intrabar_confirmed"))
-    from hunt_core.scanner.detect.routing import resolve_delivery_mode
+    setup_confirmed = bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed"))
 
-    mode = resolve_delivery_mode(lc_dict, setup)
-
-    if mode == "monitor_only" and not setup_confirmed:
+    # NOTE: the fusion-era ``resolve_delivery_mode`` (armed_first / monitor_only
+    # routing) was removed with scanner.detect.routing. Only unconfirmed setups
+    # are held back now — same fail-safe direction as the old monitor_only path,
+    # no fabricated replacement for the deleted routing distinction.
+    if not setup_confirmed:
         return None
 
     if delivery_hard_block(direction=direction, setup=setup, row=row):
@@ -199,9 +200,6 @@ def classify_delivery_tier(
     price = float(row.get("price") or 0)
     if price <= 0:
         return None
-
-    if mode == "armed_first" and not setup_confirmed:
-        return "armed"
 
     if price_in_entry_zone(setup, price, direction=direction):
         return "triggered"

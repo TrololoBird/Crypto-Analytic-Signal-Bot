@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from hunt_core.domain.market_regime import HuntCalibratedParams, active_params
+from hunt_core.regime.market_regime import HuntCalibratedParams, active_params
 from hunt_core.paths import ADAPTIVE_THRESHOLDS, EWMA_THRESHOLDS, HUNT_CALIBRATION
 
 _CALIBRATION_KEYS = frozenset(
@@ -38,14 +38,20 @@ UNIVERSAL_DEFAULTS: dict[str, Any] = {
         "q_phase": 0.85,
         "min_active_factors": 2,
         "lookback": 120,
-        "global_gate_floor": 0.55,
+        "global_gate_floor": 0.06,
         "abs_magnitude_floor": 0.5,
         "vol_floor_pct": 0.15,
+        "fusion_score_scale": 25.0,
         "cusum_k": 0.5,
         "cusum_span": 96,
         "phase_mid_exit_ratio": 0.65,
         "phase_mid_exit_bars": 2,
         "funding_min_n": 48,
+        "pre_gate_min_energy": 1,
+        "pre_gate_min_structure": 0.10,
+        "pre_gate_min_magnitude": 0.08,
+        "mad_epsilon": 1e-6,
+        "robust_z_clip": 12.0,
     },
     "gates": {
         "confirm_min_score": 60.0,
@@ -70,7 +76,7 @@ UNIVERSAL_DEFAULTS: dict[str, Any] = {
         "sl_min_atr": 0.6,
         "min_rr": 1.0,
     },
-    "scanner": {
+    "hunter": {
         "hot_range_pct": 8.0,
         "pump_extreme_pct": 15.0,
     },
@@ -400,9 +406,9 @@ def scoring_thresholds(symbol: str = "") -> dict[str, float]:
     return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
 
 
-def scanner_thresholds() -> dict[str, float | int]:
+def hunter_thresholds() -> dict[str, float | int]:
     """Unified [scanner] config — single source with config.defaults.toml."""
-    sc = universal_section("scanner")
+    sc = universal_section("hunter")
     return {
         "min_quote_volume_usd": float(sc.get("min_quote_volume_usd", 10_000_000)),
         "min_open_interest_usd": float(sc.get("min_open_interest_usd", 500_000)),

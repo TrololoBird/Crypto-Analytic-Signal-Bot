@@ -99,7 +99,6 @@ def build_network_config(
         }
     if proxy_url:
         config["aiohttp_proxy"] = proxy_url
-        config["proxies"] = {"http": proxy_url, "https": proxy_url}
     if trust_env:
         config["aiohttp_trust_env"] = True
     return config

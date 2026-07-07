@@ -18,7 +18,7 @@ PY=(uv run python)
 "${PY[@]}" -m hunt_core._dev.replay_fusion --all --walk-forward 0.3 || true
 "${PY[@]}" -m hunt_core._dev.authority_audit || true
 "${PY[@]}" -m hunt_core._dev.check_deep
-"${PY[@]}" -m hunt_core._dev.check_verdict_v2
+"${PY[@]}" -m hunt_core._dev.check_analyst
 "${PY[@]}" -m hunt_core._dev.check_deep_e2e
 "${PY[@]}" -m hunt_core._dev.check_plan_complete
 "${PY[@]}" -m hunt_core._dev.check_phase9

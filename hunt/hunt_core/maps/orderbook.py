@@ -292,17 +292,25 @@ def _detect_iceberg(
             continue
         key = round(px / tol) * tol if tol else px
         fill_at[key] = fill_at.get(key, 0.0) + qty * px
+    _RATIO_CAP = 50.0
     out: list[dict[str, Any]] = []
     for key, filled in fill_at.items():
         shown = book_by_px.get(key)
         if shown and filled > shown[0] * 1.4:
+            # A flat $1 floor on displayed notional lets a near-empty book level
+            # (e.g. a few cents shown) blow the ratio up into the tens of thousands —
+            # not a meaningful "replenishment" reading. Floor against a fraction of the
+            # fill itself instead, and cap the displayed figure so it stays interpretable.
+            floor = max(shown[0], filled * 0.02)
+            raw_ratio = filled / floor
             out.append(
                 {
                     "price": round(key, 6),
                     "side": shown[1],
                     "filled_usd": round(filled, 2),
                     "displayed_usd": round(shown[0], 2),
-                    "replenishment_ratio": round(filled / max(shown[0], 1.0), 2),
+                    "replenishment_ratio": round(min(raw_ratio, _RATIO_CAP), 2),
+                    "replenishment_ratio_capped": raw_ratio > _RATIO_CAP,
                 }
             )
     return sorted(out, key=lambda x: x["filled_usd"], reverse=True)[:4]
@@ -345,6 +353,9 @@ def _detect_absorption(
     return out
 
 
+_SPOOF_MIN_PRIOR_SAMPLES = 3  # wall must show up in this many consecutive snapshots before vanishing counts as spoof
+
+
 def _detect_spoof(
     history: deque[dict[str, Any]],
     current_bids: list[tuple[float, float]],
@@ -353,11 +364,21 @@ def _detect_spoof(
     current_price: float,
     tolerance_pct: float = 0.12,
 ) -> list[dict[str, Any]]:
-    """Wall vanishes as price approaches (present in prior sample, gone now)."""
-    if len(history) < 2 or current_price <= 0:
+    """Wall vanishes as price approaches (present across several prior samples, gone now).
+
+    Used to compare only the single immediately-prior snapshot (``history[-2]``) —
+    a wall that simply hadn't been re-quoted yet on that one tick (ordinary MM
+    order refresh/rebalancing, which happens constantly) read identically to a
+    genuine spoof (a wall placed to bait, then pulled right before it would fill).
+    Requiring the wall to have actually persisted across several consecutive
+    snapshots before its disappearance counts as anything filters out that
+    single-tick noise — a real spoof wall sits there to be seen, a
+    rebalance-in-progress wall doesn't have a multi-sample history to erase.
+    """
+    if len(history) < _SPOOF_MIN_PRIOR_SAMPLES + 1 or current_price <= 0:
         return []
     tol = current_price * tolerance_pct / 100.0
-    prior = history[-2]
+    prior_samples = list(history)[-(_SPOOF_MIN_PRIOR_SAMPLES + 1):-1]
     flags: list[dict[str, Any]] = []
 
     def _levels(side: str, snap: dict[str, Any]) -> dict[float, float]:
@@ -375,14 +396,17 @@ def _detect_spoof(
     cur_bid = {round(p / tol) * tol if tol else p: p * q for p, q in current_bids if p > 0}
     cur_ask = {round(p / tol) * tol if tol else p: p * q for p, q in current_asks if p > 0}
     for side, cur_map in (("bid", cur_bid), ("ask", cur_ask)):
-        prev_map = _levels(side, prior)
-        for px, prev_n in prev_map.items():
-            if prev_n < 50_000:
-                continue
+        per_sample = [_levels(side, snap) for snap in prior_samples]
+        candidate_prices = set(per_sample[0].keys()) if per_sample else set()
+        for px in candidate_prices:
+            notionals = [m.get(px, 0.0) for m in per_sample]
+            if any(n < 50_000 for n in notionals):
+                continue  # must have been a genuinely large wall on EVERY prior sample
             dist = abs(px - current_price) / current_price * 100.0
             if dist > 1.2:
                 continue
-            if cur_map.get(px, 0.0) < prev_n * 0.25:
+            prev_n = notionals[-1]  # most recent prior sample, for the reported drop size
+            if cur_map.get(px, 0.0) < min(notionals) * 0.25:
                 flags.append(
                     {
                         "side": side,
@@ -390,6 +414,7 @@ def _detect_spoof(
                         "prior_notional_usd": round(prev_n, 2),
                         "current_notional_usd": round(cur_map.get(px, 0.0), 2),
                         "distance_pct": round(dist, 3),
+                        "persisted_samples": len(notionals),
                     }
                 )
     return flags[:4]

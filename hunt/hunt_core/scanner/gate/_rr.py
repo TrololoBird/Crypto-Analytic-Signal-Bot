@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from hunt_core.data.universe import PINNED_SYMBOLS
-from hunt_core.domain.market_regime import HuntCalibratedParams
+from hunt_core.regime.market_regime import HuntCalibratedParams
 from hunt_core.scanner.gate._types import BOUNCE_MIN_RISK_REWARD, GateResult
 from hunt_core.params.store import delivery_thresholds, effective_hunt_params
 
@@ -54,9 +54,9 @@ def setup_fuel_legacy(setup: dict[str, Any], direction: str) -> float:
 
 def setup_fuel(setup: dict[str, Any], direction: str) -> float:
     """Delivery strength 0–100 — P(win)×100 when calibrated, else legacy fuel score."""
-    from hunt_core.scanner.gate._ev import setup_p_win
+    from hunt_core.scanner.gate._ev import setup_confidence_score
 
-    p = setup_p_win(setup)
+    p = setup_confidence_score(setup)
     if p is not None:
         return p * 100.0
     return setup_fuel_legacy(setup, direction)
@@ -169,7 +169,7 @@ def late_dump_depth_chase_block(
 
 
 def order_flow_demotes_triggered(row: dict[str, Any], *, direction: str) -> bool:
-    from hunt_core.analysis.order_flow import synthesize_order_flow
+    from hunt_core.toolkit.order_flow import synthesize_order_flow
 
     market = row.get("market") or {}
     taker = market.get("taker_5m")
@@ -231,12 +231,12 @@ def dump_continuation_short_ok(
     *,
     phase: str,
     lc: dict[str, Any],
-    p_win: float | None,
+    confidence_score: float | None,
     cal_min_p_win: float,
     pos_in_range: float | None = None,
 ) -> bool:
     """Deprecated — mid-dump continuation is never valid for watch TG delivery."""
-    _ = setup, phase, lc, p_win, cal_min_p_win, pos_in_range
+    _ = setup, phase, lc, confidence_score, cal_min_p_win, pos_in_range
     return False
 
 
@@ -254,7 +254,7 @@ def confirmed_structural_dump_min_rr(
     setup: dict[str, Any],
     lc: dict[str, Any],
 ) -> float | None:
-    if not bool(setup.get("confirmed")):
+    if not bool(setup.get("impulse_confirmed")):
         return None
     hard = setup.get("confirm_hard") or []
     if not structural_dump_hard(hard) and structural_hard_count(hard, direction="short") < 1:
@@ -276,9 +276,17 @@ def effective_min_rr(
     cal: HuntCalibratedParams,
 ) -> float:
     base = min_rr(symbol, direction, lc)
+    phase = str(lc.get("phase") or "")
+    # Pre-pump/pre-dump entries sit at accumulation zone; nearest resistance may give R:R ~1.1-1.3 —
+    # enforcing 1.6 kills every such setup before price has confirmed the move.
+    # Pre-pump entry sits at accumulation zone; TP1 is nearest resistance and may give R:R ~1.1.
+    # The real target is TP2/TP3; a 1:1 floor is the minimum meaningful gate here.
+    if direction == "long" and phase in {"pre_pump", "accumulation", "breakout_arming"}:
+        return 1.0
     if direction != "short":
         return max(base, DELIVERY_MIN_RR_FLOOR)
-    phase = str(lc.get("phase") or "")
+    if phase in {"pre_dump", "distribution"}:
+        return max(base, _PRE_DUMP_STRUCTURAL_MIN_RR)
     if phase == "exhaustion_at_high":
         return max(base, _EXHAUSTION_FADE_DELIVERY_MIN_RR)
     cont_floor = continuation_pct_min_rr(setup)
@@ -287,7 +295,7 @@ def effective_min_rr(
     structural_floor = confirmed_structural_dump_min_rr(setup, lc)
     if structural_floor is not None:
         return min(base, structural_floor)
-    if bool(setup.get("confirmed")):
+    if bool(setup.get("impulse_confirmed")):
         return max(base, _CONFIRMED_STRUCTURAL_DUMP_MIN_RR)
     return max(base, DELIVERY_MIN_RR_FLOOR)
 

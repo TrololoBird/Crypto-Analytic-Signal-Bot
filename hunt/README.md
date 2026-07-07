@@ -1,10 +1,14 @@
-# Hunt Watch (crypto-hunter)
+# Hunt (crypto-hunter)
 
-**Memecoin pump/dump minute scanner** — independent package in the monorepo.
+Standalone crypto-futures signal-analytics package in the monorepo — **two independent modules**:
 
-- Public **Binance USDⓈ-M** via **CCXT** REST + Pro WebSocket
-- **Telegram** manual signals on closed-bar confirm
-- **No auto-trading**, no private Binance auth
+- **Deep** (`hunt_core/deep/`) — 5-module gating pipeline (macro/trend/structure/positioning/risk) for pinned majors and `/signal SYM`
+- **Scanner** (`hunt_core/scanner/`) — universe-wide pre-pump/pre-dump detection (`run_scan()`, `PrescanEngine`)
+
+Both share only via `hunt_core/signals/`, `data/`, `market/`, `track/` — they never import each other.
+
+- Public **Binance USDⓈ-M** via **CCXT** — 100% CCXT market plane, no raw Binance HTTP, no CoinMarketCap/CoinGecko (`hunt_core/deep/pipeline/macro_data.py` computes BTC.D/TOTAL3 as a CCXT `fetchTickers()` quoteVolume proxy)
+- **Telegram** manual signals only — signal-analytics, no auto-trading, no private Binance auth
 - Canonical package: **`hunt_core/`** only — `python -m hunt_core`
 
 ## Quick start
@@ -20,27 +24,38 @@ python -m hunt_core watch --once --no-telegram
 python -m hunt_core watch --interval 60
 ```
 
-Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` in `.env`.
+Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` in `.env` (repo root).
 
-Data: `hunt/data/` — see [docs/DEPLOY.md](docs/DEPLOY.md).
+Data: `hunt/data/` — runtime state, watchlist, calibration cache.
 
 ## Package layout
 
 ```
 hunt/
-├── hunt_core/          # Canonical: market, data, features, scan, regime, gate, deliver
-├── docs/               # HUNT_ARCHITECTURE, DEPLOY, LIBRARY_STACK
-├── config.defaults.toml
-└── data/               # Runtime state + baseline/
+├── hunt_core/
+│   ├── deep/            # Deep module: 5-module gating pipeline + config
+│   │   └── pipeline/    # macro/trend/structure/positioning/risk + config.py (reads config.defaults.toml [deep])
+│   ├── scanner/         # Scanner module: universe pre-pump/pre-dump (prescan, gate, detect)
+│   ├── toolkit/         # Shared analytical primitives (manipulation fusion, order flow, robust stats)
+│   ├── market/          # CCXT client, rate limiting, WS/REST transport (shared kernel)
+│   ├── signals/         # Shared spine: Signal, setup_id dedup, lifecycle states
+│   ├── data/, track/, deliver/, domain/, features/, runtime/, ...
+├── docs/                # SPEC_v5.1.md (Deep pipeline target spec)
+├── config.toml / config.defaults.toml   # includes [deep.*] sections for pipeline thresholds
+└── data/                # Runtime state + baseline/
 ```
 
 ## vs main bot
 
 | | Main bot (`bot/`) | Hunt |
 |---|-------------------|------|
-| Trigger | WS kline close | CCXT REST poll + Pro WS enrich |
-| Delivery | contract → confluence 3/5 | Hunt confirm → TG |
-| Universe | shortlist | pinned + scanner watchlist |
+| Trigger | WS kline close | CCXT REST poll (Deep: every `HUNT_DEEP_PINNED_INTERVAL`s, default 300s) + Scanner tick |
+| Delivery | contract → confluence 3/5 | Deep 5-module gating / Scanner prescan → TG |
+| Universe | shortlist | Deep: pinned majors + `/signal SYM`; Scanner: full USDⓈ-M universe |
+
+## Configuration
+
+`PipelineConfig.load()` (`hunt_core/deep/pipeline/config.py`) reads `[deep]`/`[deep.macro]`/`[deep.trend]`/`[deep.positioning]`/`[deep.positioning.vp_ofi]`/`[deep.risk]`/`[deep.new_coin]`/`[deep.regime]` from `config.defaults.toml`, merging overrides onto the dataclass defaults — same pattern as `hunt_core/scanner/detect/config.py::fusion_params()`.
 
 ## Verification
 
@@ -48,21 +63,14 @@ After `pip install -e "./hunt"` (repo root, venv active):
 
 ```bash
 python -m compileall -q hunt/hunt_core
-python -m hunt_core._dev.check_ccxt
-python -m hunt_core._dev.budget
-python -m hunt_core._dev.check_scenarios
-python -m hunt_core._dev.check_logic
-python -m hunt_core._dev.replay_fusion --all --q-gate 0.92
-python -m hunt_core._dev.authority_audit
-python -m hunt_core._dev.ccxt_plane_smoke BTCUSDT ETHUSDT --ws-seconds 3
-python -m hunt_core._dev.smoke_signals --baseline hunt/data/baseline/hunt_baseline.json BTCUSDT
 ```
 
-Offline logic checks: `_dev/check_*` + CI live-smoke (no `verify` subcommand).
+There is no `_dev` diagnostics package or `verify` subcommand in the current tree — verify via `compileall` plus a live smoke run:
+
+```bash
+python -m hunt_core watch --once --no-telegram
+```
 
 ## Docs
 
-- [HUNT_ARCHITECTURE.md](docs/HUNT_ARCHITECTURE.md) — canonical architecture
-- [CCXT.md](docs/CCXT.md) — market plane (100% CCXT, CI-enforced)
-- [DEPLOY.md](docs/DEPLOY.md) — install, run, ops
-- [LIBRARY_STACK.md](docs/LIBRARY_STACK.md) — polars + ccxt deps
+- [SPEC_v5.1.md](docs/SPEC_v5.1.md) — Deep 5-module pipeline target specification

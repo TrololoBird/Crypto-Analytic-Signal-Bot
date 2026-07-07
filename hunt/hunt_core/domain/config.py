@@ -218,19 +218,25 @@ def _load_toml(path: Path) -> dict[str, Any]:
 
 
 def _resolve_config_source(config_file: Path) -> Path:
-    name = config_file.name if config_file.name else "config.toml"
     if config_file.is_file():
         return config_file
-    # watch.sh cwd is hunt/ — canonical config lives at repo root.
-    for base in (Path.cwd(), *Path.cwd().parents):
-        candidate = base / name
+
+    repo_root = Path(__file__).resolve().parents[2]
+    for candidate in (
+        repo_root / config_file.name,
+        repo_root / "config.toml",
+        repo_root / "config.defaults.toml",
+        Path.cwd() / config_file.name,
+        Path.cwd() / "config.toml",
+        Path.cwd() / "config.defaults.toml",
+    ):
         if candidate.is_file():
             return candidate
-        if base == base.parent:
-            break
+
     example = config_file.with_name("config.toml.example")
     if example.is_file():
         return example
+
     for base in (Path.cwd(), *Path.cwd().parents):
         candidate = base / "config.toml.example"
         if candidate.is_file():
@@ -277,12 +283,35 @@ def _merge_hunt_defaults(payload: dict[str, Any], hunt_defaults: Mapping[str, An
                     block["analyst"] = True
 
 
+def _normalize_bot_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _convert_toml_dict(cast("dict[Any, Any]", payload))
+
+    runtime_payload = normalized.get("runtime") if isinstance(normalized.get("runtime"), dict) else {}
+    if not isinstance(runtime_payload, dict):
+        runtime_payload = {}
+
+    for field_name in ("strict_data_quality", "shortlist_unified_routing", "analysis_kline_intervals", "log_level", "telemetry_subdir"):
+        if field_name in normalized and field_name not in runtime_payload:
+            runtime_payload[field_name] = normalized[field_name]
+
+    if runtime_payload:
+        normalized["runtime"] = runtime_payload
+
+    network_payload = normalized.get("network") if isinstance(normalized.get("network"), dict) else {}
+    if not isinstance(network_payload, dict):
+        network_payload = {}
+    if network_payload:
+        normalized["network"] = network_payload
+
+    return normalized
+
+
 def load_settings(config_path: str | Path = "config.toml") -> HuntSettings:
     config_file = Path(config_path)
     resolved = _resolve_config_source(config_file)
     parsed = _load_toml(resolved)
     bot_raw = parsed.get("bot") if isinstance(parsed.get("bot"), dict) else {}
-    payload = _convert_toml_dict(cast("dict[Any, Any]", bot_raw))
+    payload = _normalize_bot_payload(bot_raw)
     secrets = load_secrets()
     payload["tg_token"] = secrets.tg_token
     payload["target_chat_id"] = secrets.target_chat_id
@@ -298,10 +327,6 @@ def load_settings(config_path: str | Path = "config.toml") -> HuntSettings:
         env_list = str(os.getenv("BINANCE_PROXY_URLS", "") or "").strip()
         if env_list:
             network_payload["proxy_urls"] = [x.strip() for x in env_list.split(",") if x.strip()]
-
-    hunt_defaults_path = Path(__file__).resolve().parents[2] / "config.defaults.toml"
-    if hunt_defaults_path.is_file():
-        _merge_hunt_defaults(payload, _load_toml(hunt_defaults_path))
 
     return HuntSettings.model_validate(payload)
 
@@ -397,7 +422,7 @@ def load_config_defaults_toml() -> dict[str, Any]:
         if lc_block:
             out["lifecycle"] = lc_block
 
-    for section in ("collect", "scoring", "tracker", "delivery", "intra_bar"):
+    for section in ("collect", "scoring", "tracker", "delivery", "intra_bar", "fusion"):
         block = raw.get(section)
         if isinstance(block, dict):
             out[section] = {k: v for k, v in block.items() if v is not None}

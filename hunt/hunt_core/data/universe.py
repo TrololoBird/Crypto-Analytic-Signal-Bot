@@ -34,7 +34,7 @@ def load_pinned_symbols() -> tuple[str, ...]:
             deep = [
                 str(s).upper()
                 for s, block in assets.items()
-                if isinstance(block, dict) and block.get("deep_analysis")
+                if isinstance(block, dict) and block.get("analyst")
             ]
             if deep:
                 return tuple(dict.fromkeys(deep))
@@ -242,7 +242,7 @@ def save_pinned_cache(symbol: str, row: dict[str, Any]) -> None:
             mtf_payload = None
     # Verdict V2 summary is the single verdict source (legacy pinned_verdict /
     # indicator_panel removed). Map action→kind, strength→confidence.
-    summary = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else None
+    summary = row.get("prizrak_summary") if isinstance(row.get("prizrak_summary"), dict) else None
     verdict_payload: dict[str, Any] | None = None
     if summary:
         action = str(summary.get("action") or "wait").lower()
@@ -297,7 +297,7 @@ def save_pinned_cache(symbol: str, row: dict[str, Any]) -> None:
         "market": row.get("market"),
         "timeframes": {k: tf.get(k) for k in ("1w", "1d", "4h", "1h", "15m") if tf.get(k)},
         "mtf_summary": mtf_payload,
-        "verdict_v2": verdict_payload,
+        "prizrak_verdict": verdict_payload,
         "poc_level_scenario": poc_payload,
         "liquidity_scenarios": liq_payload,
         "cross_exchange": row.get("cross_exchange"),

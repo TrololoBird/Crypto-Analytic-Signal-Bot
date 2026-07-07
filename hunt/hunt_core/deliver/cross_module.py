@@ -8,25 +8,25 @@ _DOWN = frozenset({"down", "dump", "short", "bear", "pre_dump"})
 
 
 def _deep_direction(row: dict[str, Any]) -> str | None:
-    for key in ("verdict_v2", "deep_report", "deep"):
-        block = row.get(key)
-        if not isinstance(block, dict):
-            continue
-        raw = (
-            block.get("decision")
-            or block.get("signal_decision")
-            or block.get("direction")
-            or block.get("recommended_bias")
-        )
-        if raw is None:
-            continue
-        text = str(raw).lower()
-        if text in {"long", "short"}:
-            return text
-        if text in _UP:
-            return "long"
-        if text in _DOWN:
-            return "short"
+    block = row.get("prizrak_summary")
+    if not isinstance(block, dict):
+        return None
+    raw = (
+        block.get("decision")
+        or block.get("signal_decision")
+        or block.get("action")
+        or block.get("direction")
+        or block.get("recommended_bias")
+    )
+    if raw is None:
+        return None
+    text = str(raw).lower()
+    if text in {"long", "short"}:
+        return text
+    if text in _UP:
+        return "long"
+    if text in _DOWN:
+        return "short"
     return None
 
 

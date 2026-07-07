@@ -27,7 +27,7 @@ def resolve_delivery_ev(
 ) -> dict[str, Any]:
     """Resolve EV + P for delivery from catalog-primary, shadow, or geometry recompute."""
     ev: float | None = None
-    p_win: float | None = None
+    confidence_score: float | None = None
     source = "missing"
 
     for key in ("ev_primary_ev", "catalog_ev", "delivery_ev"):
@@ -49,35 +49,35 @@ def resolve_delivery_ev(
         except (TypeError, ValueError):
             LOG.debug("resolve_delivery_ev_shadow_ev_parse_failed raw=%r", shadow.get("ev"))
 
-    for key in ("delivery_p_win", "fusion_strength", "p_win", "catalog_p_win"):
+    for key in ("delivery_confidence_score", "fusion_strength", "confidence_score", "catalog_confidence_score"):
         raw = setup.get(key)
         if raw is not None:
             try:
-                p_win = float(raw)
+                confidence_score = float(raw)
                 break
             except (TypeError, ValueError):
                 LOG.debug("resolve_delivery_ev_pwin_parse_failed key=%s raw=%r", key, raw)
                 continue
-    if p_win is None and shadow.get("p_win") is not None:
+    if confidence_score is None and shadow.get("confidence_score") is not None:
         try:
-            p_win = float(shadow["p_win"])
+            confidence_score = float(shadow["confidence_score"])
         except (TypeError, ValueError):
-            LOG.debug("resolve_delivery_ev_shadow_pwin_parse_failed raw=%r", shadow.get("p_win"))
+            LOG.debug("resolve_delivery_ev_shadow_pwin_parse_failed raw=%r", shadow.get("confidence_score"))
 
     struct = structure
     if struct is None and row is not None:
         struct = row.get("structure") if isinstance(row.get("structure"), dict) else None
-    if (ev is None or p_win is None) and setup.get("stop_loss") and setup.get("tp1"):
+    if (ev is None or confidence_score is None) and setup.get("stop_loss") and setup.get("tp1"):
         recomputed = compute_rule_based_ev(setup, direction=direction, structure=struct)
         if ev is None and recomputed.get("ev") is not None:
             ev = float(recomputed["ev"])
             source = "recomputed"
-        if p_win is None and recomputed.get("p_win") is not None:
-            p_win = float(recomputed["p_win"])
+        if confidence_score is None and recomputed.get("confidence_score") is not None:
+            confidence_score = float(recomputed["confidence_score"])
 
     return {
         "ev": ev,
-        "p_win": p_win,
+        "confidence_score": confidence_score,
         "source": source,
         "reason": shadow.get("reason") if isinstance(shadow, dict) else None,
     }
@@ -91,12 +91,12 @@ def stamp_delivery_ev_fields(
     structure: dict[str, Any] | None = None,
     catalog_candidate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Unify delivery_ev / delivery_p_win on setup after tick assembly."""
+    """Unify delivery_ev / delivery_confidence_score on setup after tick assembly."""
     if catalog_candidate:
         if catalog_candidate.get("ev") is not None:
             setup["catalog_ev"] = catalog_candidate["ev"]
-        if catalog_candidate.get("p_win") is not None:
-            setup["catalog_p_win"] = catalog_candidate["p_win"]
+        if catalog_candidate.get("confidence_score") is not None:
+            setup["catalog_confidence_score"] = catalog_candidate["confidence_score"]
         if catalog_candidate.get("setup_id"):
             setup.setdefault("catalog_setup", catalog_candidate["setup_id"])
     resolved = resolve_delivery_ev(
@@ -104,8 +104,8 @@ def stamp_delivery_ev_fields(
     )
     if resolved["ev"] is not None:
         setup["delivery_ev"] = resolved["ev"]
-    if resolved["p_win"] is not None:
-        setup["delivery_p_win"] = resolved["p_win"]
+    if resolved["confidence_score"] is not None:
+        setup["delivery_confidence_score"] = resolved["confidence_score"]
     setup["delivery_ev_source"] = resolved["source"]
     return setup
 
@@ -143,9 +143,9 @@ def setup_fusion_score(setup: dict[str, Any]) -> float | None:
     return None
 
 
-def setup_p_win(setup: dict[str, Any]) -> float | None:
+def setup_confidence_score(setup: dict[str, Any]) -> float | None:
     """Calibrated P(win) in [0, 1] — primary delivery strength."""
-    for key in ("delivery_p_win", "fusion_strength", "p_win", "catalog_p_win"):
+    for key in ("delivery_confidence_score", "fusion_strength", "confidence_score", "catalog_confidence_score"):
         raw = setup.get(key)
         if raw is None:
             continue
@@ -156,13 +156,13 @@ def setup_p_win(setup: dict[str, Any]) -> float | None:
         except (TypeError, ValueError):
             continue
     shadow = setup.get("ev_shadow") if isinstance(setup.get("ev_shadow"), dict) else {}
-    if shadow.get("p_win") is not None:
+    if shadow.get("confidence_score") is not None:
         try:
-            p = float(shadow["p_win"])
+            p = float(shadow["confidence_score"])
             if 0.0 <= p <= 1.0:
                 return p
         except (TypeError, ValueError):
-            LOG.debug("setup_p_win_shadow_parse_failed raw=%r", shadow.get("p_win"))
+            LOG.debug("setup_confidence_score_shadow_parse_failed raw=%r", shadow.get("confidence_score"))
     return None
 
 
@@ -171,7 +171,7 @@ def setup_conviction_pct(setup: dict[str, Any], *, direction: str = "short") -> 
     fs = setup_fusion_score(setup)
     if fs is not None:
         return fs
-    p = setup_p_win(setup)
+    p = setup_confidence_score(setup)
     if p is not None:
         return min(100.0, max(0.0, p * 100.0))
     from hunt_core.scanner.gate._rr import setup_fuel_legacy
@@ -184,7 +184,7 @@ def strength_display_label(setup: dict[str, Any], *, direction: str = "short") -
     fs = setup_fusion_score(setup)
     if fs is not None:
         return f"fusion {fs:.0f}"
-    p = setup_p_win(setup)
+    p = setup_confidence_score(setup)
     if p is not None:
         return f"P {p:.0%}"
     return f"conv {setup_conviction_pct(setup, direction=direction):.0f}"
@@ -239,7 +239,7 @@ def ev_primary_delivery_qualified(
 ) -> bool:
     """EV-primary path: structure detectors + P(win)/EV floors replace fuel/phase stack."""
     if not pwin_gate_enabled():
-        from hunt_core.analysis.playbook_eval import setup_meets_playbook
+        from hunt_core.toolkit.playbook_eval import setup_meets_playbook
 
         if setup_meets_playbook(setup, row=row, direction=direction):  # type: ignore[arg-type]
             return True
@@ -249,19 +249,19 @@ def ev_primary_delivery_qualified(
         ev = resolved.get("ev")
         if ev is None:
             return False
-        min_ev, _ = delivery_ev_floors(symbol, confirmed=bool(setup.get("confirmed")))
+        min_ev, _ = delivery_ev_floors(symbol, confirmed=bool(setup.get("impulse_confirmed")))
         try:
             return float(ev) > max(0.0, min_ev)
         except (TypeError, ValueError):
             return False
     if not bool(setup.get("ev_primary")):
         return False
-    p_win = setup_p_win(setup)
-    if p_win is None:
+    confidence_score = setup_confidence_score(setup)
+    if confidence_score is None:
         return False
-    confirmed = bool(setup.get("confirmed") or setup.get("intrabar_confirmed"))
+    confirmed = bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed"))
     min_ev, min_p = delivery_ev_floors(symbol, confirmed=confirmed)
-    if p_win < min_p:
+    if confidence_score < min_p:
         return False
     resolved = resolve_delivery_ev(setup, direction=direction)  # type: ignore[arg-type]
     ev = resolved.get("ev")
@@ -307,7 +307,7 @@ def setup_meets_strength(
     imports ``setup_fields`` (fusion ``confirmed`` only). See docs/AUTHORITY_MODEL.md §1.
     """
     if not pwin_gate_enabled() and row is not None:
-        from hunt_core.analysis.playbook_eval import setup_meets_playbook
+        from hunt_core.toolkit.playbook_eval import setup_meets_playbook
 
         if tier == "confirm" and setup_meets_playbook(
             setup, row=row, direction=direction  # type: ignore[arg-type]
@@ -325,12 +325,12 @@ def setup_meets_strength(
         min_p = float(dl.get("min_p_win", 0.42)) - slack_p
         min_conv = float(cal.confirm_min_score) - slack_conv
     if not pwin_gate_enabled():
-        p = setup_p_win(setup)
+        p = setup_confidence_score(setup)
         if tier == "confirm":
             if p is not None and p >= min_p - slack_p:
                 return True
             if row is not None:
-                from hunt_core.analysis.playbook_eval import setup_meets_playbook
+                from hunt_core.toolkit.playbook_eval import setup_meets_playbook
 
                 if setup_meets_playbook(
                     setup, row=row, direction=direction  # type: ignore[arg-type]
@@ -339,11 +339,11 @@ def setup_meets_strength(
         if p is not None:
             shadow = setup.get("ev_shadow")
             if not isinstance(shadow, dict):
-                setup["ev_shadow"] = {"p_win": p}
+                setup["ev_shadow"] = {"confidence_score": p}
             else:
-                shadow.setdefault("p_win", p)
+                shadow.setdefault("confidence_score", p)
         return setup_conviction_pct(setup, direction=direction) >= min_conv - slack_conv
-    p = setup_p_win(setup)
+    p = setup_confidence_score(setup)
     if p is not None:
         return p >= min_p
     return setup_conviction_pct(setup, direction=direction) >= min_conv
@@ -360,7 +360,7 @@ __all__ = [
     "setup_conviction_pct",
     "setup_fusion_score",
     "setup_meets_strength",
-    "setup_p_win",
+    "setup_confidence_score",
     "stamp_delivery_ev_fields",
     "strength_display_label",
 ]

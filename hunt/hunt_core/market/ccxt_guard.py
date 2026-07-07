@@ -32,10 +32,20 @@ _DEFAULT_IP_BAN_PAUSE_S = 1800.0
 _DEFAULT_429_PAUSE_S = 60.0
 
 _RETRY_AFTER_RE = re.compile(
-    r"(?:retry[- ]?after|banned until|ban time)[:\s\"]+(\d+)",
+    r"(?:retry[- ]?after|ban time)[:\s\"]+(\d+)",
     re.IGNORECASE,
 )
+# Binance -1003 body: "banned until <epoch_ms>" -- an ABSOLUTE timestamp, not a
+# relative duration. Was previously matched by _RETRY_AFTER_RE and returned as
+# a raw seconds-to-wait value (~56000 years), which made remaining_pause_s()
+# permanently positive and effectively locked the bot out of Binance forever
+# after a single ban. Parsed separately below and converted to a relative delta.
+_BANNED_UNTIL_RE = re.compile(r"banned until[:\s\"]+(\d+)", re.IGNORECASE)
 _HTTP_CODE_RE = re.compile(r"\b(418|429)\b")
+# Defense in depth: never trust a parsed pause duration beyond this, however
+# it was derived -- caps a single self-inflicted lockout at 1 hour instead of
+# forever if any future parsing path is wrong again.
+_MAX_SANE_PAUSE_S = 3600.0
 
 
 @dataclass(slots=True)
@@ -151,19 +161,36 @@ def _http_code_in_exc(exc: BaseException, code: int) -> bool:
 
 
 def parse_ccxt_retry_after_s(exc: BaseException) -> float | None:
-    """Parse Retry-After style hints from CCXT exception text / JSON body."""
+    """Parse Retry-After style hints from CCXT exception text / JSON body.
+
+    Returns a RELATIVE duration in seconds, always clamped to
+    [0, _MAX_SANE_PAUSE_S] regardless of source, so a malformed or
+    unexpected upstream error format can never produce an effectively
+    infinite self-inflicted lockout.
+    """
     text = str(exc)
+    # Binance -1003: "banned until <epoch_ms>" -- absolute timestamp, convert
+    # to a relative delta from now. Checked first: this is Binance's actual
+    # 418 wording and must not be caught by the relative-seconds regex below.
+    banned_until_m = _BANNED_UNTIL_RE.search(text)
+    if banned_until_m:
+        try:
+            banned_until_ms = float(banned_until_m.group(1))
+            delta_s = (banned_until_ms - time.time() * 1000.0) / 1000.0
+            return max(0.0, min(delta_s, _MAX_SANE_PAUSE_S))
+        except (TypeError, ValueError):
+            pass
     m = _RETRY_AFTER_RE.search(text)
     if m:
         try:
-            return max(0.0, float(m.group(1)))
+            return max(0.0, min(float(m.group(1)), _MAX_SANE_PAUSE_S))
         except (TypeError, ValueError):
             pass
     # Binance ban body sometimes embeds ban duration in milliseconds
     ms_m = re.search(r"\"banDuration\"\s*:\s*(\d+)", text)
     if ms_m:
         try:
-            return max(1.0, float(ms_m.group(1)) / 1000.0)
+            return max(1.0, min(float(ms_m.group(1)) / 1000.0, _MAX_SANE_PAUSE_S))
         except (TypeError, ValueError):
             pass
     return None

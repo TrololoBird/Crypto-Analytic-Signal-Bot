@@ -11,7 +11,6 @@ extra veto beyond the fusion gate" — and are documented as such.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any
 
 # New-vocabulary mid-leg phases (replaces the 10-state FSM's MID set).
@@ -120,24 +119,21 @@ def disabled_phase_pairs(*_a: Any, **_k: Any) -> frozenset[str]:
 # --- report helpers: surface the fusion gate reason -------------------------
 def evaluate_alert_gate(setup: dict[str, Any], **_k: Any) -> GateResult:
     """A confirmed fusion setup is alert-worthy; otherwise blocked by gate_reason."""
-    if setup.get("confirmed") or setup.get("intrabar_confirmed"):
+    if setup.get("impulse_confirmed") or setup.get("intrabar_confirmed"):
         return GateResult(ok=True)
     return GateResult(ok=False, code=str(setup.get("gate_reason") or "not_confirmed"))
 
 
-def evaluate_formation(setup: dict[str, Any], **_k: Any) -> SimpleNamespace:
-    confirmed = bool(setup.get("confirmed") or setup.get("intrabar_confirmed"))
-    return SimpleNamespace(
-        ok=confirmed,
-        confirmed=confirmed,
-        reason=str(setup.get("gate_reason") or ""),
-        score=float(setup.get("p_win") or 0) * 100.0,
-        missing=[],
-    )
+def evaluate_formation(setup: dict[str, Any], **_k: Any) -> GateResult:
+    confirmed = bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed"))
+    if confirmed:
+        return GateResult(ok=True, code="confirmed")
+    reason = str(setup.get("gate_reason") or "not_confirmed")
+    return GateResult(ok=False, code=reason, message=reason)
 
 
 def collect_report_blockers(setup: dict[str, Any] | None = None, **_k: Any) -> list[GateResult]:
-    if isinstance(setup, dict) and not setup.get("confirmed"):
+    if isinstance(setup, dict) and not setup.get("impulse_confirmed"):
         reason = str(setup.get("gate_reason") or "not_confirmed")
         return [GateResult(ok=False, code=reason, message=reason)]
     return []

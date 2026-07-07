@@ -1,8 +1,6 @@
 """Per-session mutable state, symbol memory, and watch-loop runtime handles (P11)."""
 from __future__ import annotations
 
-import time
-from hunt_core import clock
 import contextvars
 import json
 from dataclasses import asdict, dataclass, field
@@ -10,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
+from hunt_core import clock
 from hunt_core.data.universe import DEFAULT_MODES
 from hunt_core.deliver.dispatch import SniperConfig
 from hunt_core.paths import SESSION_DIR, TELEGRAM_COOLDOWN, TICK_JSONL
@@ -18,39 +17,6 @@ from hunt_core.runtime.logging import configure_script_logging
 WatchMode = Literal["short", "long", "both"]
 
 SYMBOL_WATCH_MODES: dict[str, WatchMode] = dict(DEFAULT_MODES)
-
-# Per-symbol blacklist for persistent fetch errors (delisted / halted).
-# TTL: auto-remove after BLACKLIST_TTL_S seconds.
-_symbol_blacklist: dict[str, float] = {}
-BLACKLIST_TTL_S = 3600  # 1 hour
-
-
-def blacklist_symbol(symbol: str) -> None:
-    sym = symbol.upper()
-    _symbol_blacklist[sym] = time.monotonic() + BLACKLIST_TTL_S
-
-
-def unblacklist_symbol(symbol: str) -> None:
-    _symbol_blacklist.pop(symbol.upper(), None)
-
-
-def is_blacklisted(symbol: str) -> bool:
-    sym = symbol.upper()
-    expiry = _symbol_blacklist.get(sym)
-    if expiry is None:
-        return False
-    if time.monotonic() >= expiry:
-        _symbol_blacklist.pop(sym, None)
-        return False
-    return True
-
-
-def blacklisted_symbols() -> frozenset[str]:
-    now = time.monotonic()
-    expired = [s for s, exp in _symbol_blacklist.items() if now >= exp]
-    for s in expired:
-        _symbol_blacklist.pop(s, None)
-    return frozenset(_symbol_blacklist.keys())
 
 OUT_PATH = TICK_JSONL
 STATE_PATH = TELEGRAM_COOLDOWN
@@ -301,3 +267,108 @@ def signal_lifecycle_store():
     from hunt_core.signals.lifecycle import SignalLifecycleStore
 
     return SignalLifecycleStore.load()
+
+
+# ── Session checkpoint ───────────────────────────────────────────────────────
+
+_CHECKPOINT_SCHEMA_VERSION = 1
+
+
+def _checkpoint_data(store: SymbolStateStore) -> dict[str, Any]:
+    return {
+        "schema_version": _CHECKPOINT_SCHEMA_VERSION,
+        "timestamp": clock.now_utc().isoformat(),
+        "rsi_exhaustion_latched": dict(store.rsi_exhaustion_latched),
+        "dump_guard": dict(store.dump_guard),
+        "sticky": dict(store.sticky),
+        "regime": dict(store.regime),
+    }
+
+
+def save_session_checkpoint(state: SymbolStateStore | None = None) -> Path | None:
+    """Atomically save session state in dual format:
+
+    - ``session_checkpoint.json`` — versioned JSON for long-term storage
+      (schema_version=1, portable across Python versions).
+    - ``session_checkpoint.pkl.gz`` — pickle for fast process recovery.
+
+    Prefer JSON for cross-version compatibility; fall back to pickle for speed.
+    """
+    store = state or current_symbol_state()
+    data = _checkpoint_data(store)
+    SESSION_DIR.mkdir(parents=True, exist_ok=True)
+
+    saved: Path | None = None
+
+    # Primary: versioned JSON (long-term portable).
+    json_dst = SESSION_DIR / "session_checkpoint.json"
+    try:
+        tmp = SESSION_DIR / "_checkpoint.json.tmp"
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+        tmp.rename(json_dst)
+        saved = json_dst
+    except OSError:
+        LOG.exception("session_checkpoint_json_save_failed")
+
+    # Secondary: gzip pickle (fast process recovery).
+    try:
+        import gzip
+        import pickle
+
+        pkl_dst = SESSION_DIR / "session_checkpoint.pkl.gz"
+        tmp = SESSION_DIR / "_checkpoint.pkl.tmp"
+        with gzip.open(tmp, "wb") as f:
+            pickle.dump(data, f)
+        tmp.rename(pkl_dst)
+        saved = pkl_dst
+    except OSError:
+        LOG.exception("session_checkpoint_pickle_save_failed")
+
+    return saved
+
+
+def load_session_checkpoint() -> dict[str, Any] | None:
+    """Load checkpoint, preferring JSON (portable) over pickle (fast).
+
+    Falls back gracefully if only one format exists.
+    """
+    json_dst = SESSION_DIR / "session_checkpoint.json"
+    pkl_dst = SESSION_DIR / "session_checkpoint.pkl.gz"
+
+    # Prefer JSON (portable across Python versions).
+    if json_dst.exists():
+        try:
+            raw = json.loads(json_dst.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                return raw
+        except (OSError, json.JSONDecodeError):
+            LOG.exception("session_checkpoint_json_load_failed, falling back to pickle")
+
+    # Fall back to gzip pickle.
+    if pkl_dst.exists():
+        try:
+            import gzip
+            import pickle
+
+            with gzip.open(pkl_dst, "rb") as f:
+                return pickle.load(f)
+        except (OSError, pickle.UnpicklingError):
+            LOG.exception("session_checkpoint_pickle_load_failed")
+
+    return None
+
+
+def restore_session_checkpoint(target: SymbolStateStore | None = None) -> bool:
+    """Restore checkpoint data into a SymbolStateStore.
+
+    Returns False when no checkpoint exists or all formats failed.
+    """
+    data = load_session_checkpoint()
+    if data is None:
+        return False
+    store = target or current_symbol_state()
+    store.rsi_exhaustion_latched.update(data.get("rsi_exhaustion_latched", {}))
+    store.dump_guard.update(data.get("dump_guard", {}))
+    store.sticky.update(data.get("sticky", {}))
+    store.regime.update(data.get("regime", {}))
+    return True

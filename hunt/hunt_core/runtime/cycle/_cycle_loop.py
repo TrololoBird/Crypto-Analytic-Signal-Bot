@@ -11,7 +11,7 @@ from typing import Any
 from hunt_core import clock
 from hunt_core.data.collect import TickBatchCache, safe_fetch
 from hunt_core.data.lake import FeatureLakeWriter, buffer_tick_rows, flush_lake
-from hunt_core.hunter.prescan import (
+from hunt_core.scanner.prescan import (
     PrescanDebounceQueue,
     PrescanEngine,
     apply_quality_gates,
@@ -32,7 +32,7 @@ from hunt_core.regime.market_regime import (
     load_regime_file,
     refresh_market_regime,
 )
-from hunt_core.errors import DEFENSIVE_EXC, defensive_exc_types
+from hunt_core.errors import DEFENSIVE_EXC, defensive_exc_types, system_breakers
 from hunt_core.features.prepare import min_required_bars
 from hunt_core.market import (
     CrossExchangeConfig,
@@ -64,6 +64,7 @@ from hunt_core.track.pump_history import (
 )
 from hunt_core.track.tracker import iter_active_tracker_symbols, load_tracker_state
 from hunt_core.domain.config import load_settings
+from hunt_core.market.network import run_proxy_refresh_daemon
 
 
 def _build_digest_candidates(
@@ -104,6 +105,42 @@ def _build_digest_candidates(
     return out
 
 
+async def _manipulation_scan_loop(
+    symbols: list[str],
+    client: Any,
+    broadcaster: Any | None,
+    send_telegram: bool,
+    *,
+    interval_s: int = 300,
+) -> None:
+    """Periodic scan for manipulation reversal setups (scanner/detect/patterns.py).
+
+    Detects Pattern A (long: impulse→absorption→bokovik→sweep→break) and
+    Pattern B (short: HTF sweep→fade→LTF_confirm) across the non-pinned
+    universe. Each scan fetches OHLCV for all tracked symbols, runs the
+    state machine, and delivers if score ≥ 0.50.
+    """
+    from hunt_core.deliver.manipulation_delivery import deliver_manipulation_setups
+    from hunt_core.data.lake import buffer_tracker_state, flush_tracker_state
+    from hunt_core.track.tracker import load_tracker_state
+
+    LOG.info("manipulation_scan_loop_started interval=%s symbols=%s", interval_s, len(symbols))
+    while not should_stop():
+        try:
+            if send_telegram and broadcaster is not None and symbols:
+                ts = load_tracker_state()
+                await deliver_manipulation_setups(symbols, client, broadcaster, tracker_state=ts)
+                buffer_tracker_state(ts)
+                flush_tracker_state()
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            LOG.exception("manipulation_scan_loop_error")
+        await asyncio.sleep(interval_s)
+
+    LOG.info("manipulation_scan_loop_stopped")
+
+
 async def run_loop(
     cli_symbols: tuple[str, ...],
     interval_s: int,
@@ -137,16 +174,10 @@ async def run_loop(
     if migrate_calibration_split():
         LOG.info("hunt_calibration_migrated", path="hunt/data/hunt_calibration.json")
     try:
-        from hunt_core._dev.rebuild_calibration import rebuild_calibration
         from hunt_core.params.store import invalidate_calibration_cache
 
-        cal = rebuild_calibration(dry_run=False)
         invalidate_calibration_cache()
-        LOG.info(
-            "hunt_calibration_rebuilt",
-            version=cal.get("version"),
-            n_outcomes=(cal.get("outcome_stats") or {}).get("n"),
-        )
+        LOG.debug("hunt_calibration_rebuild_skipped", reason="module_unavailable")
     except Exception:
         LOG.exception("hunt_calibration_rebuild_failed")
     try:
@@ -162,22 +193,30 @@ async def run_loop(
     broadcaster: TelegramBroadcaster | None = None
     if send_telegram:
         if not settings.tg_token or not settings.target_chat_id:
-            msg = "Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)"
-            raise RuntimeError(msg)
-        for attempt in range(3):
-            try:
-                broadcaster = TelegramBroadcaster(settings.tg_token, settings.target_chat_id)
-                await broadcaster.preflight_check()
-                LOG.info("watch_telegram_ready", chat=settings.target_chat_id, mode="confirm_only")
-                break
-            except DEFENSIVE_EXC as exc:
-                LOG.warning("watch_telegram_preflight_failed", attempt=attempt + 1, error=repr(exc))
-                broadcaster = None
-                if attempt < 2:
-                    await asyncio.sleep(2.0 * (attempt + 1))
-        if broadcaster is None:
-            LOG.warning("watch_telegram_disabled", reason="preflight_failed")
+            LOG.warning(
+                "watch_telegram_disabled",
+                reason="missing_credentials",
+                missing=[
+                    "TELEGRAM_BOT_TOKEN" if not settings.tg_token else None,
+                    "TELEGRAM_CHAT_ID" if not settings.target_chat_id else None,
+                ],
+            )
             send_telegram = False
+        else:
+            for attempt in range(3):
+                try:
+                    broadcaster = TelegramBroadcaster(settings.tg_token, settings.target_chat_id)
+                    await broadcaster.preflight_check()
+                    LOG.info("watch_telegram_ready", chat=settings.target_chat_id, mode="confirm_only")
+                    break
+                except DEFENSIVE_EXC as exc:
+                    LOG.warning("watch_telegram_preflight_failed", attempt=attempt + 1, error=repr(exc))
+                    broadcaster = None
+                    if attempt < 2:
+                        await asyncio.sleep(2.0 * (attempt + 1))
+            if broadcaster is None:
+                LOG.warning("watch_telegram_disabled", reason="preflight_failed")
+                send_telegram = False
 
     minimums = min_required_bars(
         min_bars_15m=settings.filters.min_bars_15m,
@@ -194,7 +233,27 @@ async def run_loop(
         refresh_s=cross_cfg.refresh_interval_s,
         max_symbols=cross_cfg.max_symbols_per_refresh,
     )
-    plane = await create_hunt_market_plane_from_settings(settings)
+    # Startup network/DNS can be transiently down (e.g. right after the host
+    # wakes from sleep) — create_hunt_market_plane_from_settings already
+    # retries proxies internally, but one pass giving up killed the whole
+    # unattended run on a single blip. Retry the full attempt a few times
+    # with backoff before actually failing startup.
+    plane = None
+    _plane_exc: Exception | None = None
+    for _attempt in range(1, 4):
+        try:
+            plane = await create_hunt_market_plane_from_settings(settings)
+            break
+        except Exception as exc:
+            _plane_exc = exc
+            LOG.warning(
+                "hunt_market_plane_startup_retry | attempt=%d error=%s",
+                _attempt, type(exc).__name__,
+            )
+            if _attempt < 3:
+                await asyncio.sleep(20.0 * _attempt)
+    if plane is None:
+        raise _plane_exc
     client = plane.client
     ws_feed = plane.streams
     spot_companion = plane.spot
@@ -205,9 +264,23 @@ async def run_loop(
     last_bias: dict[str, str] = {}
     last_lifecycle_phase: dict[str, str] = {}
     symbol_state = new_session_state()
-    from hunt_core.hunter.detect.intra_bar_state import IntraBarState
-    intra_bar_state = IntraBarState(initial_symbols=list(cli_symbols))
-    ws_feed._intra_bar = intra_bar_state
+    from hunt_core.data.universe import PINNED_SYMBOLS, load_watchlist_symbols
+    # Pinned symbols are Prizrak's exclusive domain (Deep module — continuous
+    # analysis, structural накопление/PP/traps, its own HTF-gated candidates).
+    # Scanner owns only the non-pinned universe.
+    pinned_upper = {str(s).upper() for s in PINNED_SYMBOLS}
+    all_intra_bar_syms = [
+        s for s in dict.fromkeys(list(cli_symbols) + load_watchlist_symbols())
+        if str(s).upper() not in pinned_upper
+    ]
+
+    manipulation_task: asyncio.Task[None] | None = None
+    if not once:
+        manipulation_task = asyncio.create_task(
+            _manipulation_scan_loop(all_intra_bar_syms, client, broadcaster, send_telegram),
+            name="manipulation_scan_loop",
+        )
+        LOG.info("manipulation_scan_loop_scheduled")
 
     from hunt_core.data.frame_cache import reset_frame_cache
 
@@ -301,50 +374,28 @@ async def run_loop(
         )
         LOG.info("analyst_pinned_loop_scheduled")
 
-    expansion_review_task: asyncio.Task[None] | None = None
-    from hunt_core.expansion.config import load_expansion_config
-
-    exp_cfg = load_expansion_config()
-    if exp_cfg.enabled and exp_cfg.lab_runtime:
-        try:
-            from hunt_core.expansion.runtime_state import load_expansion_runtime_state
-
-            load_expansion_runtime_state()
-        except Exception:
-            LOG.exception("expansion_fsm_load_failed")
-
-    if not once and exp_cfg.enabled and exp_cfg.lab_runtime and exp_cfg.review_loop:
-        from hunt_core.runtime.analyst_assembly import expansion_outcome_review_loop
-
-        expansion_review_task = asyncio.create_task(
-            expansion_outcome_review_loop(client),
-            name="expansion_outcome_review_loop",
-        )
-        LOG.info("expansion_review_loop_scheduled", interval_s=exp_cfg.review_interval_s)
-
-    expansion_universe_task: asyncio.Task[None] | None = None
-    if not once and exp_cfg.enabled and exp_cfg.lab_runtime and exp_cfg.tg_universe_scan and send_telegram:
-        from hunt_core.expansion.universe_scan import expansion_universe_scan_loop
-
-        expansion_universe_task = asyncio.create_task(
-            expansion_universe_scan_loop(broadcaster, send_telegram=send_telegram),
-            name="expansion_universe_scan_loop",
-        )
-        LOG.info(
-            "expansion_universe_scan_scheduled",
-            interval_s=exp_cfg.tg_universe_interval_s,
-            top_n=exp_cfg.tg_universe_top_n,
-        )
-
-    calibration_task: asyncio.Task[None] | None = None
+    path_backfill_task: asyncio.Task[None] | None = None
     if not once:
-        from hunt_core.runtime.analyst_assembly import calibration_refresh_loop
+        from hunt_core.track.path_backfill import path_backfill_loop
 
-        calibration_task = asyncio.create_task(
-            calibration_refresh_loop(),
-            name="calibration_refresh_loop",
+        path_backfill_task = asyncio.create_task(
+            path_backfill_loop(client, interval_s=900.0),
+            name="path_backfill_loop",
         )
-        LOG.info("calibration_refresh_scheduled", interval_s=6 * 3600)
+        LOG.info("path_backfill_scheduled", interval_s=900.0)
+
+    proxy_refresh_task: asyncio.Task[None] | None = None
+    if not once:
+        from hunt_core.paths import ROOT
+
+        proxy_refresh_task = asyncio.create_task(
+            run_proxy_refresh_daemon(
+                interval_s=900.0,
+                config_path=ROOT / "config.toml",
+            ),
+            name="proxy_refresh",
+        )
+        LOG.info("proxy_refresh_scheduled", interval_s=900.0)
 
     # Hang watchdog: if a cycle stalls (e.g. an unbounded loop in scan/levels on
     # degenerate data), faulthandler dumps every Python thread's stack — it works
@@ -355,6 +406,7 @@ async def run_loop(
     _wd_file = (OUT_PATH.parent / "hunt_watchdog.log").open("a", buffering=1)
     LOG.info("hunt_watchdog_armed", timeout_s=_wd_timeout_s)
     _pinned_brief_sent = False
+    _last_checkpoint = time.monotonic()
     try:
         tick_ctx: dict[str, Any] | None = None
         while not should_stop():
@@ -376,7 +428,7 @@ async def run_loop(
 
                 if not once and time.monotonic() - last_scan >= SCAN_INTERVAL_S:
                     try:
-                        from hunt_core.hunter.prescan import run_scan
+                        from hunt_core.scanner.prescan import run_scan
 
                         summary = await run_scan(
                             limit=30, min_score=45.0, client=client
@@ -478,7 +530,7 @@ async def run_loop(
                         for _d in prescan_ready:
                             append_prescan_universe_audit(_d, ts=now)
                     except Exception:
-                        pass
+                        LOG.exception("hunt_prescan_universe_audit_failed")
                     for d in prescan_ready[:12]:
                         record_funnel_stage(
                             "prescan",
@@ -528,7 +580,7 @@ async def run_loop(
                         )
                         or prescan_thresholds()["max_change_pct_for_merge"]
                     )
-                    from hunt_core.hunter.prescan import prescan_merge_eligible
+                    from hunt_core.scanner.prescan import prescan_merge_eligible
 
                     prescan_filtered: list[Any] = []
                     prescan_skipped_late = 0
@@ -549,7 +601,7 @@ async def run_loop(
                                     ts=now,
                                 )
                             except Exception:
-                                pass
+                                LOG.exception("hunt_prescan_merge_skip_audit_failed")
                     if prescan_skipped_late:
                         LOG.info(
                             "hunt_prescan_late_chase_skipped",
@@ -612,11 +664,7 @@ async def run_loop(
                         _warmup_writer.close()
                     _lake_warmed_syms.update(_cold)
                 active = tuple(s for s in active if not is_blacklisted(s))
-                hunt_active = tuple(
-                    s
-                    for s in active
-                    if s not in PINNED_SYMBOLS or s in prescan_pinned_ready
-                )
+                hunt_active = tuple(active)
                 load_plan = load_planner.plan_tick(
                     hunt_active,
                     ignited=set(ignition_by_sym.keys()),
@@ -626,7 +674,6 @@ async def run_loop(
                     "hunt_load_plan",
                     symbols=len(hunt_active),
                     ws_symbols=len(active),
-                    pinned_excluded=len(active) - len(hunt_active),
                     parallel=load_plan.parallel,
                     full=load_plan.full_count,
                     fast=load_plan.fast_count,
@@ -710,11 +757,35 @@ async def run_loop(
                     faulthandler.dump_traceback_later(
                         _wd_timeout_s, repeat=False, file=_wd_file, exit=True
                     )
+                # Circuit breaker telemetry — log OPEN state once per tick.
+                _breakers = system_breakers()
+                if not _breakers.rest.can_execute():
+                    LOG.warning(
+                        "circuit_breaker_rest_open | state=%s failures=%d threshold=%d recovery=%.0fs",
+                        _breakers.rest.state.name,
+                        _breakers.rest.failures,
+                        _breakers.rest.failure_threshold,
+                        _breakers.rest.recovery_timeout,
+                    )
+                if not _breakers.ws.can_execute():
+                    LOG.warning(
+                        "circuit_breaker_ws_open | state=%s failures=%d threshold=%d recovery=%.0fs",
+                        _breakers.ws.state.name,
+                        _breakers.ws.failures,
+                        _breakers.ws.failure_threshold,
+                        _breakers.ws.recovery_timeout,
+                    )
+                if not _breakers.execution.can_execute():
+                    LOG.warning(
+                        "circuit_breaker_execution_open | state=%s failures=%d threshold=%d",
+                        _breakers.execution.state.name,
+                        _breakers.execution.failures,
+                        _breakers.execution.failure_threshold,
+                    )
                 async with _TICK_LOCK:
                     rows = await run_tick(
                         hunt_active,
                         **{k: v for k, v in tick_ctx.items() if k != "active"},
-                        intra_bar=intra_bar_state,
                     )
                 if (
                     not once
@@ -758,17 +829,18 @@ async def run_loop(
                     )
                     if sent_digest:
                         LOG.info("hunt_digest_scheduled_sent", candidates=len(digest_candidates))
+                # Periodic session checkpoint (~every 5 minutes)
+                if time.monotonic() - _last_checkpoint >= 300.0:
+                    try:
+                        from hunt_core.runtime.state import save_session_checkpoint
+                        cp = save_session_checkpoint(symbol_state)
+                        if cp:
+                            LOG.info("session_checkpoint_saved", path=str(cp.name))
+                        _last_checkpoint = time.monotonic()
+                    except Exception:
+                        LOG.exception("session_checkpoint_save_failed")
                 save_pump_history(pump_store)
                 buffer_tick_rows(rows)
-                try:
-                    if exp_cfg.lab_runtime:
-                        from hunt_core.expansion.runtime_state import (
-                            maybe_save_expansion_runtime_state,
-                        )
-
-                        maybe_save_expansion_runtime_state()
-                except Exception:
-                    LOG.debug("expansion_runtime_maybe_save_failed", exc_info=True)
                 if not once:
                     faulthandler.cancel_dump_traceback_later()
                 if (
@@ -826,37 +898,30 @@ async def run_loop(
                 await tg_task
             except asyncio.CancelledError:
                 pass
+        if manipulation_task is not None:
+            manipulation_task.cancel()
+            try:
+                await manipulation_task
+            except asyncio.CancelledError:
+                pass
         if deep_task is not None:
             deep_task.cancel()
             try:
                 await deep_task
             except asyncio.CancelledError:
                 pass
-        if expansion_review_task is not None:
-            expansion_review_task.cancel()
+        if path_backfill_task is not None:
+            path_backfill_task.cancel()
             try:
-                await expansion_review_task
+                await path_backfill_task
             except asyncio.CancelledError:
                 pass
-        if expansion_universe_task is not None:
-            expansion_universe_task.cancel()
+        if proxy_refresh_task is not None:
+            proxy_refresh_task.cancel()
             try:
-                await expansion_universe_task
+                await proxy_refresh_task
             except asyncio.CancelledError:
                 pass
-        if calibration_task is not None:
-            calibration_task.cancel()
-            try:
-                await calibration_task
-            except asyncio.CancelledError:
-                pass
-        if exp_cfg.lab_runtime:
-            try:
-                from hunt_core.expansion.runtime_state import save_expansion_runtime_state
-
-                save_expansion_runtime_state()
-            except Exception:
-                LOG.exception("expansion_fsm_save_failed")
         if tg_cmds is not None:
             await tg_cmds.close()
         try:

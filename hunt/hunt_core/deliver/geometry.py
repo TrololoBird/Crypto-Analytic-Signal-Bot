@@ -17,9 +17,27 @@ def setup_risk_reward(setup: dict[str, Any]) -> float | None:
         return None
 
 
+def _p_win_from_setup(setup: dict[str, Any]) -> float | None:
+    for key in ("p_win", "confidence_score", "delivery_confidence_score"):
+        try:
+            v = setup.get(key)
+            if v is not None:
+                return float(v)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def resolve_min_rr(setup: dict[str, Any], *, direction: str = "", symbol: str = "") -> float:
-    """Fixed R:R floor; structural levels already enforce a minimum."""
-    del setup, direction, symbol
+    """R:R floor scaled by p_win: higher p_win → lower acceptable RR.
+
+    When p_win is unavailable, falls back to DEFAULT_MIN_RR=1.6.
+    """
+    del direction, symbol
+    p = _p_win_from_setup(setup)
+    if p is not None and 0 < p < 1:
+        scaled = DEFAULT_MIN_RR * (0.5 / max(p, 0.05))
+        return max(1.0, scaled)
     return DEFAULT_MIN_RR
 
 

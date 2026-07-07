@@ -217,7 +217,7 @@ def mission_delivery_block(
                 "mission_not_pre_dump",
                 f"Фаза {phase or '—'} вне pre-dump окна (exhaustion/distribution/initiating)",
             )
-        if isinstance(setup, dict) and setup.get("confirmed"):
+        if isinstance(setup, dict) and setup.get("impulse_confirmed"):
             sp = str(setup.get("phase") or "")
             if sp == "pre_dump":
                 return None
@@ -259,7 +259,7 @@ def mission_delivery_block(
                 "mission_not_pre_pump",
                 f"Фаза {phase or '—'} вне pre-pump окна (accumulation/bounce/coil)",
             )
-        if isinstance(setup, dict) and setup.get("confirmed"):
+        if isinstance(setup, dict) and setup.get("impulse_confirmed"):
             sp = str(setup.get("phase") or "")
             if sp == "pre_pump":
                 return None

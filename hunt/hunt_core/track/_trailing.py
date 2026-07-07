@@ -73,16 +73,20 @@ def _update_trailing_stop(
     """Trail SL behind peak MFE; squeeze_on + MFE>0 tightens room by 30% (Phase 5B).
 
     Returns ``(updated, previous_stop)`` for same-tick guards and TG notifications.
+
+    Манипуляционные сигналы (reversal) не используют трейлинг — держим до цели/стопа.
     """
+    if str(active.get("entry_type") or "") == "manipulation_reversal":
+        return False, float(active.get("stop_loss") or 0)
     cur_stop = float(active.get("stop_loss") or 0)
     mfe = _mfe_pct(active, direction=direction)
     if mfe <= 0:
         return False, cur_stop
     tr = tracker_thresholds(symbol)
     entry_phase = str(active.get("entry_lifecycle_phase") or "")
-    min_trail_mfe = float(tr.get("min_trail_mfe_pct", 3.5))
+    min_trail_mfe = float(tr.get("min_trail_mfe_pct", 2.5))
     _ = entry_phase
-    if mfe < min_trail_mfe:
+    if mfe <= min_trail_mfe:
         return False, cur_stop
     initial_r = _initial_risk_distance(active, direction=direction)
     if initial_r <= 0:

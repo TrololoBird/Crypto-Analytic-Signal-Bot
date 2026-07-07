@@ -81,7 +81,7 @@ def collect_lifecycle_blockers(
 
     if (
         direction == "short"
-        and bool(setup.get("confirmed") or setup.get("intrabar_confirmed"))
+        and bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed"))
         and phase == "dump_active"
         and str(lc.get("recommended_bias") or "") == "wait"
     ):
@@ -93,7 +93,7 @@ def collect_lifecycle_blockers(
             )
         )
 
-    confirmed = bool(setup.get("confirmed") or setup.get("intrabar_confirmed"))
+    confirmed = bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed"))
     if direction == "short" and confirmed:
         late = _short_dump_delivery_too_late(lc, setup, symbol=sym)
         if late is not None:

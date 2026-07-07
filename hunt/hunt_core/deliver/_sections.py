@@ -101,9 +101,16 @@ def format_mtf_section(
     lines.append("")
     lines.append(f"🎯 <b>MTF bias:</b> {dom_ru} <i>(контекст)</i>")
 
-    from hunt_core.scanner.detect.probe import hunt_confirmed_direction
+    def _hunt_confirmed_direction(r: dict[str, Any]) -> str:
+        dump_s = r.get("dump") if isinstance(r.get("dump"), dict) else {}
+        long_s = r.get("long") if isinstance(r.get("long"), dict) else {}
+        if dump_s.get("confirmed") or dump_s.get("intrabar_confirmed"):
+            return "short"
+        if long_s.get("confirmed") or long_s.get("intrabar_confirmed"):
+            return "long"
+        return ""
 
-    hunt_conf = hunt_confirmed_direction(row or {})
+    hunt_conf = _hunt_confirmed_direction(row or {})
     if hunt_conf == "short":
         lines.append("✅ <b>Hunt confirm:</b> ШОРТ · closed-bar")
     elif hunt_conf == "long":
@@ -361,7 +368,10 @@ def format_liquidation_map_section(row: dict[str, Any]) -> str:
     synthetic_only = bool(market.get("liq_synthetic_only"))
     if nearest_long is None and nearest_short is None and not cascade:
         return ""
-    lines = ["💥 <b>Ликвидации</b>"]
+    header = "💥 <b>Ликвидации</b>"
+    if synthetic_only:
+        header += " · <i>оценка по leverage-tier, без реальных ликвидаций</i>"
+    lines = [header]
     if nearest_long is not None:
         pull = market.get("liq_magnet_pull_long_pct")
         tail = f" ({pull:.1f}%)" if pull is not None else ""
@@ -479,11 +489,20 @@ def format_orderflow_section(row: dict[str, Any]) -> str:
             lines.append(f"Δ @ <code>{_fmt_price(float(px))}</code>: {sign}{float(delta or 0):,.0f}")
     sticky = (ob or {}).get("sticky_walls") or []
     if sticky:
-        s = sticky[0]
-        if isinstance(s, dict):
+        _sticky_shown: set[str] = set()
+        for s in sticky[:3]:
+            if not isinstance(s, dict):
+                continue
+            px = float(s.get("price") or 0)
+            side = str(s.get("side", "?")).lower()
+            samples = s.get("samples", 0)
+            _key = f"{px:.6f}" if px < 1 else f"{px:.4f}"
+            if _key in _sticky_shown:
+                continue
+            _sticky_shown.add(_key)
             lines.append(
-                f"Sticky {s.get('side', '?')} wall @ <code>{_fmt_price(float(s.get('price') or 0))}</code>"
-                f" ({s.get('samples')} samples)"
+                f"Sticky {side} @ <code>{_fmt_price(px)}</code>"
+                f" ({samples} samples)"
             )
     return "\n".join(lines) if len(lines) > 1 else ""
 
@@ -514,8 +533,15 @@ def format_book_walls_section(row: dict[str, Any]) -> str:
         agg = " агр." if int(vc) > 1 else ""
         return f"{emoji} {side}: {tag}{agg} {_fmt_price(float(px))} (${float(notional or 0)/1e3:.1f}k)"
 
+    _CROSS_VENUE_CLUSTER_TOL_PCT = 0.05  # levels within this % of each other = one wall, not three
+
     def _top_per_venue(side_key: str) -> list[dict[str, Any]]:
-        out: list[dict[str, Any]] = []
+        """Best level per venue, then merged across venues within a tight price band —
+        otherwise each exchange's own top-of-book (always within a few bps of price)
+        renders as 2-3 near-duplicate "walls" a few ticks apart, reading as noise
+        rather than one real level with real aggregate size behind it.
+        """
+        raw: list[dict[str, Any]] = []
         for ex, snap in per_ex.items():
             if not isinstance(snap, dict):
                 continue
@@ -530,9 +556,39 @@ def format_book_walls_section(row: dict[str, Any]) -> str:
             if best:
                 row_lvl = dict(best)
                 row_lvl["exchange"] = ex
-                out.append(row_lvl)
-        out.sort(key=lambda r: float(r.get("notional_usd") or 0), reverse=True)
-        return out[:3]
+                raw.append(row_lvl)
+        if not raw:
+            return []
+
+        price = float(row.get("price") or 0)
+        tol = price * _CROSS_VENUE_CLUSTER_TOL_PCT / 100.0 if price > 0 else 0.0
+        raw.sort(key=lambda r: float(r.get("price") or 0))
+        clusters: list[dict[str, Any]] = []
+        for lvl in raw:
+            px = float(lvl.get("price") or 0)
+            notional = float(lvl.get("notional_usd") or 0)
+            if clusters and tol > 0 and abs(px - clusters[-1]["_ref_px"]) <= tol:
+                c = clusters[-1]
+                c["notional_usd"] = c.get("notional_usd", 0.0) + notional
+                c["venue_count"] = c.get("venue_count", 1) + 1
+                # Weighted-average anchor so the cluster price tracks its biggest venue.
+                if notional > c.get("_max_notional", 0.0):
+                    c["price"] = px
+                    c["_max_notional"] = notional
+                    c["exchange"] = lvl.get("exchange")
+            else:
+                clusters.append(
+                    {
+                        "price": px,
+                        "notional_usd": notional,
+                        "venue_count": 1,
+                        "exchange": lvl.get("exchange"),
+                        "_ref_px": px,
+                        "_max_notional": notional,
+                    }
+                )
+        clusters.sort(key=lambda c: c["notional_usd"], reverse=True)
+        return clusters[:3]
 
     freshness = row.get("freshness") if isinstance(row.get("freshness"), dict) else {}
     dom_age = freshness.get("dom_age_s")
@@ -543,8 +599,37 @@ def format_book_walls_section(row: dict[str, Any]) -> str:
     lines = [f"📋 <b>Карта ордеров ({dom_label})</b>"]
     if isinstance(venues, list) and len(venues) > 1:
         lines[0] += f" <i>({len(venues)} бирж)</i>"
+    stale_excluded = walls.get("stale_venues_excluded")
+    if isinstance(stale_excluded, list) and stale_excluded:
+        lines.append(f"<i>⏱ исключены устаревшие: {', '.join(str(v)[:3].upper() for v in stale_excluded)}</i>")
 
-    if isinstance(per_ex, dict) and len(per_ex) > 1:
+    # Prefer real full-depth cross-venue buckets (merge_full_depth_bins) over top-of-book
+    # per-venue levels — each exchange's own best bid/ask sits within a few bps of price
+    # by definition, so displaying them individually reads as "3 separate walls a tick
+    # apart" when it's really one shallow front-of-book with real depth sitting a bit
+    # further out. depth_bins sums actual book size (not just best tick) into fixed
+    # price buckets (~0.5% wide by default) across every venue's full snapshot.
+    depth_bins = walls.get("depth_bins") if isinstance(walls.get("depth_bins"), dict) else None
+
+    def _fmt_bin(side: str, b: dict[str, Any], emoji: str) -> str:
+        center = b.get("price_center")
+        depth = b.get("depth_usd")
+        if center is None:
+            return ""
+        intensity = b.get("intensity")
+        pct = f" · {float(intensity):.0%} от макс." if intensity is not None else ""
+        return f"{emoji} {side}: ≈{_fmt_price(float(center))} (${float(depth or 0)/1e3:.1f}k{pct})"
+
+    if depth_bins and (depth_bins.get("bid_bins") or depth_bins.get("ask_bins")):
+        for b in (depth_bins.get("bid_bins") or [])[:2]:
+            line = _fmt_bin("Покупка", b, "🟢")
+            if line:
+                lines.append(line)
+        for b in (depth_bins.get("ask_bins") or [])[:2]:
+            line = _fmt_bin("Продажа", b, "🔴")
+            if line:
+                lines.append(line)
+    elif isinstance(per_ex, dict) and len(per_ex) > 1:
         bid_levels = _top_per_venue("bid_levels")
         ask_levels = _top_per_venue("ask_levels")
         for lvl in bid_levels:
@@ -614,7 +699,8 @@ def format_book_walls_section(row: dict[str, Any]) -> str:
             i0 = ice[0]
             side_ru = "покупка" if i0.get("side") == "bid" else "продажа"
             ratio = i0.get("replenishment_ratio")
-            ratio_s = f" · пополнение ×{float(ratio):.1f}" if ratio else ""
+            ratio_suffix = "+" if i0.get("replenishment_ratio_capped") else ""
+            ratio_s = f" · пополнение ×{float(ratio):.1f}{ratio_suffix}" if ratio else ""
             lines.append(
                 f"🧊 Скрытый ордер ({side_ru}) @ <code>{_fmt_price(float(i0.get('price') or 0))}</code>{ratio_s}"
             )
@@ -695,13 +781,13 @@ def _humanize_micro_bias(raw: str) -> str:
 
 
 def format_pinned_deep_analysis(row: dict[str, Any]) -> str:
-    """Deep /signal block via hunt_core.deep (Module 1 — not scanner lake_panel)."""
+    """Deep /signal block via hunt_core.prizrak (Module 1 — not hunter lake_panel)."""
     sym = str(row.get("symbol") or "")
     if not sym:
         return ""
     try:
-        from hunt_core.deep.build import build_deep_report
-        from hunt_core.deep.format_telegram import format_deep_analysis_telegram
+        from hunt_core.prizrak.build import build_deep_report
+        from hunt_core.prizrak.format_telegram import format_deep_analysis_telegram
 
         analysis = build_deep_report(row, include_watch_appendix=False)
         return format_deep_analysis_telegram(analysis)

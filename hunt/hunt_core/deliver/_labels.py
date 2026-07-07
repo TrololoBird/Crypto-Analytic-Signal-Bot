@@ -4,6 +4,13 @@ from __future__ import annotations
 import html
 from typing import Any
 
+# Shown on every delivered signal card (dispatch.py, intra_bar_delivery.py) --
+# single source so wording only needs to change in one place.
+EXPERIMENTAL_DISCLAIMER_RU = (
+    "<i>Сигнал экспериментальный. Направленный edge не подтверждён на бэктесте. "
+    "Решение о входе и риск — на пользователе.</i>"
+)
+
 PHASE_HUMAN: dict[str, str] = {
     "dump_active": "Активный дамп",
     "dump_initiating": "Начало дампа",
@@ -193,7 +200,7 @@ def rr_display(risk_reward: Any) -> str:
 
 
 def signal_strength_rating(conviction_pct: float, lc_phase: str) -> str:
-    """Map 0–100 conviction (P×100 when calibrated) to operator tier."""
+    """Map 0-100 uncalibrated composite score to operator tier (not a probability)."""
     if conviction_pct >= 70:
         tier = "strong"
     elif conviction_pct >= 60:
@@ -212,6 +219,7 @@ def signal_strength_rating(conviction_pct: float, lc_phase: str) -> str:
 
 
 __all__ = [
+    "EXPERIMENTAL_DISCLAIMER_RU",
     "PHASE_HUMAN",
     "fmt_price",
     "format_symbol_telegram",

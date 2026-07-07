@@ -12,7 +12,7 @@ from hunt_core.scanner.gate._registry import pipeline_pre_blockers as _pipeline_
 from hunt_core.scanner.gate._ev import (
     filter_ev_primary_legacy_blockers,
     setup_conviction_pct,
-    setup_p_win,
+    setup_confidence_score,
 )
 from hunt_core.scanner.gate._rr import (
     effective_min_rr as _effective_min_rr,
@@ -34,10 +34,8 @@ def log_strategic_shadow(
     code: str,
     message: str,
 ) -> None:
-    from hunt_core.scanner.detect.calibrate import symbol_state_tier
     from hunt_core.track.shadow import append_shadow_reject, shadow_record_from_delivery
 
-    n = int((row.get("feature_window_n") or row.get("lake_bars") or 0))
     append_shadow_reject(
         {
             **shadow_record_from_delivery(
@@ -47,7 +45,6 @@ def log_strategic_shadow(
                 setup=setup,
                 blockers=[code],
                 no_signal_reason=message,
-                symbol_state_tier=symbol_state_tier(n),
             ),
             "shadow_mode": True,
         }
@@ -62,12 +59,10 @@ def log_delivery_shadow(
     row: dict[str, Any],
     blockers: list[GateResult],
 ) -> None:
-    from hunt_core.scanner.detect.calibrate import symbol_state_tier
     from hunt_core.track.shadow import append_shadow_reject, shadow_record_from_delivery
 
     if not blockers:
         return
-    n = int((row.get("feature_window_n") or row.get("lake_bars") or 0))
     append_shadow_reject(
         shadow_record_from_delivery(
             symbol=symbol,
@@ -76,7 +71,6 @@ def log_delivery_shadow(
             setup=setup,
             blockers=[b.code for b in blockers],
             no_signal_reason=blockers[0].message,
-            symbol_state_tier=symbol_state_tier(n),
         )
     )
 
@@ -98,10 +92,10 @@ def collect_report_blockers(
     lc = _lifecycle_dict(lifecycle)
     r = row or {}
     dl = delivery_thresholds(sym)
-    p_win = setup_p_win(setup)
+    confidence_score = setup_confidence_score(setup)
     conviction = setup_conviction_pct(setup, direction=direction)
     min_forming_p = float(dl.get("min_p_win_forming", 0.35))
-    confirmed = bool(setup.get("confirmed") or setup.get("intrabar_confirmed"))
+    confirmed = bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed"))
     blockers: list[GateResult] = []
 
     dir_block = direction_block_reason(direction)
@@ -207,22 +201,29 @@ def collect_report_blockers(
                 )
             )
 
-    if p_win is not None and p_win < min_forming_p:
-        blockers.append(
-            GateResult(
-                False,
-                "below_forming_min",
-                f"P(win) {p_win:.2f} < forming_min {min_forming_p:.2f}",
+    # Pre-phase signals are confirmed by the fusion pre-gate itself (watch_ok + pre_gate_open).
+    # The forming_min gate is redundant and blocks early accumulation signals by design.
+    _is_pre_phase = setup.get("signal_type") == "pre_phase" or str(
+        setup.get("phase") or lc.get("phase") or ""
+    ) in {"pre_pump", "pre_dump", "accumulation", "breakout_arming", "distribution"}
+    _is_confirmed = confirmed
+    if not (_is_pre_phase and _is_confirmed):
+        if confidence_score is not None and confidence_score < min_forming_p:
+            blockers.append(
+                GateResult(
+                    False,
+                    "below_forming_min",
+                    f"P(win) {confidence_score:.2f} < forming_min {min_forming_p:.2f}",
+                )
             )
-        )
-    elif p_win is None and conviction < cal.forming_min_score:
-        blockers.append(
-            GateResult(
-                False,
-                "below_forming_min",
-                f"Conviction {conviction:.0f} < forming_min {cal.forming_min_score:.0f}",
+        elif confidence_score is None and conviction < cal.forming_min_score:
+            blockers.append(
+                GateResult(
+                    False,
+                    "below_forming_min",
+                    f"Conviction {conviction:.0f} < forming_min {cal.forming_min_score:.0f}",
+                )
             )
-        )
 
     if not confirmed:
         blockers.append(
@@ -375,12 +376,12 @@ def evaluate_stale_advice(
         return f"💡 TP1 взят — зафиксируй {pct}% · остаток на TP2 / SL"
     cal = effective_hunt_params(symbol)
     dl = delivery_thresholds(symbol.upper())
-    p_win = setup_p_win(setup)
+    confidence_score = setup_confidence_score(setup)
     conviction = setup_conviction_pct(setup, direction=direction)
     min_confirm_p = float(dl.get("min_p_win", 0.42))
-    if not bool(setup.get("confirmed")) and (
-        (p_win is not None and p_win >= min_confirm_p)
-        or (p_win is None and conviction >= cal.confirm_min_score)
+    if not bool(setup.get("impulse_confirmed")) and (
+        (confidence_score is not None and confidence_score >= min_confirm_p)
+        or (confidence_score is None and conviction >= cal.confirm_min_score)
     ):
         return "💡 P(win) достаточен — жди closed-bar confirm для re-alert"
     return None
@@ -396,12 +397,12 @@ def format_setup_snapshot(
     """Compact live setup line — avoids duplicating the primary block reason."""
     lc = _lifecycle_dict(lifecycle)
     conviction = setup_conviction_pct(setup, direction=direction)
-    p_win = setup_p_win(setup)
+    confidence_score = setup_confidence_score(setup)
     phase = str(setup.get("phase") or "—")
     latch = latch_score if latch_score not in (None, "", "—") else "—"
-    confirm = "да" if bool(setup.get("confirmed")) else "нет"
+    confirm = "да" if bool(setup.get("impulse_confirmed")) else "нет"
     bias = str(lc.get("recommended_bias") or "—")
-    strength = f"P {p_win:.0%}" if p_win is not None else f"conv {conviction:.0f}"
+    strength = f"P {confidence_score:.0%}" if confidence_score is not None else f"conv {conviction:.0f}"
     return (
         f"Сетап: confirm={confirm} · {strength} (открыт {latch}) · "
         f"{phase} · bias={bias}"
@@ -451,7 +452,7 @@ def evaluate_alert_gate(
                 blockers=[br],
             )
             return br
-    if not bool(setup.get("confirmed")) and not setup.get("intrabar_confirmed"):
+    if not bool(setup.get("impulse_confirmed")) and not setup.get("intrabar_confirmed"):
         return GateResult(False, "not_confirmed", "Нет closed-bar confirm (5m/1m)")
     return GateResult(True, "ok", "Все гейты пройдены — алерт разрешён")
 
@@ -468,24 +469,24 @@ def evaluate_formation(
     cal = effective_hunt_params(sym)
     lc = _lifecycle_dict(lifecycle)
     dl = delivery_thresholds(sym)
-    p_win = setup_p_win(setup)
+    confidence_score = setup_confidence_score(setup)
     conviction = setup_conviction_pct(setup, direction=direction)
     min_forming_p = float(dl.get("min_p_win_forming", 0.35))
     min_confirm_p = float(dl.get("min_p_win", 0.42))
     phase = str(setup.get("phase") or "—")
-    confirmed = bool(setup.get("confirmed"))
+    confirmed = bool(setup.get("impulse_confirmed"))
 
     if confirmed:
-        label = f"P {p_win:.0%}" if p_win is not None else f"conv {conviction:.0f}"
+        label = f"P {confidence_score:.0%}" if confidence_score is not None else f"conv {conviction:.0f}"
         return GateResult(True, "confirmed", f"Confirm есть · phase={phase} · {label}")
 
-    if p_win is not None and p_win < min_forming_p:
+    if confidence_score is not None and confidence_score < min_forming_p:
         return GateResult(
             False,
             "forming_low",
-            f"Формирование слабое: P(win) {p_win:.2f} < {min_forming_p:.2f}",
+            f"Формирование слабое: P(win) {confidence_score:.2f} < {min_forming_p:.2f}",
         )
-    if p_win is None and conviction < cal.forming_min_score:
+    if confidence_score is None and conviction < cal.forming_min_score:
         return GateResult(
             False,
             "forming_low",
@@ -495,13 +496,13 @@ def evaluate_formation(
     gaps: list[str] = []
     if not (setup.get("confirm_hard") or []):
         gaps.append("нет structural hard")
-    if p_win is not None and p_win < min_confirm_p:
-        gaps.append(f"P(win) {p_win:.2f} < confirm {min_confirm_p:.2f}")
-    elif p_win is None and conviction < cal.confirm_min_score:
+    if confidence_score is not None and confidence_score < min_confirm_p:
+        gaps.append(f"P(win) {confidence_score:.2f} < confirm {min_confirm_p:.2f}")
+    elif confidence_score is None and conviction < cal.confirm_min_score:
         gaps.append(f"conviction {conviction:.0f} < confirm {cal.confirm_min_score:.0f}")
     gap_txt = ", ".join(gaps) if gaps else "ждём closed-bar"
     bias = str(lc.get("recommended_bias") or "—")
-    label = f"P {p_win:.0%}" if p_win is not None else f"conv={conviction:.0f}"
+    label = f"P {confidence_score:.0%}" if confidence_score is not None else f"conv={conviction:.0f}"
     return GateResult(
         False,
         "forming",

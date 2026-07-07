@@ -9,8 +9,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from hunt_core.scanner.detect.phase import MID, NEUTRAL, PRE_DUMP, PRE_PUMP
 from hunt_core.scanner.gate._types import GateResult
+
+MID = "mid"
+NEUTRAL = "neutral"
+PRE_DUMP = "pre_dump"
+PRE_PUMP = "pre_pump"
 
 FUSION_PHASES = frozenset({PRE_PUMP, PRE_DUMP, MID, NEUTRAL})
 
@@ -99,59 +103,6 @@ def fusion_lifecycle_flags(
     }
 
 
-def fusion_lifecycle_dict(
-    detection: Any,
-    *,
-    structure_bias: str,
-    fall_from_high_pct: float,
-    leg_gain_pct: float,
-) -> dict[str, Any]:
-    """Build ``row["lifecycle"]`` from a fusion ``Detection`` (or neutral stub)."""
-    if detection is None:
-        return {
-            "phase": NEUTRAL,
-            "phase_fusion": NEUTRAL,
-            "bias": "",
-            "recommended_bias": "",
-            "structure_bias": structure_bias,
-            "invalidate_short": False,
-            "fall_from_high_pct": fall_from_high_pct,
-            "leg_gain_pct": leg_gain_pct,
-            "watch_ok": False,
-            "short_entry_ok": False,
-            "long_entry_ok": False,
-            "short_confirm_ok": False,
-            "long_confirm_ok": False,
-            "cusum": 0.0,
-            "cusum_band": 0.0,
-        }
-
-    side = detection.side if detection.side in {"long", "short"} else ""
-    phase_val = str(detection.phase or NEUTRAL)
-    flags = fusion_lifecycle_flags(
-        side=side,
-        phase=phase_val,
-        gate_open=bool(detection.gate_open),
-        watch_ok=bool(detection.watch_ok),
-    )
-    pi = detection.phase_info
-    band = pi.band
-    return {
-        "phase": phase_val,
-        "phase_fusion": phase_val,
-        "bias": side,
-        "recommended_bias": side,
-        "structure_bias": structure_bias,
-        "invalidate_short": False,
-        "fall_from_high_pct": fall_from_high_pct,
-        "leg_gain_pct": leg_gain_pct,
-        "watch_ok": bool(detection.watch_ok),
-        "cusum": round(float(pi.cusum), 4),
-        "cusum_band": round(float(band), 4) if band is not None else None,
-        **flags,
-    }
-
-
 def lifecycle_veto_hard(setup: dict[str, Any]) -> GateResult | None:
     for raw in setup.get("confirm_hard") or []:
         tag = str(raw)
@@ -199,7 +150,6 @@ __all__ = [
     "PRE_PUMP_MISSION_PHASES",
     "bias_conflict",
     "core_lifecycle_blockers",
-    "fusion_lifecycle_dict",
     "fusion_lifecycle_flags",
     "is_fusion_phase",
     "is_mid_leg_context",

@@ -34,29 +34,6 @@ HUNT_SNAPSHOT_PARALLEL = max(1, int(os.getenv("HUNT_SNAPSHOT_PARALLEL", "6")))
 _TICK_LOCK = asyncio.Lock()
 
 
-def _evaluate_delivery_row(
-    row: dict[str, Any],
-    *,
-    direction: str,
-    setup: dict[str, Any],
-    lifecycle: dict[str, Any] | None,
-    symbol: str,
-    refresh_live_price: bool = False,
-    ws_feed: HuntCcxtStreams | None = None,
-) -> tuple[Any, Any]:
-    from hunt_core.runtime.cycle._delivery import evaluate_delivery_row
-
-    return evaluate_delivery_row(
-        row,
-        direction=direction,
-        setup=setup,
-        lifecycle=lifecycle,
-        symbol=symbol,
-        refresh_live_price=refresh_live_price,
-        ws_feed=ws_feed,
-    )
-
-
 def _overlay_ws_tickers(
     ticker_by_sym: dict[str, dict[str, Any]],
     symbols: tuple[str, ...] | list[str],

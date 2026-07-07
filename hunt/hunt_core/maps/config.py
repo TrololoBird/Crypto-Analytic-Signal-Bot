@@ -25,7 +25,9 @@ class MapsConfig:
     forward_confidence_min: float = 0.25
     leverage_weights: tuple[float, ...] = (0.35, 0.30, 0.20, 0.10, 0.05)
     vp_periods: tuple[str, ...] = ("1h", "4h", "1d", "1w")
-    vp_buckets: int = 24
+    # 24→60: display "Карта уровней" POC/VAH/VAL at trader-grade resolution (see prizrak
+    # config vp_buckets note — 24 buckets is ~$150/bucket on BTC, too coarse to be useful).
+    vp_buckets: int = 60
     vp_value_area_pct: float = 0.70
 
     @classmethod

@@ -5,7 +5,7 @@ import math
 from typing import Any
 
 from hunt_core.data.universe import PINNED_SYMBOLS
-from hunt_core.scanner.gate._ev import setup_p_win
+from hunt_core.scanner.gate._ev import setup_confidence_score
 from hunt_core.scanner.gate._rr import (
     FADE_PHASES_SHORT,
     PUMP_PHASES_LONG,
@@ -102,8 +102,8 @@ _short_dump_start_max_fall_pct = short_dump_start_max_fall_pct
 _short_dump_delivery_too_late = short_dump_delivery_too_late
 
 
-def _setup_p_win(setup: dict[str, Any], *, confirmed: bool = True) -> float | None:
-    p = setup_p_win(setup)
+def _setup_confidence_score(setup: dict[str, Any], *, confirmed: bool = True) -> float | None:
+    p = setup_confidence_score(setup)
     if p is not None:
         return p
     return None
@@ -118,7 +118,7 @@ def check_delivery_confluence(
     row: dict[str, Any],
 ) -> GateResult | None:
     dl = delivery_thresholds(symbol)
-    p_win = _setup_p_win(setup)
+    confidence_score = _setup_confidence_score(setup)
     min_p = float(dl.get("min_p_win_forming", dl.get("min_p_win", 0.42)))
     hard = [str(h) for h in (setup.get("confirm_hard") or [])]
     phase = str(lifecycle.get("phase") or "")
@@ -141,7 +141,7 @@ def check_delivery_confluence(
         direction == "short"
         and phase in SHORT_DUMP_START_LC_PHASES
         and fall <= start_max
-        and (p_win is None or p_win >= min_p)
+        and (confidence_score is None or confidence_score >= min_p)
         and (
             any("rejection" in str(h) for h in hard)
             or has_div
@@ -152,20 +152,20 @@ def check_delivery_confluence(
     if (
         direction == "short"
         and phase == "exhaustion_at_high"
-        and (p_win is None or p_win >= min_p)
+        and (confidence_score is None or confidence_score >= min_p)
         and any("rejection" in str(h) for h in hard)
     ):
         min_struct_eff = 1
     if (
         direction == "short"
         and phase in {"pre_dump", "distribution"}
-        and (p_win is None or p_win >= min_p)
+        and (confidence_score is None or confidence_score >= min_p)
     ):
         min_struct_eff = 1
     if (
         direction == "long"
         and phase in {"pre_pump", "accumulation", "breakout_arming"}
-        and (p_win is None or p_win >= min_p)
+        and (confidence_score is None or confidence_score >= min_p)
     ):
         min_struct_eff = 1
     if struct_n < min_struct_eff and not (
@@ -192,7 +192,7 @@ def check_exhaustion_fade(
         return None
     dl = delivery_thresholds(symbol)
     hard = [str(h) for h in (setup.get("confirm_hard") or [])]
-    p_win = _setup_p_win(setup)
+    confidence_score = _setup_confidence_score(setup)
     exh_min = float(dl.get("min_p_win_exhaustion", 0.52))
     structure_primary = bool(setup.get("anticipation")) or bool(setup.get("ev_primary")) or any(
         h in hard
@@ -230,11 +230,11 @@ def check_exhaustion_fade(
             "exhaustion_strong_trend",
             f"Fade при ADX1h {adx14:.0f} > {adx_max:.0f} — сильный тренд, жди div/break",
         )
-    if p_win is not None and p_win < exh_min and not has_div and not closed_break:
+    if confidence_score is not None and confidence_score < exh_min and not has_div and not closed_break:
         return GateResult(
             False,
             "exhaustion_fade_weak",
-            f"Fade-at-top P(win) {p_win:.2f} < {exh_min:.2f} без div/closed break",
+            f"Fade-at-top P(win) {confidence_score:.2f} < {exh_min:.2f} без div/closed break",
         )
     return None
 
@@ -407,9 +407,9 @@ def check_accumulation_long(
         return None
     dl = delivery_thresholds(symbol)
     acc_min = float(dl.get("min_p_win_accumulation", 0.48))
-    p_win = _setup_p_win(setup)
+    confidence_score = _setup_confidence_score(setup)
     chg24 = float(setup.get("context_chg_24h_pct") or row.get("chg_24h_pct") or 0)
-    if p_win is not None and p_win < acc_min and chg24 < -8.0:
+    if confidence_score is not None and confidence_score < acc_min and chg24 < -8.0:
         # Mission: catch the start of accumulation. Strong professional-map accumulation
         # (VP coil + bid absorption + thin asks + bullish CVD + rising OI) overrides the
         # weak-P(win) block so we don't filter out the very setups we exist to find.
@@ -423,7 +423,7 @@ def check_accumulation_long(
         return GateResult(
             False,
             "accumulation_long_weak",
-            f"Weak accumulation P(win) {p_win:.2f} < {acc_min:.2f} при chg24 {chg24:.1f}%",
+            f"Weak accumulation P(win) {confidence_score:.2f} < {acc_min:.2f} при chg24 {chg24:.1f}%",
         )
     _ = symbol
     return None

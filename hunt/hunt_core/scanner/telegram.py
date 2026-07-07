@@ -13,6 +13,11 @@ _ENTRY_TYPE_LABELS = {
 }
 
 
+def _calibration_tag() -> str:
+    """No-op since the fusion calibration engine was removed."""
+    return ""
+
+
 def format_scanner_signal(
     *,
     symbol: str,
@@ -38,7 +43,8 @@ def format_scanner_signal(
     lab: bool = False,
 ) -> str:
     icon = "🔴" if side.upper() == "SHORT" else "🟢"
-    prefix = "🧪 ЛАБ · " if lab else ""
+    cal_tag = _calibration_tag()
+    prefix = f"{cal_tag}🧪 ЛАБ · " if lab else cal_tag
     ctx = "\n".join(context_lines) if context_lines else ""
     et_label = _ENTRY_TYPE_LABELS.get(entry_type, entry_type)
 
@@ -96,7 +102,7 @@ def format_scanner_coil_bracket(
 
 
 def format_scanner_from_setup(symbol: str, setup: dict[str, Any], row: dict[str, Any], *, lab: bool = False) -> str | None:
-    if not setup.get("confirmed"):
+    if not setup.get("impulse_confirmed"):
         return None
     phase = str(setup.get("phase") or row.get("lifecycle", {}).get("phase") or "")
     reasons = setup.get("reasons") or []

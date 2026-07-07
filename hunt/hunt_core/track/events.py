@@ -103,7 +103,7 @@ def record_sent_delivery(
             detail=delivery_tier or str(setup.get("delivery_tier") or ""),
             payload={
                 "ev": ev.get("ev"),
-                "p_win": ev.get("p_win"),
+                "confidence_score": ev.get("confidence_score"),
                 "reason": ev.get("reason"),
                 "delivery_tier": delivery_tier,
             },
@@ -299,25 +299,25 @@ def audit_probe_row(row: dict[str, Any], *, source: str = "signal_cmd") -> dict[
     long_s = row.get("long") or {}
     if bias in {"short", "long"}:
         direction = bias
-    elif dump_s.get("confirmed"):
+    elif dump_s.get("impulse_confirmed"):
         direction = "short"
-    elif long_s.get("confirmed"):
+    elif long_s.get("impulse_confirmed"):
         direction = "long"
     else:
         direction = (
             "short"
-            if float(dump_s.get("fusion_score") or dump_s.get("p_win") or 0)
-            >= float(long_s.get("fusion_score") or long_s.get("p_win") or 0)
+            if float(dump_s.get("fusion_score") or dump_s.get("confidence_score") or 0)
+            >= float(long_s.get("fusion_score") or long_s.get("confidence_score") or 0)
             else "long"
         )
     setup = dump_s if direction == "short" else long_s
     fuel = float(
         setup.get("fusion_score")
-        or (float(setup.get("p_win") or 0) * 100.0)
+        or (float(setup.get("confidence_score") or 0) * 100.0)
         or 0
     )
     dir_notes: list[str] = []
-    indie_conf = bool(setup.get("confirmed"))
+    indie_conf = bool(setup.get("impulse_confirmed"))
     hard = list(setup.get("confirm_hard") or [])
     checks.append(f"confirm_ok={indie_conf}")
 
@@ -350,24 +350,12 @@ def audit_probe_row(row: dict[str, Any], *, source: str = "signal_cmd") -> dict[
     if setup.get("filter_blocks"):
         checks.append(f"filters={setup.get('filter_blocks')}")
 
+    # setup dicts (row["dump"]/row["long"]) are permanently neutral stubs
+    # (impulse_confirmed always False) since the fusion detection engine was
+    # removed — manipulation.py is the only real Hunter signal source now and
+    # doesn't populate these keys, so there is no gate left to evaluate here.
     delivery_ok: bool | None = None
     gate_code = ""
-    if indie_conf:
-        from hunt_core.deliver.dispatch import evaluate_delivery_fast
-
-        gate, tier = evaluate_delivery_fast(
-            row,
-            direction=direction,
-            setup=setup,
-            lifecycle=lc,
-            symbol=sym,
-        )
-        delivery_ok = gate.ok
-        gate_code = str(gate.code or "")
-        if gate.ok:
-            checks.append(f"delivery_ok tier={tier}")
-        else:
-            issues.append(f"delivery_blocked {gate.code}: {gate.message}")
 
     sess = row.get("session") or {}
     chg = abs(float(row.get("chg_24h_pct") or 0))

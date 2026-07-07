@@ -20,11 +20,13 @@ def evaluate_confirm_authorities(
     if not isinstance(setup, dict):
         return GateResult(ok=False, code="invalid_setup", message="invalid_setup")
 
-    if not (setup.get("confirmed") or setup.get("intrabar_confirmed")):
+    if not (setup.get("impulse_confirmed") or setup.get("intrabar_confirmed")):
         return GateResult(ok=False, code="not_confirmed", message="not_confirmed")
 
-    # Pre-phase signals use Dual-Gate as authority — skip playbook N-of-M
-    if setup.get("signal_type") != "pre_phase":
+    # Pre-phase signals use Dual-Gate as authority — skip playbook N-of-M.
+    # pre_phase_blocked + impulse_confirmed also skip (main gate authority is sufficient).
+    st = setup.get("signal_type")
+    if st != "pre_phase" and not (st == "pre_phase_blocked" and setup.get("impulse_confirmed")):
         mf = row.get("manipulation_fusion") if isinstance(row.get("manipulation_fusion"), dict) else {}
         req_n = mf.get("required_n")
         pass_n = mf.get("pass_count")
@@ -45,7 +47,8 @@ def evaluate_confirm_authorities(
         return GateResult(ok=False, code="fusion_gate_closed", message="fusion_gate_closed")
 
     # Pre-phase signals use Dual-Gate as authority — skip playbook_pass_ok check
-    if snap.get("playbook_pass_ok") is False and setup.get("signal_type") != "pre_phase":
+    st = setup.get("signal_type")
+    if snap.get("playbook_pass_ok") is False and st != "pre_phase" and not (st == "pre_phase_blocked" and setup.get("impulse_confirmed")):
         return GateResult(ok=False, code="playbook_fail", message="playbook_fail")
 
     if not snap.get("mission_pass"):

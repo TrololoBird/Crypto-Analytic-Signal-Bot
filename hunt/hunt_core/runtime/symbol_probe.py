@@ -23,14 +23,7 @@ from hunt_core.features.prepare import _prepare_frame, min_required_bars
 from hunt_core.market import HuntCcxtClient
 from hunt_core.deliver.telegram import TelegramBroadcaster
 
-from hunt_core.scanner.detect.delivery_support import evaluate_alert_gate, evaluate_formation
-from hunt_core.scanner.detect.probe import (
-    btc_market_context,
-    forming_confirm_gaps,
-    probe_header,
-    resolve_trade_direction,
-    scenario_summary,
-)
+from hunt_core.data.tick_jsonl import btc_market_context, resolve_trade_direction
 from hunt_core.track.events import append_audit_log, audit_probe_row, backtest_levels_on_bars
 from hunt_core.track.tracker import load_tracker_state
 from hunt_core.data.universe import PINNED_SYMBOLS
@@ -69,15 +62,6 @@ def parse_symbol_text(text: str) -> str:
     return normalize_symbol(raw)
 
 
-def resolve_direction(row: dict[str, Any]) -> tuple[str, dict[str, Any], float, list[str]]:
-    return resolve_trade_direction(row)
-
-
-def _best_direction(row: dict[str, Any]) -> tuple[str, dict[str, Any], float]:
-    direction, setup, fuel, _ = resolve_trade_direction(row)
-    return direction, setup, fuel
-
-
 def _is_hunt_anomaly(row: dict[str, Any], *, symbol: str) -> bool:
     cal = effective_hunt_params(symbol)
     sess = row.get("session") or {}
@@ -86,183 +70,6 @@ def _is_hunt_anomaly(row: dict[str, Any], *, symbol: str) -> bool:
     if bool(row.get("young_listing")):
         return True
     return chg >= cal.anomaly_min_chg_24h_pct or rng >= cal.anomaly_min_range_24h_pct
-
-
-def format_signal_probe_telegram(
-    row: dict[str, Any], *, added_watch: bool, compact: bool = False
-) -> str:
-    """User-facing /signal reply when closed-bar confirm is not yet present.
-
-    ``compact`` drops blocks already rendered by the pinned deep-analysis header
-    (liquidity scenarios, volume profile, regime) so the two are not concatenated
-    with duplicates.
-    """
-    from hunt_core.deliver.dispatch import (
-        readiness_short_for_setup,
-    )
-    from hunt_core.deliver.telegram import fmt_price, format_setup_lines
-
-    sym = html.escape(str(row.get("symbol", "?")).replace("USDT", "-USDT"))
-    if row.get("error"):
-        return f"⚠️ <b>/signal {sym}</b>\n<code>{html.escape(str(row['error']))}</code>"
-
-    dump = row.get("dump") or {}
-    long_setup = row.get("long") or {}
-    lc = row.get("lifecycle") or {}
-    direction, setup, best_fuel, btc_notes = resolve_direction(row)
-    other_dir = "long" if direction == "short" else "short"
-    other_setup = long_setup if direction == "short" else dump
-
-    short_ok = bool(dump.get("confirmed"))
-    long_ok = bool(long_setup.get("confirmed"))
-    if short_ok or long_ok:
-        return ""  # caller uses full _format_telegram
-
-    price = float(row.get("price") or 0)
-    tf = row.get("timeframes") or {}
-    pos = row.get("market") or row.get("positioning") or {}
-    badge, dir_label, header_sub = probe_header(row)
-    bias = str(lc.get("recommended_bias") or "both")
-    watch_bias = bias if bias in {"short", "long", "both"} else "both"
-    btc_ctx = row.get("btc_context") or {}
-    regime = row.get("regime") or {}
-    corr = regime.get("btc_corr_1h")
-
-    _vsum = row.get("verdict_v2_summary") if isinstance(row.get("verdict_v2_summary"), dict) else {}
-    _vaction = str(_vsum.get("action") or "").lower()
-    verdict_kind = _vaction if _vaction in {"long", "short"} else ("sideways" if _vsum else None)
-    if compact and verdict_kind == "sideways":
-        header = (
-            f"🔍 <b>/signal {sym}</b> · контекст {badge} <b>{dir_label}</b> "
-            f"(advisory · вердикт боковик)"
-        )
-    elif header_sub:
-        header = f"🔍 <b>/signal {sym}</b> · {badge} <b>{dir_label}</b> · <i>{html.escape(header_sub)}</i>"
-    else:
-        header = f"🔍 <b>/signal {sym}</b> · приоритет: {badge} <b>{dir_label}</b>"
-
-    lines = [
-        header,
-        scenario_summary(
-            direction=direction,
-            setup=setup,
-            fuel=best_fuel,
-            lc=lc,
-            confirmed=False,
-            row=row,
-        ),
-        (
-            f"Статус: <code>ждём closed-bar confirm</code> · "
-            f"{readiness_short_for_setup(setup, direction=direction, row=row)} vs {other_dir} "
-            f"<code>{readiness_short_for_setup(other_setup, direction=other_dir, row=row)}</code>"
-        ),
-        (
-            f"Цена <code>{fmt_price(price)}</code> · 24h "
-            f"<code>{row.get('chg_24h_pct')}%</code> · lifecycle "
-            f"<code>{html.escape(str(lc.get('phase') or '—'))}</code>"
-        ),
-    ]
-    lc_phase = str(lc.get("phase") or "")
-    if lc_phase == "no_setup":
-        oi = pos.get("oi")
-        oi_usd = float(oi) * price if oi is not None and price > 0 else None
-        if oi_usd is not None and oi_usd >= 1_000_000:
-            oi_txt = f"${oi_usd / 1_000_000:.1f}M"
-        elif oi_usd is not None:
-            oi_txt = f"${oi_usd:,.0f}" if oi_usd else "—"
-        else:
-            oi_txt = "—"
-        lines.extend(
-            [
-                (
-                    "<i>lifecycle=no_setup: MTF bias и fuel — справочно; "
-                    "уровни входа скрыты до structural confirm.</i>"
-                ),
-                (
-                    f"Контекст fuel: short <code>{float(dump.get('dump_fuel') or 0):.0f}</code> · "
-                    f"long <code>{float(long_setup.get('long_fuel') or 0):.0f}</code> · "
-                    f"OI ≈ <code>{oi_txt}</code>"
-                ),
-            ]
-        )
-    else:
-        lines.append(
-            "<i>Hunt анализирует pump/dump по REST+WS; confirm = закрытый 5m/1m бар. "
-            "Ниже — уровни, OI, funding и триггеры для ручного решения.</i>"
-        )
-        lines.extend(
-            format_setup_lines(
-                row,
-                setup,
-                direction=direction,
-                tf=tf,
-                pos=pos,
-                price=price,
-                suppress_context=compact,
-            )
-        )
-    if regime and not compact:
-        lines.append(
-            "Regime: "
-            f"<code>{html.escape(str(regime.get('regime_4h') or '—'))}</code>/"
-            f"<code>{html.escape(str(regime.get('regime_1h') or '—'))}</code> · "
-            f"structure <code>{html.escape(str(regime.get('structure_1h') or '—'))}</code>"
-        )
-    if sym != "BTC-USDT" and (btc_ctx or corr is not None):
-        b1 = btc_ctx.get("btc_chg_1h_pct")
-        trend = btc_ctx.get("btc_trend") or "—"
-        lines.append(
-            "BTC: "
-            f"1h <code>{b1 if b1 is not None else '—'}%</code> "
-            f"<code>{html.escape(str(trend))}</code> · "
-            f"corr <code>{corr if corr is not None else '—'}</code>"
-        )
-        for note in btc_notes:
-            lines.append(f"<i>{html.escape(note)}</i>")
-    if lc_phase != "no_setup":
-        gaps = forming_confirm_gaps(setup, direction=direction, tf=tf, row=row, price=price)
-        if gaps:
-            lines.append(
-                "До confirm нужно: "
-                f"<code>{html.escape(', '.join(gaps[:6]))}</code>"
-            )
-        form = evaluate_formation(setup, direction=direction, symbol=str(row.get("symbol") or ""), lifecycle=lc)
-        lines.append(f"Формирование: <i>{html.escape(form.message)}</i>")
-    if bool(setup.get("confirmed")):
-        gate = evaluate_alert_gate(
-            setup,
-            direction=direction,
-            symbol=str(row.get("symbol") or ""),
-            lifecycle=lc,
-            row=row,
-        )
-        if gate.ok:
-            lines.append("✅ Все гейты доставки пройдены")
-        else:
-            lines.append(f"⛔ Алерт заблокирован: <i>{html.escape(gate.message)}</i>")
-    if added_watch:
-        lines.append(
-            f"✅ Добавлен в watchlist (<code>{watch_bias}</code>) — "
-            "уведомлю при pre-setup (<code>dump_imminent</code> / "
-            "<code>long_imminent</code>)."
-        )
-    else:
-        lines.append(
-            "ℹ️ Уже в watchlist — уведомлю при pre-setup (<code>dump_imminent</code> / "
-            "<code>long_imminent</code>)."
-        )
-    try:
-        from hunt_core.expansion.format import format_expansion_section_from_dict
-
-        exp = row.get("expansion")
-        if isinstance(exp, dict):
-            exp_block = format_expansion_section_from_dict(exp)
-            if exp_block:
-                lines.extend(["", exp_block])
-    except Exception:
-        pass
-    lines.append("<i>On-demand probe · staggered REST · не прерывает hunt loop</i>")
-    return "\n".join(lines)
 
 
 async def probe_symbol_signal(
@@ -337,7 +144,7 @@ async def probe_symbol_signal(
         else (_PINNED_PROBE_TIMEOUT_S if sym in PINNED_SYMBOLS else _PROBE_TIMEOUT_S)
     )
     cache = batch_cache
-    if lite_probe and cache is None:
+    if cache is None:
         cache = TickBatchCache()
     try:
         if cache is not None:
@@ -353,6 +160,7 @@ async def probe_symbol_signal(
             funding_info_all = cache.funding_info_all
             exchange_by_sym = cache.exchange_by_sym
             btc_work_1h = cache.btc_work_1h
+            btc_work_4h = cache.btc_work_4h
             btc_work_1m = cache.btc_work_1m
         else:
             premium_all = await safe_fetch(
@@ -369,6 +177,7 @@ async def probe_symbol_signal(
             exchange_by_sym = {r.symbol: r for r in exchange_list}
             await asyncio.sleep(stagger_ms / 1000.0)
             btc_work_1h = None
+            btc_work_4h = None
             btc_work_1m = None
             btc_df = await safe_fetch(
                 client.fetch_klines_cached("BTCUSDT", "1h", limit=500),
@@ -376,6 +185,12 @@ async def probe_symbol_signal(
             )
             if btc_df is not None and not btc_df.is_empty():
                 btc_work_1h = _prepare_frame(btc_df)
+            btc_4h = await safe_fetch(
+                client.fetch_klines_cached("BTCUSDT", "4h", limit=250),
+                context="btc_klines_4h",
+            )
+            if btc_4h is not None and not btc_4h.is_empty():
+                btc_work_4h = _prepare_frame(btc_4h)
             btc_1m = await safe_fetch(
                 client.fetch_klines_cached("BTCUSDT", "1m", limit=999),
                 context="btc_klines_1m",
@@ -411,7 +226,7 @@ async def probe_symbol_signal(
             timeout=probe_timeout,
         )
         if btc_work_1h is not None:
-            row["btc_context"] = btc_market_context(btc_work_1h)
+            row["btc_context"] = btc_market_context(btc_work_1h, btc_work_4h=btc_work_4h)
         # Ручной /signal (и прочие explicit-пробы) дают полный направленный разбор
         # по ЛЮБОМУ символу, включая якоря BTC/ETH/XAU/XAG вне аномалии. Meme-only
         # фильтр остаётся только в пассивном сканере (watch.py). Якорь при низкой
@@ -523,17 +338,13 @@ async def probe_symbol_signal(
         if not delivery_probe:
             append_audit_log(audit)
         row["_signal_audit"] = audit
-        if not catalog_probe and not row.get("error"):
-            try:
-                from hunt_core.runtime.deep_assembly import stamp_expansion_on_row
-
-                stamp_expansion_on_row(row)
-            except Exception:
-                LOG.debug("signal_probe_expansion_stamp_failed", symbol=sym, exc_info=True)
         if delivery_probe:
             row["_probe_kind"] = "delivery"
         elif catalog_probe:
             row["_probe_kind"] = "catalog"
+        # PrizrakTrade (hunt_core/prizrak/) is the sole decision authority; the report
+        # reads row["prizrak_summary"] / row["prizrak_signals"].
+
         if auto_watchlist and not row.get("error"):
             dump = row.get("dump") or {}
             long_setup = row.get("long") or {}
@@ -591,13 +402,13 @@ async def probe_pinned_deep(
 ) -> dict[str, Any]:
     """Extended REST + full prepare + microstructure for pinned anchors."""
     from hunt_core.data.universe import cache_is_fresh, load_pinned_cache
-    from hunt_core.runtime.deep_assembly import assemble_deep_tick
+    from hunt_core.runtime.analyst_assembly import assemble_analyst_tick
     from hunt_core.runtime.query_service import STORE_STALE_S, row_age_seconds
     from hunt_core.runtime.tick_state import deep_query_store
 
     sym = normalize_symbol(symbol)
     cached = deep_query_store().resolve(sym)
-    if isinstance(cached, dict) and not cached.get("error") and cached.get("verdict_v2_summary"):
+    if isinstance(cached, dict) and not cached.get("error") and cached.get("prizrak_summary"):
         age = row_age_seconds(cached)
         if age is not None and age <= STORE_STALE_S:
             out = dict(cached)
@@ -605,7 +416,7 @@ async def probe_pinned_deep(
             if cache_is_fresh(sym):
                 out["_pinned_cache"] = load_pinned_cache(sym)
             return out
-    row = await assemble_deep_tick(sym, client, stagger_ms=max(stagger_ms, 200))
+    row = await assemble_analyst_tick(sym, client, stagger_ms=max(stagger_ms, 200))
     if cache_is_fresh(sym):
         row["_pinned_cache"] = load_pinned_cache(sym)
     return row
@@ -630,7 +441,7 @@ async def probe_deep_only(
             auto_watchlist=False,
             client=client,
         )
-        row["_deep_analysis"] = True
+        row["_analyst"] = True
     return row
 
 
@@ -675,8 +486,6 @@ async def _tracker_levels_backtest(client: Any, sym: str) -> dict[str, Any] | No
     return None
 
 
-_SIGNAL_STORE_FRESH_S = 180.0  # re-export compat; canonical: query_service.STORE_FRESH_S
-
 
 def _row_age_seconds(row: dict[str, Any]) -> float | None:
     from hunt_core.runtime.query_service import row_age_seconds
@@ -692,15 +501,19 @@ async def deliver_signal_probe(
     live: bool = False,
     client: HuntCcxtClient | None = None,
 ) -> dict[str, Any]:
-    """Reply with query result for ``symbol`` (store-first, full blocker explain)."""
+    """Reply with query result for ``symbol`` (store-first, full blocker explain).
+
+    Telegram ``/signal`` calls this directly via ``telegram_commands.py``.
+    """
+    sym = normalize_symbol(symbol)
+
     from hunt_core.runtime.query_service import (
         build_query_result,
+        format_freshness_footer,
         format_query_telegram,
         resolve_query_row,
-        spawn_background_refresh,
     )
 
-    sym = normalize_symbol(symbol)
     row, _source, from_store, age_s = await resolve_query_row(
         sym, live=live, stagger_ms=stagger_ms, client=client
     )
@@ -721,16 +534,19 @@ async def deliver_signal_probe(
     text = format_query_telegram(
         query, added_watch=bool(row.get("_watchlist_added"))
     )
-    from hunt_core.analysis.confluence_grid import build_confluence_grid, format_grid_telegram
+    from hunt_core.deliver.confluence_grid import build_confluence_grid, format_grid_telegram
     from hunt_core.deliver._sections import format_intraday_maps_telegram
 
-    grid = build_confluence_grid(row)
-    if grid:
-        text = f"{text}\n\n{format_grid_telegram(grid)}"
-    maps_block = format_intraday_maps_telegram(row)
-    if maps_block:
-        text = f"{text}\n\n{maps_block}"
+    # Skip level grid + maps for WAIT signals — avoid conflicting scanner artifacts
+    _prizrak_action = str((row.get("prizrak_summary") or {}).get("action") or "").upper()
+    _show_extras = _prizrak_action in {"LONG", "SHORT"} or not _prizrak_action
+    if _show_extras:
+        grid = build_confluence_grid(row)
+        if grid:
+            text = f"{text}\n\n{format_grid_telegram(grid, price=float(row.get('price') or 0))}"
+        maps_block = format_intraday_maps_telegram(row)
+        if maps_block:
+            text = f"{text}\n\n{maps_block}"
+    text = f"{text}\n{format_freshness_footer(query)}"
     await broadcaster.send_html(text, no_split=True)
-    if from_store and row.get("_stale_store"):
-        spawn_background_refresh(sym, client=client, stagger_ms=stagger_ms)
     return row

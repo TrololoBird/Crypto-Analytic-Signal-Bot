@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from hunt_core.paths import DEEP_TICKS_JSONL, HUNT_SCAN_JSONL
+from hunt_core.paths import ANALYST_TICKS_JSONL, HUNT_SCAN_JSONL
 
 
 class _TickStoreBase:
@@ -89,7 +89,7 @@ class DeepQueryStore(_TickStoreBase):
     """Module 1 Deep — pinned continuous + on-demand rows (plane=deep)."""
 
     def __init__(self) -> None:
-        super().__init__(jsonl_path=DEEP_TICKS_JSONL)
+        super().__init__(jsonl_path=ANALYST_TICKS_JSONL)
 
 
 class LastTickStore:

@@ -17,7 +17,7 @@ LOG = logging.getLogger("hunt_core.data.collect")
 
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.data_readiness import kline_fetch_limit
-from hunt_core.errors import DEFENSIVE_EXC
+from hunt_core.errors import DEFENSIVE_EXC, system_breakers
 from hunt_core.market import HuntCcxtClient, HuntCcxtStreams
 from hunt_core.market.ccxt_guard import is_ccxt_rate_limited
 
@@ -29,10 +29,16 @@ def kline_limits(minimums: dict[str, int], symbol: str = "") -> dict[str, int]:
         "15m": kline_fetch_limit(int(minimums.get("15m", 400)), "15m"),
         "1h": kline_fetch_limit(int(minimums.get("1h", 400)), "1h"),
         "4h": kline_fetch_limit(int(minimums.get("4h", 200)), "4h"),
-        "1d": 90,
+        # 1d/1w must clear EMA200 warmup (~200 bars) or _prepare_frame drops every
+        # row → empty frame → HTF snapshot falls to lite (no EMAs) → trend always
+        # "neutral". Only 90 daily bars made the 1d/1w trend structurally dead for
+        # every symbol. 260 daily / 220 weekly warms EMA200 for established symbols
+        # (verified: 203 daily bars reproduce the real bear stack). Binance caps at
+        # 1500 klines/request, so this is a single cheap REST call per TF.
+        "1d": 260,
     }
     if symbol.upper() in PINNED_SYMBOLS:
-        limits["1w"] = 52  # ~1 year of weekly bars for MTF structure
+        limits["1w"] = 220  # ~4y weekly — clears EMA200 warmup for MTF structure
     return limits
 
 
@@ -90,7 +96,7 @@ async def safe_fetch(
             await client.await_rate_limit_pause()
         return await _invoke()
     except ccxt.BadSymbol as exc:
-        from hunt_core.runtime.state import blacklist_symbol
+        from hunt_core.data.symbol_blacklist import blacklist_symbol
         sym = _extract_symbol_from_context(context)
         if sym:
             blacklist_symbol(sym)
@@ -104,6 +110,7 @@ async def safe_fetch(
         )
         return None
     except ccxt.BaseError as exc:
+        system_breakers().rest.record_failure()
         if client is not None:
             client.rest_gate.record_error(exc, context=context or "safe_fetch")
         if is_ccxt_rate_limited(exc):
@@ -120,6 +127,7 @@ async def safe_fetch(
         )
         return None
     except DEFENSIVE_EXC as exc:
+        system_breakers().rest.record_failure()
         LOG.warning(
             "safe_fetch_failed | context=%s error=%s",
             context or type(target).__name__,
@@ -717,6 +725,7 @@ class TickBatchCache:
         "funding_info_all",
         "exchange_by_sym",
         "btc_work_1h",
+        "btc_work_4h",
         "btc_work_1m",
         "premium_at",
         "funding_at",
@@ -729,6 +738,7 @@ class TickBatchCache:
         self.funding_info_all: dict[str, dict[str, float | int]] = {}
         self.exchange_by_sym: dict[str, Any] = {}
         self.btc_work_1h: Any | None = None
+        self.btc_work_4h: Any | None = None
         self.btc_work_1m: Any | None = None
         self.premium_at = 0.0
         self.funding_at = 0.0
@@ -768,6 +778,13 @@ async def refresh_tick_batch_cache(
         )
         if btc_1h is not None and not btc_1h.is_empty():
             cache.btc_work_1h = prepare_frame(btc_1h)
+        btc_4h = await safe_fetch(
+            lambda: client.fetch_klines_cached("BTCUSDT", "4h", limit=250),
+            context="btc_4h",
+            client=client,
+        )
+        if btc_4h is not None and not btc_4h.is_empty():
+            cache.btc_work_4h = prepare_frame(btc_4h)
         btc_1m = await safe_fetch(
             lambda: client.fetch_klines_cached("BTCUSDT", "1m", limit=999),
             context="btc_1m",

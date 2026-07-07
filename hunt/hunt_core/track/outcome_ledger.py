@@ -44,7 +44,7 @@ def build_authority_snapshot(
     lc = r.get("lifecycle") if isinstance(r.get("lifecycle"), dict) else {}
     codes = _blocker_codes(blockers)
 
-    fusion_gate_open = bool(s.get("confirmed"))
+    fusion_gate_open = bool(s.get("impulse_confirmed"))
     mf = r.get("manipulation_fusion") if isinstance(r.get("manipulation_fusion"), dict) else {}
     req_n = mf.get("required_n")
     pass_n = mf.get("pass_count")
@@ -154,7 +154,7 @@ def build_ledger_record(
         "playbook_pass": fusion.get("pass_count"),
         "playbook_required": fusion.get("required_n"),
         "check_sources": fusion.get("check_sources"),
-        "setup_confirmed": bool((setup or {}).get("confirmed")),
+        "setup_confirmed": bool((setup or {}).get("impulse_confirmed")),
         "playbook_pass_ratio": (
             round(float(fusion.get("pass_count", 0)) / float(fusion.get("required_n", 1)), 3)
             if fusion.get("required_n")
@@ -182,7 +182,7 @@ def maybe_append_candidate_ledger(
 ) -> None:
     """P0-E candidate lane — geometry to ledger without delivery (one row per bar)."""
     s = setup if isinstance(setup, dict) else {}
-    if s.get("confirmed"):
+    if s.get("impulse_confirmed"):
         return
     if s.get("stop_loss") is None or s.get("tp1") is None:
         return

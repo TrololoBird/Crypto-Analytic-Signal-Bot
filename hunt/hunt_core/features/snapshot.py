@@ -10,7 +10,6 @@ import polars as pl
 
 from hunt_core.data.collect import (
     _book_from_pack,
-    _kline_integrity_reject,
     _overlay_ws_market,
     kline_limits,
 )
@@ -27,7 +26,7 @@ from hunt_core.features.polars_ta_bridge import rsi_series as _rsi_series
 from hunt_core.features.prepare_columns import patch_work_4h, resolve_prepare_groups_for_symbol
 from hunt_core.features.prepare_frame import _prepare_frame
 from hunt_core.features.research_plugins import enrich_research_columns, research_snapshot_fields
-from hunt_core.analysis.trend import legacy_trend_label, trend_from_snapshot
+from hunt_core.toolkit.trend import legacy_trend_label, trend_from_snapshot
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.features.structure import detect_pp
 from hunt_core.market.client import depth_imbalance_from_book, microprice_bias_from_book
@@ -92,7 +91,7 @@ def kline_integrity_reject(
 ) -> dict[str, Any]:
     violations = list(report.violations)
     primary = violations[0] if violations else "data.klines_incomplete"
-    from hunt_core.runtime.tick_jsonl import ensure_fusion_lifecycle_fields
+    from hunt_core.data.tick_jsonl import ensure_fusion_lifecycle_fields
 
     return {
         "ts": datetime.now(UTC).isoformat(),
@@ -190,7 +189,7 @@ def _series_ols_slope(values: Any, *, min_n: int = 8) -> float | None:
     try:
         import polars as pl
 
-        from hunt_core.analysis.robust_stats import ols_slope
+        from hunt_core.toolkit.robust_stats import ols_slope
 
         return ols_slope(pl.Series([float(x) for x in values]), min_n=min_n)
     except (TypeError, ValueError):
@@ -526,7 +525,7 @@ def merge_research_tf_fields(out: dict[str, Any], df: Any) -> dict[str, Any]:
 
 
 def enrich_tf_maturity_fields(out: dict[str, Any], df: Any) -> dict[str, Any]:
-    """Derive bars_since_cross, trend_age, ema_separation_pct for verdict_v2 maturity."""
+    """Derive bars_since_cross, trend_age, ema_separation_pct for prizrak maturity checks."""
     if df is None or getattr(df, "is_empty", lambda: True)():
         return out
     if not isinstance(df, pl.DataFrame):
@@ -556,9 +555,46 @@ def enrich_tf_maturity_fields(out: dict[str, Any], df: Any) -> dict[str, Any]:
     return out
 
 
+def _compute_ker(closes: list[float], n: int = 10) -> float:
+    """Kaufman Efficiency Ratio over n periods."""
+    if len(closes) < n + 1:
+        return 0.0
+    direction = abs(closes[-1] - closes[-n - 1])
+    noise = sum(abs(closes[i] - closes[i - 1]) for i in range(-n, 0))
+    if noise == 0:
+        return 1.0
+    return direction / noise
+
+
+def _compute_ema_slope(values: list[float], period: int = 5) -> float:
+    """EMA slope as % change over `period` bars."""
+    if len(values) < period + 1:
+        return 0.0
+    return (values[-1] / values[-period - 1] - 1.0) * 100.0
+
+
+def _enrich_ker_ema_slope(out: dict[str, Any], df: Any) -> dict[str, Any]:
+    """Attach KER(10) and EMA50 slope(5) to TF snapshot for pipeline trend module."""
+    if df is None or getattr(df, "is_empty", lambda: True)():
+        return out
+    try:
+        closes = [float(x) for x in df["close"].to_list()]
+        out["ker_10"] = round(_compute_ker(closes, 10), 4)
+    except Exception:
+        pass
+    try:
+        if "ema50" in df.columns:
+            ema50s = [float(x) for x in df["ema50"].to_list() if x is not None]
+            out["ema50_slope_5"] = round(_compute_ema_slope(ema50s, 5), 4)
+    except Exception:
+        pass
+    return out
+
+
 def enrich_tf_research_fields(out: dict[str, Any], df: Any) -> dict[str, Any]:
     merge_research_tf_fields(out, df)
     enrich_tf_maturity_fields(out, df)
+    _enrich_ker_ema_slope(out, df)
     return out
 
 
@@ -1276,9 +1312,6 @@ def squeeze_watch(tf: dict[str, Any], market: dict[str, Any]) -> dict[str, Any] 
     return None
 
 
-def format_squeeze_telegram(row: dict[str, Any]) -> str:
-    from hunt_core.deliver.templates import format_squeeze_telegram as _fmt
 
-    return _fmt(row)
 
 

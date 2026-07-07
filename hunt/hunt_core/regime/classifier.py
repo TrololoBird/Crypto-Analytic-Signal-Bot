@@ -11,6 +11,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal
 
+# Scalar fallback for dead-code path — avoids importing runtime.state.
+_symbol_regime_local: dict[str, Any] = {}
+
+
 Direction = Literal["short", "long"]
 
 
@@ -58,14 +62,6 @@ class _RegimeLatch:
     regime: str = Regime.RANGE.value
     pending: str | None = None
     pending_count: int = 0
-
-
-def _resolve_state(state: Any | None) -> Any:
-    if state is not None:
-        return state
-    from hunt_core.runtime.state import current_symbol_state
-
-    return current_symbol_state()
 
 
 def _f(value: Any, default: float = 0.0) -> float:
@@ -190,12 +186,13 @@ def _apply_transition(
     state: Any,
     ticks_required: int = 2,
 ) -> tuple[Regime, bool]:
-    store = _resolve_state(state)
+    store = state if state is not None else _symbol_regime_local
     sym = symbol.upper()
-    latch = store.regime.setdefault(sym, _RegimeLatch())
+    regime_store = store.regime if hasattr(store, "regime") else store
+    latch = regime_store.setdefault(sym, _RegimeLatch())
     if not isinstance(latch, _RegimeLatch):
         latch = _RegimeLatch(regime=str(getattr(latch, "regime", Regime.RANGE.value)))
-        store.regime[sym] = latch
+        regime_store[sym] = latch
 
     try:
         prev = Regime(latch.regime)
@@ -246,9 +243,9 @@ def classify_regime(
         lifecycle=lifecycle,
         session=session,
     )
-    store = _resolve_state(state)
+    store = state if state is not None else _symbol_regime_local
     sym = (symbol or str(prepared.get("symbol") or "")).upper()
-    latch = store.regime.get(sym)
+    latch = store.regime.get(sym) if hasattr(store, "regime") else store.get(sym)
     try:
         previous = Regime(latch.regime) if isinstance(latch, _RegimeLatch) else None
     except (ValueError, AttributeError):

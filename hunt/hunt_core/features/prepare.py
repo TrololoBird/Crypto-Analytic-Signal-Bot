@@ -17,8 +17,8 @@ from typing import Any, cast
 import polars as pl
 import structlog
 
-from hunt_core.analysis.adx_thresholds import ADX_RANGE_MAX, ADX_TREND_MIN
-from hunt_core.analysis.trend import bias_from_ema_row
+from hunt_core.toolkit.adx_thresholds import ADX_RANGE_MAX, ADX_TREND_MIN
+from hunt_core.toolkit.trend import bias_from_ema_row
 from hunt_core.features.pivots import _swing_points
 
 from ..domain.schemas import PreparedSymbol, SymbolFrames, UniverseSymbol
@@ -30,10 +30,28 @@ from ..market.client import (
     normalize_depth_levels,
     wall_cluster_to_dict,
 )
-from ..domain.policy import (
-    configured_context_timeframes,
-    configured_primary_timeframe,
-)
+def _configured_primary_timeframe(settings: Any, symbol: str, default: str = "15m") -> str:
+    assets = getattr(settings, "assets", None)
+    if not isinstance(assets, dict):
+        return default
+    normalized = str(symbol or "").strip().upper()
+    if not normalized:
+        return default
+    entry = assets.get(normalized)
+    return entry.get("primary_timeframe", default) if isinstance(entry, dict) else default
+
+
+def _configured_context_timeframes(settings: Any, symbol: str, default: tuple[str, ...] = ("1h", "4h")) -> tuple[str, ...]:
+    assets = getattr(settings, "assets", None)
+    if not isinstance(assets, dict):
+        return default
+    normalized = str(symbol or "").strip().upper()
+    if not normalized:
+        return default
+    entry = assets.get(normalized)
+    if isinstance(entry, dict) and "context_timeframes" in entry:
+        return tuple(entry["context_timeframes"])
+    return default
 from .microstructure import add_microstructure_features
 from .prepare_columns import resolve_prepare_groups, resolve_prepare_groups_for_symbol
 from .prepare_frame import (
@@ -748,8 +766,8 @@ def prepare_symbol(
         )
         return None
 
-    configured_primary = configured_primary_timeframe(settings, sym)
-    context_timeframes = configured_context_timeframes(settings, sym)
+    configured_primary = _configured_primary_timeframe(settings, sym)
+    context_timeframes = _configured_context_timeframes(settings, sym)
     primary_timeframe = configured_primary
     primary_work = work_15m
     if configured_primary == "1h":

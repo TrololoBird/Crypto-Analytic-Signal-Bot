@@ -1,7 +1,7 @@
-"""Telegram /signals — Prizrak analytics + strategy catalog + tracker status.
+"""Telegram /signals — watchlist snapshot + tracker status.
 
-Runs unique hunter strategies (POC/ловушки/ПП, setup catalog) on collected row data.
-Not a memecoin pump/dump scan. Point query: ``/signal``. Live pre_*: watch loop.
+REST snapshot of watched symbols: lifecycle, regime, candidates.
+Point query: ``/signal SYM``. Live pre_*: watch loop.
 """
 from __future__ import annotations
 
@@ -15,21 +15,9 @@ from typing import Any
 
 from hunt_core.deliver.telegram import TelegramBroadcaster
 
-# Legacy POC-scenario + strategy-catalog detection removed; report degrades gracefully.
-def build_poc_level_scenarios(*_a, **_k) -> None: return None
-def format_poc_level_scenarios_telegram(*_a, **_k) -> str: return ""
-
-
-class SetupEvidence:  # inert placeholder for type references
-    pass
-
-
-def resolve_catalog_regime(*_a, **_k) -> str: return "neutral"
-def run_setup_catalog(*_a, **_k) -> list: return []
 
 
 from hunt_core.data.universe import load_watchlist_symbols
-from hunt_core.track.candidates import load_setup_candidates_state
 from hunt_core.scanner.detect.delivery_support import (
     collect_report_blockers,
     evaluate_alert_gate,
@@ -50,25 +38,6 @@ _STRONG_PHASES = frozenset(
 _LONG_STRONG_PHASES = frozenset(
     {"recovery", "impulse_active", "impulse_initiating", "breakout_arming"}
 )
-
-_SETUP_LABEL_RU: dict[str, str] = {
-    "dump_initiation": "пре-дамп",
-    "squeeze_expansion": "пре-сквиз",
-    "liquidity_sweep": "ликвидность sweep",
-    "bos_choch": "BOS/CHoCH",
-    "value_accept_reject": "VA reject",
-    "oi_cascade": "OI-каскад",
-    "accumulation_breakout": "пре-памп",
-}
-
-_STAGE_LABEL_RU: dict[str, str] = {
-    "compression": "пре-сквиз",
-    "prep": "пре-импульс",
-    "imminent": "пре-импульс",
-    "start": "старт",
-    "forming": "формирование",
-    "blocked": "заблокирован",
-}
 
 
 def _fmt_price(value: float | None) -> str:
@@ -99,8 +68,6 @@ async def _probe_with_retry(symbol: str) -> dict[str, Any]:
             row = await probe_symbol_signal(symbol, auto_watchlist=False, stagger_ms=120)
             if row.get("error"):
                 return row
-            row["_signals_catalog"] = True
-            build_poc_level_scenarios(row)
             return row
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
@@ -113,7 +80,7 @@ async def _probe_with_retry(symbol: str) -> dict[str, Any]:
 
 
 def resolve_signals_universe(explicit: list[str] | None = None) -> list[str]:
-    """Symbols: args → watchlist → paper candidates → tracker active."""
+    """Symbols: args → watchlist → tracker active."""
     if explicit:
         out: list[str] = []
         for raw in explicit:
@@ -127,12 +94,6 @@ def resolve_signals_universe(explicit: list[str] | None = None) -> list[str]:
         if sym not in symbols:
             symbols.append(sym)
 
-    cand_state = load_setup_candidates_state()
-    for key in (cand_state.get("active") or {}):
-        sym = str(key).split(":", 1)[0].upper()
-        if sym and sym not in symbols:
-            symbols.append(sym)
-
     tracker = load_tracker_state()
     for key, sig in (tracker.get("signals") or {}).items():
         if not isinstance(sig, dict) or sig.get("status") != "active":
@@ -144,101 +105,23 @@ def resolve_signals_universe(explicit: list[str] | None = None) -> list[str]:
     return symbols[:_MAX_SYMBOLS]
 
 
-def catalog_hits_for_row(row: dict[str, Any]) -> list[SetupEvidence]:
-    regime = resolve_catalog_regime(row, row)
-    return run_setup_catalog(row, row, regime, include_forming=True)
 
 
-def _format_setup_hit(ev: SetupEvidence) -> str:
-    label = _SETUP_LABEL_RU.get(ev.setup_id, ev.setup_id)
-    dir_ru = "ШОРТ" if ev.direction == "short" else "ЛОНГ"
-    tier = "✅" if ev.confirmed else "⏳"
-    tier_note = "confirm" if ev.confirmed else "forming"
-    reasons = ", ".join(str(r) for r in ev.reasons[:3])
-    prob = ev.metadata.get("probability") if isinstance(ev.metadata, dict) else None
-    prob_note = f" · P <code>{float(prob):.0%}</code>" if prob is not None else ""
-    lines = [
-        f"  {tier} <b>{html.escape(label)}</b> · {dir_ru} · "
-        f"<code>{tier_note}</code> · strength <code>{ev.strength:.2f}</code>{prob_note}",
-    ]
-    if reasons:
-        lines.append(f"  <i>{html.escape(reasons)}</i>")
-    if ev.entry > 0 and ev.tp1 > 0:
-        lines.append(
-            f"  entry <code>{_fmt_price(ev.entry)}</code> → "
-            f"TP <code>{_fmt_price(ev.tp1)}</code> · "
-            f"SL <code>{_fmt_price(ev.stop_loss)}</code>"
-        )
-    return "\n".join(lines)
-
-
-def _format_prizrak_brief(row: dict[str, Any]) -> str:
-    block = format_poc_level_scenarios_telegram(row.get("poc_level_scenarios"))
-    if not block:
-        return "  — нет Prizrak-сценария уровня (нужен POC/структура)"
-    return block.replace("📍 <b>Сценарий уровня</b>", "  📍 <b>Prizrak</b>").replace(
-        "<i>Pinned: обновляется каждый tick · memecoin scan — только fuel+confirm.</i>",
-        "",
-    ).strip()
-
-
-def _format_candidate(cand: dict[str, Any]) -> str:
-    sym = html.escape(str(cand.get("symbol") or "?").replace("USDT", "-USDT"))
-    stage = _STAGE_LABEL_RU.get(str(cand.get("stage") or ""), str(cand.get("stage") or "—"))
-    source = str(cand.get("source") or "")
-    if "squeeze" in source:
-        stage = _STAGE_LABEL_RU.get("compression", stage)
-    direction = str(cand.get("direction") or "short").upper()
-    fuel = float(cand.get("fuel") or 0)
-    lc = html.escape(str(cand.get("lifecycle_phase") or "—"))
-    block = cand.get("block_code")
-    tail = f" · block <code>{html.escape(str(block))}</code>" if block else ""
-    return (
-        f"  ⏳ <b>{sym}</b> {direction} · <code>{html.escape(stage)}</code> · "
-        f"fuel <code>{fuel:.0f}</code> · lc <code>{lc}</code>{tail}"
-    )
-
-
-def _format_symbol_strategies(
+def _format_symbol_snapshot(
     sym: str,
     row: dict[str, Any],
-    *,
-    hits: list[SetupEvidence],
-    candidates: list[dict[str, Any]],
 ) -> str:
     sym_label = html.escape(sym.replace("USDT", "-USDT"))
     price = float(row.get("price") or 0)
     lc = row.get("lifecycle") or {}
     lc_phase = html.escape(str(lc.get("phase") or "—"))
-    regime = html.escape(resolve_catalog_regime(row, row))
     bias = lc.get("recommended_bias")
     emoji = "🔴" if bias == "short" else "🟢" if bias == "long" else "⚖️"
 
     lines = [
         f"{emoji} <b>{sym_label}</b> · <code>{_fmt_price(price)}</code> · "
-        f"lc <code>{lc_phase}</code> · regime <code>{regime}</code>",
-        "<b>Стратегии каталога:</b>",
+        f"lc <code>{lc_phase}</code>",
     ]
-
-    confirmed = [h for h in hits if h.confirmed]
-    forming = [h for h in hits if not h.confirmed]
-    if confirmed:
-        for ev in sorted(confirmed, key=lambda h: h.strength, reverse=True):
-            lines.append(_format_setup_hit(ev))
-    if forming:
-        for ev in sorted(forming, key=lambda h: h.strength, reverse=True)[:2]:
-            lines.append(_format_setup_hit(ev))
-    if not hits:
-        lines.append("  — нет confirm по каталогу")
-
-    lines.append("<b>Prizrak (POC/ловушки/ПП):</b>")
-    lines.append(_format_prizrak_brief(row))
-
-    sym_cands = [c for c in candidates if str(c.get("symbol") or "").upper() == sym.upper()]
-    if sym_cands:
-        lines.append("<b>Paper pre_*:</b>")
-        for cand in sym_cands[:2]:
-            lines.append(_format_candidate(cand))
 
     return "\n".join(lines)
 
@@ -342,13 +225,9 @@ def _format_summary(
     rollup: _ReportRollup,
     *,
     n_active: int,
-    n_confirm: int,
-    n_forming: int,
-    n_cands: int,
 ) -> str:
     return (
-        f"<b>Сводка:</b> каталог confirm <code>{n_confirm}</code> · "
-        f"forming <code>{n_forming}</code> · paper <code>{n_cands}</code> · "
+        f"<b>Сводка:</b> "
         f"tracker active <code>{n_active}</code> · {rollup.n_plus} в плюсе · "
         f"{rollup.n_tp1} TP1 · {rollup.n_realert} re-alert · "
         f"{rollup.n_stale} stale · {rollup.n_bias_conflict} bias-конфликт"
@@ -447,12 +326,6 @@ def _format_active_block(
 
 async def build_signals_report_text(symbols: list[str] | None = None) -> str:
     universe = resolve_signals_universe(symbols)
-    cand_state = load_setup_candidates_state()
-    active_cands = [
-        c
-        for c in (cand_state.get("active") or {}).values()
-        if isinstance(c, dict) and c.get("status") == "active"
-    ]
 
     state = load_tracker_state()
     tracker_signals = state.get("signals") or {}
@@ -464,10 +337,7 @@ async def build_signals_report_text(symbols: list[str] | None = None) -> str:
 
     blocks: list[str] = [
         f"📋 <b>/signals</b> · {datetime.now(UTC).strftime('%H:%M')} UTC",
-        (
-            "<i>Prizrak (POC/ловушки/ПП) + каталог стратегий по собранным данным. "
-            "Не memecoin pump/dump scan. Точка: <code>/signal SYM</code>.</i>"
-        ),
+        "<i>Снимок watchlist + tracker. Точка: <code>/signal SYM</code>.</i>",
     ]
 
     if not universe:
@@ -481,8 +351,6 @@ async def build_signals_report_text(symbols: list[str] | None = None) -> str:
     blocks.append(f"<b>Монеты</b> · <code>{len(universe)}</code>")
 
     n_fail = 0
-    n_confirm = 0
-    n_forming = 0
     row_cache: dict[str, dict[str, Any]] = {}
     rollup = _ReportRollup()
 
@@ -497,11 +365,8 @@ async def build_signals_report_text(symbols: list[str] | None = None) -> str:
             )
             continue
         row_cache[sym] = row
-        hits = catalog_hits_for_row(row)
-        n_confirm += sum(1 for h in hits if h.confirmed)
-        n_forming += sum(1 for h in hits if not h.confirmed)
         blocks.append(
-            _format_symbol_strategies(sym, row, hits=hits, candidates=active_cands)
+            _format_symbol_snapshot(sym, row)
         )
 
     if active_tracker:
@@ -527,9 +392,6 @@ async def build_signals_report_text(symbols: list[str] | None = None) -> str:
         _format_summary(
             rollup,
             n_active=len(active_tracker),
-            n_confirm=n_confirm,
-            n_forming=n_forming,
-            n_cands=len(active_cands),
         )
     )
     blocks.append("<i>REST snapshot · pre_* в watch отдельно от /signal</i>")
@@ -542,7 +404,7 @@ async def deliver_signals_report(
     *,
     symbols: list[str] | None = None,
 ) -> None:
-    from hunt_core.runtime.cycle._impl import _split_telegram
+    from hunt_core.runtime.cycle._cycle_reconcile import _split_telegram
 
     text = await build_signals_report_text(symbols)
     for part in _split_telegram(text):

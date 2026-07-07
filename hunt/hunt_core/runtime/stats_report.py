@@ -13,11 +13,10 @@ import polars as pl
 
 from hunt_core.deliver.telegram import TelegramBroadcaster
 
-from hunt_core.domain.market_regime import active_params
+from hunt_core.regime.market_regime import active_params
 from hunt_core.params.store import effective_hunt_params
 from hunt_core.paths import DATA, MARKET_REGIME, SIGNAL_EVENTS, TELEGRAM_COOLDOWN
 from hunt_core.track.tracker import load_tracker_state
-from hunt_core.track.candidates import load_setup_candidates_state
 from hunt_core.track.outcomes import (
     LEGACY_UNKNOWN,
     entry_lifecycle_phase,
@@ -44,6 +43,15 @@ def _thesis_outcome(reason: str, pnl: float | None, *, tp1_managed: bool = False
     if reason in _WIN_REASONS:
         return "tp_hit"
     if reason in _STOP_REASONS:
+        # Used to key off tp1_managed alone — "stop_hit" with tp1 never
+        # partially filled was always "stop_loss", even when the stop had been
+        # trailed to breakeven-plus first (tracker.py's early-breakeven move)
+        # and the actual close was a small profit. Same bug as `outcome_kind`
+        # in track/outcomes.py (confirmed there: 16/41 closed trades mislabeled
+        # loss despite positive PnL) — real PnL is authoritative when we have
+        # it; tp1_managed is only a fallback for legacy rows with no PnL.
+        if pnl is not None:
+            return "scratch_win" if pnl > 0 else "stop_loss"
         return "scratch_win" if tp1_managed else "stop_loss"
     if reason in _SOFT_REASONS:
         return "scratch_win" if (pnl is not None and pnl > 0) else "thesis_fail"
@@ -115,7 +123,7 @@ def _format_tg_funnel(*, signals: dict[str, Any]) -> str:
             f"confirm cooldown <code>{confirm_cd}</code> · "
             f"tracker TG <code>{tracked_tg}</code> · closed <code>{closed_n}</code>"
         ),
-        "<i>pre_* в watch. /signals = Prizrak + каталог + tracker active.</i>",
+        "<i>pre_* в watch. /signals = снимок watchlist + tracker active.</i>",
     ]
     if recent_early:
         lines.append("<b>Последние early TG:</b>")
@@ -243,10 +251,17 @@ def _backtest_snippet() -> str | None:
 
 
 def _confirmed_events_count() -> int:
+    # A trailing-N-lines slice systematically undercounts a minority event type
+    # when the stream is dominated by a much more common one — here "blocked"
+    # events outnumber "confirmed" ~25:1, so the last 2000 lines held only ~60
+    # confirmed events (what /stats displayed) while the full file (17k+ lines)
+    # actually had 600+. Scan the whole file; at this scale (tens of thousands
+    # of lines) that's still a trivial read, and unlike a fixed tail it can
+    # never silently drop a minority event class as the file grows.
     if not SIGNAL_EVENTS.is_file():
         return 0
     n = 0
-    for ln in SIGNAL_EVENTS.read_text(encoding="utf-8").splitlines()[-2000:]:
+    for ln in SIGNAL_EVENTS.read_text(encoding="utf-8").splitlines():
         if not ln.strip():
             continue
         try:
@@ -281,32 +296,6 @@ def _score_floor_block(labeled: list[dict[str, Any]]) -> str | None:
         f"<code>{len(below)}</code> trades · {bw}W/{bl}L "
         f"<i>(не открывались бы сегодня)</i>"
     )
-
-
-def _candidates_rollup_block() -> str:
-    """Top symbols by setup-candidate paper tracking volume."""
-    state = load_setup_candidates_state()
-    rollup = state.get("rollup") or {}
-    if not rollup:
-        return ""
-    ranked = sorted(
-        rollup.items(),
-        key=lambda kv: int((kv[1] or {}).get("n_closed") or 0),
-        reverse=True,
-    )[:8]
-    lines = ["<b>Setup candidates</b> (squeeze/forming/blocked paper):"]
-    for sym, r in ranked:
-        n = int(r.get("n_closed") or 0)
-        if n <= 0:
-            continue
-        wins = int(r.get("wins") or 0)
-        wr = round(wins / n * 100.0, 1) if n else 0.0
-        lines.append(
-            f"· <code>{sym.replace('USDT', '')}</code> n={n} WR {wr}% "
-            f"avgPnL {r.get('avg_paper_pnl', '—')}% "
-            f"sq={r.get('n_squeeze', 0)} blk={r.get('n_blocked', 0)}"
-        )
-    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def build_stats_report_text() -> str:
@@ -374,65 +363,15 @@ def build_stats_report_text() -> str:
             )
         blocks.append("\n".join(lines))
     blocks.append(_format_tg_funnel(signals=signals))
-    cand_block = _candidates_rollup_block()
-    if cand_block:
-        blocks.append(cand_block)
     bt = _backtest_snippet()
     if bt:
         blocks.append(bt)
-    exp = _expansion_stats_block()
-    if exp:
-        blocks.append(exp)
     blocks.append("<i>Hunt stats · read-only · не auto-trade</i>")
     return "\n\n".join(blocks)
 
 
-def _expansion_stats_block() -> str | None:
-    """Compact expansion ledger + cache — separate product from fusion WR."""
-    try:
-        from hunt_core.expansion.config import load_expansion_config
-        from hunt_core.expansion.learning import (
-            load_expansion_outcomes,
-            summarize_outcomes,
-        )
-        from hunt_core.expansion.learning.review import pending_review_horizons
-        from hunt_core.paths import EXPANSION_CALIBRATION_JSON, EXPANSION_RUNTIME_STATE_JSON
-        from hunt_core.runtime.expansion_universe_scan import collect_universe_rows
-
-        cfg = load_expansion_config()
-        if not cfg.enabled:
-            return None
-        records = load_expansion_outcomes()
-        summary = summarize_outcomes(records)
-        pending = sum(1 for r in records if pending_review_horizons(r))
-        cache = collect_universe_rows()
-        stamped = sum(1 for r in cache.values() if isinstance(r.get("expansion"), dict))
-        cal = "yes" if EXPANSION_CALIBRATION_JSON.is_file() else "no"
-        runtime = "yes" if EXPANSION_RUNTIME_STATE_JSON.is_file() else "no"
-        lines = [
-            "<b>Expansion Engine</b>",
-            (
-                f"cache <code>{len(cache)}</code> (stamped <code>{stamped}</code>) · "
-                f"ledger <code>{len(records)}</code> · graded <code>{summary.get('graded') or 0}</code> · "
-                f"pending <code>{pending}</code>"
-            ),
-            (
-                f"watch_stamp <code>{cfg.watch_stamp}</code> · "
-                f"pinned TG <code>{cfg.tg_pinned_alerts}</code> · "
-                f"universe TG <code>{cfg.tg_universe_scan}</code>"
-            ),
-            f"calibration <code>{cal}</code> · runtime_state <code>{runtime}</code>",
-        ]
-        hit = summary.get("real_hit_rate")
-        if hit is not None:
-            lines.append(f"outcome hit rate <code>{float(hit) * 100:.1f}%</code>")
-        return "\n".join(lines)
-    except Exception:
-        return None
-
-
 async def deliver_stats_report(broadcaster: TelegramBroadcaster) -> None:
-    from hunt_core.runtime.cycle._impl import _split_telegram
+    from hunt_core.runtime.cycle._cycle_reconcile import _split_telegram
 
     text = build_stats_report_text()
     for part in _split_telegram(text):

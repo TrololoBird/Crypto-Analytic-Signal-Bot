@@ -8,10 +8,10 @@ import structlog
 
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.deliver.telegram import TelegramBroadcaster
-from hunt_core.runtime.deep_assembly import (
-    assemble_deep_tick,
+from hunt_core.runtime.analyst_assembly import (
+    assemble_analyst_tick,
     material_deep_change,
-    send_deep_change_telegram,
+    send_analyst_change_telegram,
 )
 from hunt_core.runtime.tick_state import deep_query_store
 
@@ -29,7 +29,7 @@ async def deliver_pinned_startup_brief(
     client: Any,
     stagger_ms: int = 250,
 ) -> int:
-    """Legacy startup burst — disabled by default; use deep_pinned_loop instead."""
+    """Legacy startup burst — disabled by default; use analyst_pinned_loop instead."""
     if not pinned_startup_brief_enabled():
         LOG.info("pinned_startup_brief_skipped", reason="disabled")
         return 0
@@ -37,11 +37,11 @@ async def deliver_pinned_startup_brief(
     for sym in PINNED_SYMBOLS:
         try:
             prev = deep_query_store().get(sym)
-            row = await assemble_deep_tick(sym, client, stagger_ms=stagger_ms)
+            row = await assemble_analyst_tick(sym, client, stagger_ms=stagger_ms)
             if row.get("error"):
                 continue
             if material_deep_change(sym, row, prev=prev):
-                if await send_deep_change_telegram(broadcaster, row):
+                if await send_analyst_change_telegram(broadcaster, row):
                     sent += 1
         except Exception as exc:
             LOG.warning("pinned_brief_probe_failed", symbol=sym, error=repr(exc))

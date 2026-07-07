@@ -19,15 +19,8 @@ LOSS_REASONS = frozenset(
     }
 )
 LEGACY_UNKNOWN = "legacy_unknown"
-# Profitable structural exits count as wins for WR (Q29 BE buffer).
-_STRUCTURAL_EXIT_REASONS = frozenset(
-    {
-        "bounce_invalidate",
-        "lifecycle_stale",
-        "bias_flip",
-        "trend_exhaustion",
-    }
-)
+# Noise floor: |pnl_pct| at or below this is too small to call win/loss on PnL
+# alone, so classification falls back to the reason label.
 _PROFIT_STRUCTURAL_EXIT_MIN_PCT = 0.15
 
 
@@ -63,15 +56,36 @@ def entry_lifecycle_phase(sig: dict[str, Any]) -> str:
 
 
 def outcome_kind(reason: str, *, pnl_pct: float | None = None) -> str:
+    """Classify a closed trade as win/loss/flat/unknown.
+
+    Real PnL is authoritative whenever it clears the noise floor
+    (``_PROFIT_STRUCTURAL_EXIT_MIN_PCT``), regardless of ``reason`` — the label
+    only decides when PnL is unavailable. This used to special-case a hand-picked
+    subset of loss reasons (``_STRUCTURAL_EXIT_REASONS``) as "can actually be a
+    win if PnL says so", while every OTHER loss reason — including "stop_hit",
+    the single most common close reason in the tracker — was hardcoded as a
+    loss no matter what the real PnL showed. Confirmed against live tracker
+    data: 16 of 41 closed trades were labeled "loss" despite positive PnL, all
+    "stop_hit" closes where the stop had been trailed to breakeven-plus first
+    (``_maybe_move_stop_to_breakeven`` in tracker.py moves ``stop_loss`` into
+    profit territory on sufficient MFE, but the close-reason generator still
+    just says generic "stop_hit" whether that stop is the original protective
+    level or an already-profitable trailed one). The reported win rate was
+    understating real performance by roughly half. A stop-loss's entire purpose
+    is capping downside — if it closed in genuine profit, that is a win by any
+    honest accounting, not a special case for a curated reason list.
+    """
+    if pnl_pct is not None:
+        p = float(pnl_pct)
+        if p > _PROFIT_STRUCTURAL_EXIT_MIN_PCT:
+            return "win"
+        if p < -_PROFIT_STRUCTURAL_EXIT_MIN_PCT:
+            return "loss"
+        # Inside the noise band (|pnl| <= floor) — fall through to the reason
+        # label, since a near-zero PnL doesn't clearly say win or loss on its own.
     if reason in WIN_REASONS:
         return "win"
     if reason in LOSS_REASONS:
-        if (
-            reason in _STRUCTURAL_EXIT_REASONS
-            and pnl_pct is not None
-            and float(pnl_pct) > _PROFIT_STRUCTURAL_EXIT_MIN_PCT
-        ):
-            return "win"
         return "loss"
     if reason == LEGACY_UNKNOWN and pnl_pct is not None:
         return "win" if float(pnl_pct) > 0 else "loss" if float(pnl_pct) < 0 else "flat"

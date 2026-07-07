@@ -57,7 +57,7 @@ from hunt_core.features.snapshot import (
     tf_snapshot_for_symbol,
     tf_snapshot_lite,
 )
-from hunt_core.hunter.detect.delivery_support import liquidity_skip_reason
+from hunt_core.scanner.detect.delivery_support import liquidity_skip_reason
 from hunt_core.runtime.state import current_symbol_state
 from hunt_core.data.universe import PINNED_SYMBOLS
 
@@ -1016,74 +1016,29 @@ async def snapshot_symbol(
 
     apply_cross_exchange_flat(result)
 
-    if not hunt_fusion:
-        from hunt_core.data.tick_jsonl import ensure_fusion_lifecycle_fields
+    from hunt_core.data.tick_jsonl import ensure_fusion_lifecycle_fields
 
-        result["plane"] = "deep"
-        neutral_lc = ensure_fusion_lifecycle_fields({"phase": "neutral", "phase_fusion": "neutral"})
-        result["lifecycle"] = neutral_lc
-        stub = {
-            "symbol": symbol,
-            "impulse_confirmed": False,
-            "phase": "neutral",
-            "lifecycle_phase": "neutral",
-            "lifecycle": neutral_lc,
-        }
-        result["dump"] = {**stub, "direction": "short"}
-        result["long"] = {**stub, "direction": "long"}
-    else:
-        # --- Fusion detection engine (replaces scan/* + regime FSM + gate scoring) ---
-        from hunt_core.runtime.tick_fusion import apply_fusion_setups, run_fusion_detection
-
-        detection, side, phase_val, lifecycle_dict = run_fusion_detection(
-            prepared=prepared,
-            result=result,
-            symbol=symbol,
-            structure=structure,
-            price=price,
-            hunt_h=hunt_h,
-            hunt_l=hunt_l,
-        )
-        result["lifecycle"] = lifecycle_dict
-        result["plane"] = "hunt"
-        apply_fusion_setups(
-            detection=detection,
-            side=side,
-            phase_val=phase_val,
-            lifecycle_dict=lifecycle_dict,
-            result=result,
-            symbol=symbol,
-            intra_bar=intra_bar,
-        )
-        if detection is not None:
-            result["factor_panel"] = {
-                f.name: {"score": f.score, "active": f.active, "detail": f.detail}
-                for f in detection.factors
-            }
-        dump = result.get("dump") if isinstance(result.get("dump"), dict) else {}
-        long_setup = result.get("long") if isinstance(result.get("long"), dict) else {}
-        dump["young_listing"] = young_listing
-        dump["bars_1h"] = bars_1h
-        long_setup["young_listing"] = young_listing
-        long_setup["bars_1h"] = bars_1h
-        result["dump"] = dump
-        result["long"] = long_setup
-        if side in {"long", "short"}:
-            from hunt_core.track.outcome_ledger import maybe_append_candidate_ledger
-
-            active_setup = dump if side == "short" else long_setup
-            maybe_append_candidate_ledger(
-                symbol=symbol,
-                direction=side,
-                row=result,
-                setup=active_setup if isinstance(active_setup, dict) else None,
-            )
+    result["plane"] = "deep" if not hunt_fusion else "hunt"
+    neutral_lc = ensure_fusion_lifecycle_fields({"phase": "neutral", "phase_fusion": "neutral"})
+    result["lifecycle"] = neutral_lc
+    stub = {
+        "symbol": symbol,
+        "impulse_confirmed": False,
+        "phase": "neutral",
+        "lifecycle_phase": "neutral",
+        "lifecycle": neutral_lc,
+        "young_listing": young_listing,
+        "bars_1h": bars_1h,
+    }
+    result["dump"] = {**stub, "direction": "short"}
+    result["long"] = {**stub, "direction": "long"}
+    if hunt_fusion:
         merge_hunt_extremes(
             symbol,
             price=price,
             rest_hunt_high=rest_h,
             rest_hunt_low=rest_l,
-            lifecycle_phase=phase_val,
+            lifecycle_phase="neutral",
             market=market,
         )
     try:
@@ -1107,6 +1062,11 @@ async def snapshot_symbol(
                     "long_htf_count": summary.get("long_htf_count"),
                     "short_htf_count": summary.get("short_htf_count"),
                 }
+            # Level C: expose the aggregated HTF bias on the row so the direction
+            # gate (analyst + scanner) can veto counter-trend signals.
+            from hunt_core.confluence.mtf import htf_bias_from_signals
+
+            result["htf_bias"] = htf_bias_from_signals(mtf_obj.tf_signals)
     except Exception as exc:
         LOG.debug("mtf_confluence_skipped | symbol=%s error=%s", symbol, exc)
     if hunt_fusion:
@@ -1131,7 +1091,7 @@ async def snapshot_symbol(
         LOG.warning("structure_state_snapshot_failed | symbol=%s error=%s", symbol, exc)
 
     try:
-        from hunt_core.analysis.forecast import stamp_forecasts_on_row
+        from hunt_core.toolkit.forecast import stamp_forecasts_on_row
 
         if ws_feed is not None:
             from hunt_core.market import apply_live_price_to_row
@@ -1146,16 +1106,6 @@ async def snapshot_symbol(
                     setup_block["entry_archetype"] = arch
     except Exception as exc:
         LOG.warning("fusion_forecast_stamp_failed | symbol=%s error=%s", symbol, exc)
-
-    try:
-        from hunt_core.analysis.expansion_engine.config import load_expansion_config
-        from hunt_core.runtime.analyst_assembly import stamp_expansion_on_row
-
-        exp_cfg = load_expansion_config()
-        if exp_cfg.enabled and exp_cfg.watch_stamp and tier in exp_cfg.watch_stamp_tiers:
-            stamp_expansion_on_row(result)
-    except Exception as exc:
-        LOG.debug("expansion_watch_stamp_failed | symbol=%s error=%s", symbol, exc)
 
     _ensure_kinematic_row_fields(result, ticker)
 

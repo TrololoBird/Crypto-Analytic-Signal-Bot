@@ -45,7 +45,7 @@ def shadow_record_from_delivery(
         "blockers": list(blockers or []),
         "no_signal_reason": no_signal_reason or row.get("no_signal_reason"),
         "lifecycle_phase": lc.get("phase"),
-        "fusion_confirmed": bool(setup.get("confirmed")),
+        "impulse_confirmed": bool(setup.get("impulse_confirmed")),
         "playbook_pass": (row.get("manipulation_fusion") or {}).get("pass_count"),
         "playbook_required": (row.get("manipulation_fusion") or {}).get("required_n"),
         "symbol_state_tier": symbol_state_tier,

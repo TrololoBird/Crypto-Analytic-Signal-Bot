@@ -380,9 +380,57 @@ def build_feature_vector(
     return FeatureVector(**filtered)
 
 
+# ── Optional feature provenance metadata ─────────────────────────────────────
+
+
+@dataclass(slots=True)
+class FeatureProvenance:
+    """Optional metadata attached to a feature extraction for replay/debug.
+
+    Every field is optional — the hot path stays lean; provenance is opt-in.
+    Through 6+ months of operation, these fields are the most useful for
+    investigating strange signals and model degradation.
+    """
+    producer_version: str = ""
+    feature_version: str = ""
+    event_id: str = ""
+    event_time: str = ""
+    processing_time: str = ""
+    source_latency_ms: int = 0
+    compute_latency_ms: float = 0.0
+
+
+def record_feature_provenance(
+    vector: FeatureVector,
+    *,
+    producer_version: str = "",
+    feature_version: str = "",
+    event_id: str = "",
+    event_time: str = "",
+    processing_time: str = "",
+    source_latency_ms: int = 0,
+    compute_latency_ms: float = 0.0,
+) -> FeatureProvenance:
+    """Attach optional provenance metadata to a FeatureVector extraction.
+
+    The provenance is a separate object — the vector remains lean for hot-path.
+    """
+    return FeatureProvenance(
+        producer_version=producer_version,
+        feature_version=feature_version,
+        event_id=event_id,
+        event_time=event_time,
+        processing_time=processing_time,
+        source_latency_ms=source_latency_ms,
+        compute_latency_ms=compute_latency_ms,
+    )
+
+
 __all__ = [
     "FeatureExtractError",
+    "FeatureProvenance",
     "FeatureVector",
     "build_feature_vector",
     "load_feature_registry",
+    "record_feature_provenance",
 ]

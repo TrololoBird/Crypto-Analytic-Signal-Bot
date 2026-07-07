@@ -798,7 +798,11 @@ def build_message_broadcaster(settings: Any) -> MessageBroadcaster:
     if provider == "none":
         return DisabledBroadcaster()
     if provider == "telegram":
-        return TelegramBroadcaster(settings.tg_token, settings.target_chat_id)
+        token = str(getattr(settings, "tg_token", "") or "").strip()
+        chat_id = str(getattr(settings, "target_chat_id", "") or "").strip()
+        if not token or not chat_id:
+            return DisabledBroadcaster()
+        return TelegramBroadcaster(token, chat_id)
 
     provider_config = getattr(settings.notifiers, provider, None)
     if provider_config is None or not getattr(provider_config, "webhook_url", None):
@@ -815,7 +819,6 @@ def build_message_broadcaster(settings: Any) -> MessageBroadcaster:
 
 # --- merged from deliver/telegram (formatters) — public re-exports ---
 
-from hunt_core.deliver._brief import format_signal_brief_telegram
 from hunt_core.deliver._followup import format_followup_telegram
 from hunt_core.deliver._labels import (
     fmt_price,
@@ -908,25 +911,6 @@ def _format_structured_thesis(
     )
 
 
-def format_entry_telegram(
-    row: dict[str, Any],
-    *,
-    direction: str,
-    confirm_reasons: list[str],
-    delivery_tier: str = "triggered",
-) -> str:
-    """Legacy alias — canonical body is format_delivery_telegram in dispatch."""
-    from hunt_core.deliver.dispatch import format_delivery_telegram
-
-    setup = row["dump"] if direction == "short" else row["long"]
-    return format_delivery_telegram(
-        row,
-        direction=direction,
-        setup=setup,
-        delivery_tier=delivery_tier,
-        confirm_reasons=confirm_reasons,
-    )
-
 
 
 
@@ -966,11 +950,9 @@ __all__ = [
     "build_message_broadcaster",
     "fmt_price",
     "format_cross_exchange_section",
-    "format_entry_telegram",
     "format_followup_telegram",
     "format_pinned_deep_analysis",
     "format_setup_lines",
-    "format_signal_brief_telegram",
     "format_squeeze_telegram",
     "format_symbol_telegram",
     "phase_badge",

@@ -58,21 +58,8 @@ def row_age_seconds(row: dict[str, Any]) -> float | None:
         return None
 
 
-def _setup_conviction(setup: dict[str, Any], direction: str) -> float:
-    from hunt_core.scanner.detect.setup_fields import setup_conviction_pct
-
-    return setup_conviction_pct(setup, direction=direction)
-
-
 def _pick_focus(row: dict[str, Any]) -> Literal["short", "long"]:
-    v2 = row.get("verdict_v2")
-    if v2 is not None:
-        action = str(getattr(getattr(v2, "signal_decision", None), "action", "") or "")
-        if action == "short":
-            return "short"
-        if action == "long":
-            return "long"
-    summary = row.get("verdict_v2_summary")
+    summary = row.get("prizrak_summary")
     if isinstance(summary, dict):
         action = str(summary.get("action") or "")
         if action == "short":
@@ -81,12 +68,10 @@ def _pick_focus(row: dict[str, Any]) -> Literal["short", "long"]:
             return "long"
     dump = row.get("dump") or {}
     long_setup = row.get("long") or {}
-    if dump.get("confirmed") and not long_setup.get("confirmed"):
+    if dump.get("impulse_confirmed") and not long_setup.get("impulse_confirmed"):
         return "short"
-    if long_setup.get("confirmed") and not dump.get("confirmed"):
+    if long_setup.get("impulse_confirmed") and not dump.get("impulse_confirmed"):
         return "long"
-    if dump.get("confirmed") and long_setup.get("confirmed"):
-        return "short" if _setup_conviction(dump, "short") >= _setup_conviction(long_setup, "long") else "long"
     return "short"
 
 
@@ -110,11 +95,14 @@ def _evaluate_direction(
     from_store: bool,
     sniper_config: Any,
 ) -> DirectionQuery:
-    from hunt_core.deliver.dispatch import evaluate_delivery, evaluate_delivery_fast
     from hunt_core.scanner.detect.delivery_support import collect_report_blockers, evaluate_formation
 
+    # row["dump"]/row["long"] are permanently neutral stubs (impulse_confirmed
+    # always False) since the fusion detection engine was removed —
+    # manipulation.py is the only real Hunter signal source now and never
+    # populates these keys, so there is no delivery gate left to evaluate here.
     setup = (row.get("dump") if direction == "short" else row.get("long")) or {}
-    confirmed = bool(setup.get("confirmed") or setup.get("intrabar_confirmed"))
+    confirmed = False
     formation = evaluate_formation(
         setup, direction=direction, symbol=symbol, lifecycle=lc
     )
@@ -132,19 +120,6 @@ def _evaluate_direction(
     delivery_gate: GateResult | None = None
     delivery_tier: Any | None = None
     would_deliver = False
-    if confirmed:
-        use_fast = from_store or str(row.get("tick_path") or "") in _HOT_TICK_PATHS
-        eval_fn = evaluate_delivery_fast if use_fast else evaluate_delivery
-        delivery_gate, delivery_tier = eval_fn(
-            row,
-            direction=direction,
-            setup=setup,
-            lifecycle=lc,
-            symbol=symbol,
-            sniper_config=sniper_config,
-            refresh_live_price=not from_store,
-        )
-        would_deliver = bool(delivery_gate.ok and delivery_tier is not None)
     return DirectionQuery(
         direction=direction,
         confirmed=confirmed,
@@ -197,7 +172,7 @@ async def resolve_query_row(
     client: HuntCcxtClient | None = None,
 ) -> tuple[dict[str, Any], str, bool, float | None]:
     """Return ``(row, source, from_store, age_s)`` — DeepQueryStore first unless ``live``."""
-    from hunt_core.runtime.deep_assembly import assemble_deep_tick
+    from hunt_core.runtime.analyst_assembly import assemble_analyst_tick
     from hunt_core.runtime.symbol_probe import normalize_symbol
     from hunt_core.runtime.tick_state import deep_query_store
 
@@ -208,26 +183,27 @@ async def resolve_query_row(
     source = "live_rest"
 
     if live:
-        row = await assemble_deep_tick(sym, client, stagger_ms=max(stagger_ms, 200))
+        row = await assemble_analyst_tick(sym, client, stagger_ms=max(stagger_ms, 200))
         source = "deep_live"
     else:
         cached = deep_query_store().resolve(sym)
         if isinstance(cached, dict) and not cached.get("error"):
             age_s = row_age_seconds(cached)
-            if age_s is None or age_s <= STORE_STALE_S:
+            if age_s is None or age_s <= STORE_FRESH_S:
                 row = cached
                 from_store = True
                 source = str(cached.get("tick_path") or "deep_store")
-                if age_s is not None and age_s > STORE_FRESH_S:
-                    row = dict(cached)
-                    row["_stale_store"] = True
+            elif age_s is not None and age_s <= STORE_STALE_S:
+                # Between STORE_FRESH_S and STORE_STALE_S: force a fresh REST probe
+                # instead of sending stale data with an apology.
+                row = None
 
     if row is None:
-        row = await assemble_deep_tick(sym, client, stagger_ms=max(stagger_ms, 200))
-        source = "deep_assembly"
+        row = await assemble_analyst_tick(sym, client, stagger_ms=max(stagger_ms, 200))
+        source = "analyst_assembly"
 
     if row.get("maps") and not row.get("maps_forecast"):
-        from hunt_core.maps.forecast import stamp_forecasts_on_row
+        from hunt_core.toolkit.forecast import stamp_forecasts_on_row
 
         stamp_forecasts_on_row(row)
 
@@ -236,9 +212,9 @@ async def resolve_query_row(
 
 def _format_blockers_section(dq: DirectionQuery) -> list[str]:
     lines: list[str] = []
-    dir_ru = "ШОРТ" if dq.direction == "short" else "ЛОНГ"
 
     if dq.confirmed:
+        dir_ru = "ШОРТ" if dq.direction == "short" else "ЛОНГ"
         if dq.would_deliver:
             tier = getattr(dq.delivery_tier, "tier", None) or (
                 dq.delivery_tier.get("tier")
@@ -246,115 +222,114 @@ def _format_blockers_section(dq: DirectionQuery) -> list[str]:
                 else None
             )
             tier_txt = f" · tier <code>{html.escape(str(tier))}</code>" if tier else ""
-            lines.append(f"✅ <b>Delivery {dir_ru}</b>: прошёл бы сейчас{tier_txt}")
+            lines.append(f"✅ Delivery {dir_ru}: прошёл бы{tier_txt}")
         elif dq.delivery_gate is not None:
             g = dq.delivery_gate
             lines.append(
-                f"🚫 <b>Delivery {dir_ru}</b>: "
-                f"<code>{html.escape(g.code or 'gate')}</code> — "
-                f"<i>{html.escape(g.message or '')}</i>"
+                f"🚫 Delivery {dir_ru}: "
+                f"<code>{html.escape(g.code or 'gate')}</code>"
             )
-    else:
-        f = dq.formation
-        lines.append(
-            f"📋 <b>Forming {dir_ru}</b>: "
-            f"<code>{html.escape(f.code or 'forming')}</code> — "
-            f"<i>{html.escape(f.message or '')}</i>"
-        )
-
-    shown = 0
-    for b in dq.blockers:
-        if not b.ok and b.code != "ok":
-            if not dq.confirmed and b.code == "not_confirmed":
-                continue
-            if dq.delivery_gate and b.code == dq.delivery_gate.code:
-                continue
-            lines.append(
-                f"  • <code>{html.escape(b.code)}</code> — "
-                f"<i>{html.escape((b.message or '')[:120])}</i>"
-            )
-            shown += 1
-            if shown >= _MAX_BLOCKERS_SHOWN:
-                rest = sum(1 for x in dq.blockers if not x.ok) - shown
-                if rest > 0:
-                    lines.append(f"  <i>…ещё {rest} blocker(s)</i>")
-                break
     return lines
 
 
 def format_query_telegram(q: QueryResult, *, added_watch: bool = False) -> str:
-    """Deep-first /signal — analysis/deep structure/MTF/maps; hunt scan collapsed footer."""
-    from hunt_core.deep.build import build_deep_report
-    from hunt_core.deep.format_telegram import format_deep_analysis_telegram
+    """Analyst-first /signal — analysis/structure/MTF/maps; hunt scan collapsed footer."""
+    from hunt_core.prizrak.build import build_deep_report as _build_deep_report
+    from hunt_core.prizrak.format_telegram import format_deep_analysis_telegram as _fmt_deep
     from hunt_core.runtime.tick_state import hunt_scan_store
 
     focus = q.focus()
     try:
-        analysis = build_deep_report(q.row, include_watch_appendix=False)
-        parts: list[str] = [format_deep_analysis_telegram(analysis)]
+        analysis = _build_deep_report(q.row, include_watch_appendix=False)
+        parts: list[str] = [_fmt_deep(analysis)]
     except Exception:
-        # Fail-loud: surface the real traceback to logs (was silently swallowed,
-        # masking the verdict_v2-dict crash). User still gets a graceful card.
+        # Fail-loud: surface the real traceback to logs instead of swallowing it.
+        # User still gets a graceful card.
         import structlog
 
         structlog.get_logger("hunt_core.runtime.query_service").exception(
-            "deep_report_build_failed", symbol=q.symbol, from_store=q.from_store
+            "report_build_failed", symbol=q.symbol, from_store=q.from_store
         )
         parts = [
             f"🔬 <b>Глубокий анализ — {html.escape(q.symbol)}</b>\n"
             "<i>анализ временно недоступен · /signal SYM --live для REST</i>"
         ]
 
-    watch_lines: list[str] = []
-    if added_watch:
-        watch_lines.append("<i>+ watchlist</i>")
-    hunt_row = hunt_scan_store().get(q.symbol)
-    if isinstance(hunt_row, dict) and not hunt_row.get("error"):
-        setup = (hunt_row.get("dump") if focus.direction == "short" else hunt_row.get("long")) or {}
-        phase = str(setup.get("phase") or "—")
-        confirmed = bool(setup.get("confirmed"))
-        _DIR_RU = {"short": "шорт", "long": "лонг"}
-        dir_ru = _DIR_RU.get(focus.direction, focus.direction)
-        bias_ru = "медвежье" if focus.direction == "short" else "бычье"
-        if confirmed:
-            watch_lines.append(
-                f"<i>Сканер: {bias_ru} наблюдение · closed-bar · "
-                f"фаза={html.escape(phase)} · <b>не</b> доставка TG</i>"
-            )
-        else:
-            watch_lines.append(
-                f"<i>Сканер: формирование {dir_ru}-сценария · "
-                f"{html.escape(phase)} · watch-фаза · отдельный контур</i>"
-            )
-    else:
-        watch_lines.append(
-            "<i>Сканер: нет отдельного тика (Deep-анализ выполнен, данные сканера отсутствуют)</i>"
-        )
-    if watch_lines:
-        parts.extend(["", "—", "<b>Сканер</b> (Модуль 2, справочно)", *watch_lines])
+    from hunt_core.data.universe import is_pinned_symbol
 
+    prizrak_action = str((analysis.row.get("prizrak_summary") or {}).get("action") or "").upper()
+
+    # When analyst says WAIT, show opposite direction too
+    if prizrak_action in {"WAIT", ""}:
+        from hunt_core.runtime.tick_state import hunt_scan_store
+        opposite_dir = "long" if q.focus_direction == "short" else "short"
+        dir_ru = "ЛОНГ" if opposite_dir == "long" else "ШОРТ"
+        opposite_q = q.long if opposite_dir == "long" else q.short
+        scan_row = hunt_scan_store().get(q.symbol)
+        scan_has_setup = False
+        if isinstance(scan_row, dict):
+            scan_setup = scan_row.get("dump" if opposite_dir == "short" else "long") or {}
+            scan_has_setup = bool(scan_setup.get("impulse_confirmed") or scan_setup.get("intrabar_confirmed"))
+        if opposite_q.would_deliver:
+            alt_label = "можно войти"
+        elif opposite_q.confirmed:
+            alt_label = "сетап есть"
+        elif scan_has_setup:
+            alt_label = "сетап в сканере (раннее обнаружение)"
+        else:
+            alt_label = "нет сетапа"
+        opp_lines = _format_blockers_section(opposite_q)
+        if opp_lines:
+            parts.extend(["", "—", f"🔄 <b>Альтернатива: {dir_ru}</b> — {alt_label}", *opp_lines])
+        elif alt_label != "нет сетапа":
+            parts.extend(["", "—", f"🔄 <b>Альтернатива: {dir_ru}</b> — {alt_label}"])
+
+    # Scanner section (always shown; independent from analyst verdict)
+    if not is_pinned_symbol(q.symbol):
+        watch_lines: list[str] = []
+        if added_watch:
+            watch_lines.append("<i>+ watchlist</i>")
+        hunt_row = hunt_scan_store().get(q.symbol)
+        if isinstance(hunt_row, dict) and not hunt_row.get("error"):
+            has_short = bool(hunt_row.get("dump", {}).get("impulse_confirmed"))
+            has_long = bool(hunt_row.get("long", {}).get("impulse_confirmed"))
+            scan_texts = []
+            if has_short:
+                scan_texts.append("🔴 сканер: шорт-сетап есть")
+            if has_long:
+                scan_texts.append("🟢 сканер: лонг-сетап есть")
+            if not scan_texts:
+                phase_s = str(hunt_row.get("dump", {}).get("phase") or "—")
+                phase_l = str(hunt_row.get("long", {}).get("phase") or "—")
+                scan_texts.append(f"сканер: шорт={phase_s} · лонг={phase_l}")
+            watch_lines.append(f"<i>{' · '.join(scan_texts)}</i>")
+        else:
+            watch_lines.append("<i>сканер: нет данных по символу</i>")
+        if watch_lines:
+            parts.extend(["", "—", "<b>Сканер</b> (модуль раннего обнаружения)", *watch_lines])
+
+    return "\n".join(parts)
+
+
+def format_freshness_footer(q: QueryResult) -> str:
+    """Source/freshness tag — always the LAST line of the full reply (after any
+    level-map/DOM/liquidation sections appended by the caller), never in the middle.
+    A mid-message "🛰 source · timestamp" line visually reads as a second message's
+    header, which is confusing — this must be appended last, once, by the caller.
+    """
     if q.from_store:
-        stale = bool(q.row.get("_stale_store"))
         as_of = q.row.get("as_of") or (q.row.get("freshness") or {}).get("as_of")
         as_of_txt = ""
         if as_of:
             as_of_txt = f" · снимок {html.escape(str(as_of)[:19].replace('T', ' '))} UTC"
         age_txt = f"{q.age_s:.0f}s назад" if q.age_s is not None else "watch-тик"
-        if stale:
-            parts.append(
-                f"\n<i>📊 данные {age_txt}{as_of_txt} (устарели) · обновляю в фоне · "
-                f"/signal {q.symbol.replace('USDT', '')} --live для немедленного REST</i>"
-            )
-        else:
-            parts.append(
-                f"\n<i>📊 из watch-тика ({age_txt}{as_of_txt}) · "
-                f"/signal {q.symbol.replace('USDT', '')} --live для REST</i>"
-            )
-    else:
-        as_of = q.row.get("as_of")
-        tail = f" · {html.escape(str(as_of)[:19].replace('T', ' '))} UTC" if as_of else ""
-        parts.append(f"\n<i>🛰 {html.escape(q.source)}{tail}</i>")
-    return "\n".join(parts)
+        return (
+            f"\n<i>📊 из кэша ({age_txt}{as_of_txt}) · "
+            f"/signal {q.symbol.replace('USDT', '')} --live для REST</i>"
+        )
+    as_of = q.row.get("as_of")
+    tail = f" · {html.escape(str(as_of)[:19].replace('T', ' '))} UTC" if as_of else ""
+    return f"\n<i>🛰 {html.escape(q.source)}{tail}</i>"
 
 
 def spawn_background_refresh(
@@ -390,6 +365,7 @@ __all__ = [
     "QueryResult",
     "STORE_FRESH_S",
     "build_query_result",
+    "format_freshness_footer",
     "format_query_telegram",
     "resolve_query_row",
     "row_age_seconds",

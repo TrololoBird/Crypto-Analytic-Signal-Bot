@@ -235,7 +235,7 @@ def _gate_squeeze_predump(
     symbol: str = "",
     sniper_config: SniperConfig | None = None,
 ) -> GateResult | None:
-    from hunt_core.analysis.manipulation_fusion import squeeze_blocks_predump_short
+    from hunt_core.toolkit.manipulation_fusion import squeeze_blocks_predump_short
 
     _ = setup, sniper_config, lifecycle, symbol
     if direction != "short":

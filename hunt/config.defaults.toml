@@ -81,21 +81,26 @@ interval_s = 300
 tg_on_change = true
 tg_stale_hours = 4
 
-[hunt.expansion]
+[hunt.expansion.runtime]
 # PRE-PUMP / PRE-DUMP engine — separate from Verdict V2 and fusion delivery.
 enabled = true
+mode = "production"
 watch_stamp = false
 # /expand TG operator commands — lab only until expansion_engine retired.
 operator_commands = false
 # Background expansion loops + row stamping — off in production watch.
 lab_runtime = false
+review_loop = false
+review_interval_s = 3600
+apply_calibration = true
+
+[hunt.expansion.persistence]
 history_persist = true
 history_persist_samples = 40
 history_persist_max_symbols = 64
 runtime_save_interval_s = 300
-review_loop = false
-review_interval_s = 3600
-apply_calibration = true
+
+[hunt.expansion.thresholds]
 delta_lookback_bars = 120
 persistence_threshold = 0.80
 forecast_min_quality = 0.55
@@ -105,6 +110,8 @@ scan_top_n = 50
 state_strong_prob = 0.62
 state_dominance_ratio = 1.20
 state_pivot_prob = 0.45
+
+[hunt.expansion.telegram]
 # Pinned TG alerts — lab only (HUNT_EXPANSION_LAB=1)
 tg_pinned_alerts = false
 tg_on_change = true
@@ -120,57 +127,12 @@ tg_universe_min_opp = 0.35
 
 [analyst]
 enabled = true
-horizon_primary = "B"
-pattern_ambiguity_spread = 0.08
-fragility_high_threshold = 0.65
-disagreement_high_threshold = 0.65
-trade_rr_favorable = 1.2
-trade_rr_poor = 0.8
 signal_queue_enabled = true
 signal_queue_top_n = 3
 signal_queue_tg_footer = true
 signal_queue_tg_batch = true
 signal_queue_tg_min_rank = 2
 signal_queue_ttl_hours = 2.5
-
-[analyst.signal_gates]
-strength_min = 0.45
-fragility_max = 0.65
-trade_quality_min = 0.45
-rr_primary_min = 0.65
-data_coverage_min = 0.50
-require_timing_c = true
-
-[analyst.trade_plan]
-entry_atr_pad = 0.25
-min_rr_tp1 = 1.0
-
-[analyst.priorities_a]
-macro_trend = 0.28
-structural = 0.24
-positioning = 0.22
-derivatives = 0.16
-cross_consensus = 0.04
-flow = 0.10
-execution_pressure = 0.0
-
-[analyst.priorities_b]
-macro_trend = 0.18
-structural = 0.18
-positioning = 0.22
-derivatives = 0.15
-cross_consensus = 0.08
-flow = 0.15
-execution_pressure = 0.06
-
-[analyst.priorities_c]
-macro_trend = 0.22
-structural = 0.20
-positioning = 0.18
-derivatives = 0.15
-cross_consensus = 0.12
-flow = 0.08
-execution_pressure = 0.05
 
 [market_regime]
 refresh_hours = 4
@@ -196,8 +158,8 @@ reclaim_buffer = 1.001
 breakeven_buffer_pct = 0.15
 breakeven_buffer_min_pct = 1.0
 breakeven_risk_fraction = 0.25
-# Defer trailing until MFE proves the move (BEAT 2026-06-16: 1.8% MFE → -0.6% stop).
-min_trail_mfe_pct = 3.5
+# Defer trailing until MFE proves the move (APT 2026-07-05: 3.49% MFE → stop_hit без трейлинга).
+min_trail_mfe_pct = 2.5
 dump_active_min_trail_mfe_pct = 2.5
 early_breakeven_mfe_pct = 99.0
 early_breakeven_buffer_pct = 0.12
@@ -252,41 +214,51 @@ vp_buckets = 24
 vp_value_area_pct = 0.70
 
 [intra_bar]
-# Intra-bar PRE-pump/PRE-dump detection thresholds (WS sub-15m).
-# Rolling windows for momentum z-score, trade burst, and DOM imbalance.
-# Silence is default: 95%+ ticks should produce no signal.
-# confidence_threshold=0 logs all signals for calibration (Stage 1).
+# Intra-bar PRE-pump/PRE-dump — sequence detector.
+# Sub-signals (DOM -> trade_burst -> momentum_z) arrive sequentially.
+# PRE = DOM + trade_burst (confidence 0.67); ignition = + momentum (confidence 1.0).
+# momentum_window is in m1 bars (1 min each).
+# trade_window is in flush cycles (1 flush per 30s tick).
 momentum_window = 10
 trade_window = 10
-momentum_z_min = 2.0
-dom_imbalance_min = 0.60
-confidence_threshold = 0.0
-min_trades_for_burst = 1
+burst_min = 0.30
+dom_imbalance_min = 0.15
+confidence_threshold = 0.67
+min_trades_for_burst = 2
 cooldown_seconds = 300
 max_symbols = 100
 dom_ema_alpha = 0.3
+sequence_window_seconds = 60
+dom_min_events = 1
 
 [fusion]
 # Official fusion tunables — see docs/FUSION_PARAMS.md (threshold-free detection is impossible).
-min_n = 18
+# These values are now actually read by fusion_params() via load_config_defaults_toml().
+min_n = 30
 lookback = 120
-q_gate = 0.60
+q_gate = 0.92
 q_phase = 0.85
 min_active_factors = 2
 global_gate_floor = 0.06
-abs_magnitude_floor = 0.08
+abs_magnitude_floor = 0.5
 vol_floor_pct = 0.15
 fusion_score_scale = 25.0
 cusum_k = 0.5
-cusum_span = 48
+cusum_span = 96
 phase_mid_exit_ratio = 0.65
 phase_mid_exit_bars = 2
 funding_min_n = 48
 pre_gate_min_energy = 1
-pre_gate_min_structure = 0.04
-pre_gate_min_magnitude = 0.06
+pre_gate_min_structure = 0.10
+pre_gate_min_magnitude = 0.08
 mad_epsilon = 0.000001
 robust_z_clip = 12.0
 horizon_bars = 16
 replay_warmup = 60
 replay_target_atr = 1.5
+
+# The old 5-module gating pipeline's config (hunt_core/deep/pipeline/config.py,
+# [deep]/[deep.macro]/[deep.trend]/[deep.positioning]/[deep.risk]/[deep.new_coin]/
+# [deep.regime]) was removed along with that file — PrizrakTrade (hunt_core/deep/
+# prizrak/config.py) is the sole Deep engine now and reads its own [deep.prizrak]
+# section (currently unset, all dataclass defaults apply).

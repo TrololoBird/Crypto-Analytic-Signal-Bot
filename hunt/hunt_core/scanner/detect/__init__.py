@@ -1,25 +1,24 @@
-"""Statistical fusion detection engine (replaces scan/* + regime FSM + gate/*).
+"""Scanner detection — manipulation patterns (Pattern A: long, Pattern B: short).
 
-Single self-calibrating pre-pump / pre-dump detector: every threshold is derived
-from each symbol's own recent distribution (rolling quantile, robust z via
-median/MAD, CUSUM change-point, regression slope) — no magic constants.
+The Scanner has exactly one signal-generation path: ``patterns.detect_manipulation_setup``.
+All TA computed via Polars + polars_ta — zero manual Python loops for math.
 
-Public surface:
-- ``calibrate`` primitives + ``windows`` builder (phase-1).
-- ``factors`` — six normalized pre-move pressures (phase-2).
-- ``fusion`` / ``phase`` + ``build_detection`` / ``Detection`` (phase-3).
+Low-level primitives in ``events.py`` (Polars-first), state machine in ``patterns.py``,
+score in ``scoring.py``, per-symbol state in ``state.py``.
 """
 from __future__ import annotations
 
-from hunt_core.scanner.detect import calibrate, factors, fusion, phase, windows
-from hunt_core.scanner.detect.result import Detection, build_detection
+from hunt_core.scanner.detect.patterns import (
+    Direction, ManipulationSetup, detect_manipulation_setup,
+)
+from hunt_core.scanner.detect.events import ohlcv_to_df, compute_features, atr
+from hunt_core.scanner.detect.state import SymbolState
+from hunt_core.scanner.detect.scoring import compute_score_a, compute_score_b
 
 __all__ = [
-    "Detection",
-    "build_detection",
-    "calibrate",
-    "factors",
-    "fusion",
-    "phase",
-    "windows",
+    "Direction", "ManipulationSetup",
+    "detect_manipulation_setup",
+    "SymbolState",
+    "ohlcv_to_df", "compute_features", "atr",
+    "compute_score_a", "compute_score_b",
 ]

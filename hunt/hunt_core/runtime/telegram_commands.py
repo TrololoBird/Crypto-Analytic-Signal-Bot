@@ -19,13 +19,13 @@ from hunt_core.secrets import load_secrets
 from hunt_core.deliver.telegram import TelegramBroadcaster
 
 from hunt_core.runtime.signals_report import deliver_signals_report
-from hunt_core.runtime.stats_report import deliver_stats_report, _candidates_rollup_block
-from hunt_core.track.candidates import format_symbol_candidates_html, load_setup_candidates_state
+from hunt_core.runtime.stats_report import deliver_stats_report
 from hunt_core.runtime.symbol_probe import deliver_signal_probe, normalize_symbol, parse_symbol_text
 
 LOG = structlog.get_logger("hunt.telegram_commands")
 _API = "https://api.telegram.org/bot{token}/{method}"
 _SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,16}(USDT|USDC)?$")
+_SIGNAL_PROBE_TIMEOUT_S = 300.0
 
 
 class HuntTelegramCommands:
@@ -50,6 +50,11 @@ class HuntTelegramCommands:
         self._session: aiohttp.ClientSession | None = None
         self._probe_lock = asyncio.Lock()
         self._dispatch_tasks: set[asyncio.Task[None]] = set()
+        # /signal while another probe is in flight used to reply "please wait"
+        # and silently drop the request — user got no answer at all. Depth-1
+        # queue: the latest request made while busy runs automatically once
+        # the current probe finishes.
+        self._pending_signal: tuple[int, str, bool] | None = None
 
     async def _session_get(self) -> aiohttp.ClientSession:
         # Telegram API must bypass Binance SOCKS proxy (trust_env breaks getUpdates).
@@ -106,7 +111,7 @@ class HuntTelegramCommands:
             hint = f" ({', '.join(s.replace('USDT','') for s in syms[:5])})" if syms else ""
             await self._send(
                 chat_id,
-                f"⏳ <b>/signals</b> — Prizrak + стратегии{hint}…",
+                f"⏳ <b>/signals</b> — снимок watchlist{hint}…",
             )
             broadcaster = TelegramBroadcaster(self._token, str(chat_id))
             try:
@@ -139,24 +144,26 @@ class HuntTelegramCommands:
                 await broadcaster.send_html(
                     f"⏳ <b>/analyze {sym_label}</b> — сценарий + уровни…"
                 )
-                from hunt_core.runtime.deep_assembly import assemble_deep_tick
-                from hunt_core.deep.build import build_deep_report
-                from hunt_core.deep.format_telegram import format_deep_analysis_telegram
+                from hunt_core.runtime.analyst_assembly import assemble_analyst_tick
+                from hunt_core.prizrak.build import build_deep_report as _build_deep_report
+                from hunt_core.prizrak.format_telegram import format_deep_analysis_telegram as _fmt_deep
 
-                row = await assemble_deep_tick(sym, self._client, stagger_ms=250)
+                row = await assemble_analyst_tick(sym, self._client, stagger_ms=250)
                 if row.get("error"):
                     await broadcaster.send_html(
                         f"⚠️ /analyze {sym_label}\n<code>{row['error']}</code>",
                         no_split=True,
                     )
                     return
-                from hunt_core.analysis.confluence_grid import build_confluence_grid, format_grid_telegram
+                analysis = _build_deep_report(row, include_watch_appendix=False)
+                blocks = [_fmt_deep(analysis)]
+                _prizrak_action = str((row.get("prizrak_summary") or {}).get("action") or "").upper()
+                if _prizrak_action in {"LONG", "SHORT"} or not _prizrak_action:
+                    from hunt_core.deliver.confluence_grid import build_confluence_grid, format_grid_telegram
 
-                analysis = build_deep_report(row, include_watch_appendix=False)
-                blocks = [format_deep_analysis_telegram(analysis)]
-                grid = build_confluence_grid(row)
-                if grid:
-                    blocks.extend(["", format_grid_telegram(grid)])
+                    grid = build_confluence_grid(row)
+                    if grid:
+                        blocks.extend(["", format_grid_telegram(grid, price=float(row.get('price') or 0))])
                 await broadcaster.send_html("\n".join(blocks), no_split=True)
             except Exception as exc:
                 LOG.exception("hunt_analyze_cmd_failed", symbol=sym)
@@ -167,191 +174,6 @@ class HuntTelegramCommands:
                 )
             finally:
                 await broadcaster.close()
-
-    async def _handle_expand(self, chat_id: int, parts: list[str]) -> None:
-        """Expansion Engine — /expand BTC | scan | stats | calibrate | review."""
-        from hunt_core.expansion.config import load_expansion_config
-
-        exp_cfg = load_expansion_config()
-        if not exp_cfg.enabled or not exp_cfg.operator_commands:
-            await self._send(
-                chat_id,
-                "ℹ️ <code>/expand</code> отключён (lab-only). "
-                "Включи <code>operator_commands</code> или "
-                "<code>HUNT_EXPANSION_OPERATOR=1</code>.",
-            )
-            return
-        if parts:
-            sub = parts[0].lower()
-            if sub in {"scan", "top", "list"}:
-                await self._handle_expand_scan(chat_id)
-                return
-            if sub in {"stats", "stat"}:
-                await self._handle_expand_stats(chat_id)
-                return
-            if sub in {"calibrate", "cal"}:
-                await self._handle_expand_calibrate(chat_id)
-                return
-            if sub in {"review", "grade"}:
-                await self._handle_expand_review(chat_id)
-                return
-        if not parts:
-            await self._send(
-                chat_id,
-                "Использование:\n"
-                "<code>/expand BTC</code> — PRE-PUMP/PRE-DUMP карта\n"
-                "<code>/expand scan</code> — TOP-N по вселенной\n"
-                "<code>/expand stats</code> — outcome ledger\n"
-                "<code>/expand review</code> — grade pending 24h/48h/72h/7d\n"
-                "<code>/expand calibrate</code> — block-weight rollup",
-            )
-            return
-        sym = normalize_symbol(parts[0])
-        if not sym:
-            await self._send(chat_id, "⚠️ Укажи символ, например <code>BTCUSDT</code>")
-            return
-        if self._probe_lock.locked():
-            await self._send(chat_id, "⏳ Другой probe уже выполняется — подожди.")
-            return
-        async with self._probe_lock:
-            sym_label = sym.replace("USDT", "-USDT")
-            broadcaster = TelegramBroadcaster(self._token, str(chat_id))
-            try:
-                await broadcaster.send_html(f"⏳ <b>/expand {sym_label}</b> — expansion state…")
-                from hunt_core.runtime.expansion_probe import probe_symbol_expansion
-                from hunt_core.expansion import format_expansion_card
-
-                row = await probe_symbol_expansion(sym, client=self._client, stagger_ms=250)
-                if row.get("error"):
-                    await broadcaster.send_html(
-                        f"⚠️ /expand {sym_label}\n<code>{row['error']}</code>", no_split=True
-                    )
-                    return
-                exp = row.get("expansion")
-                if not isinstance(exp, dict):
-                    await broadcaster.send_html(
-                        f"⚠️ /expand {sym_label}\n<code>expansion_missing</code>", no_split=True
-                    )
-                    return
-                await broadcaster.send_html(format_expansion_card(exp), no_split=True)
-                meta = exp.get("meta") if isinstance(exp.get("meta"), dict) else {}
-                if (
-                    str(exp.get("dominant") or "neutral") != "neutral"
-                    and float(meta.get("expansion_quality") or 0) >= 0.45
-                ):
-                    try:
-                        from hunt_core.expansion import build_expansion_opportunity
-                        from hunt_core.expansion.learning import (
-                            record_expansion_signal,
-                        )
-
-                        record_expansion_signal(
-                            build_expansion_opportunity(row),
-                            ts=str(row.get("ts") or ""),
-                        )
-                    except Exception:
-                        LOG.debug("expansion_record_failed", symbol=sym, exc_info=True)
-            except Exception as exc:
-                LOG.exception("hunt_expand_cmd_failed", symbol=sym)
-                await broadcaster.send_html(
-                    f"⚠️ /expand {html.escape(sym_label)}\n<code>{html.escape(str(exc))}</code>",
-                    no_split=True,
-                )
-            finally:
-                await broadcaster.close()
-
-    async def _handle_expand_scan(self, chat_id: int) -> None:
-        broadcaster = TelegramBroadcaster(self._token, str(chat_id))
-        try:
-            await broadcaster.send_html("⏳ <b>/expand scan</b> — ранжирую вселенную…")
-            from hunt_core.expansion import format_scan, rank_universe
-            from hunt_core.expansion.config import load_expansion_config
-            from hunt_core.runtime.tick_state import deep_query_store, hunt_scan_store
-
-            rows: dict[str, dict] = {}
-            for store in (hunt_scan_store(), deep_query_store()):
-                for r in store.all_rows():
-                    sym = str(r.get("symbol") or "").upper()
-                    if sym:
-                        rows[sym] = r
-            if not rows:
-                await broadcaster.send_html(
-                    "ℹ️ Нет кэшированных строк — запусти watch, затем повтори /expand scan.",
-                    no_split=True,
-                )
-                return
-            cfg = load_expansion_config()
-            lists = rank_universe(rows.values(), cfg=cfg)
-            from hunt_core.runtime.expansion_universe_scan import write_expansion_scan_jsonl
-
-            write_expansion_scan_jsonl(lists)
-            await broadcaster.send_html(format_scan(lists), no_split=True)
-        except Exception as exc:
-            LOG.exception("hunt_expand_scan_failed")
-            await broadcaster.send_html(
-                f"⚠️ /expand scan\n<code>{html.escape(str(exc))}</code>", no_split=True
-            )
-        finally:
-            await broadcaster.close()
-
-    async def _handle_expand_stats(self, chat_id: int) -> None:
-        broadcaster = TelegramBroadcaster(self._token, str(chat_id))
-        try:
-            from hunt_core.expansion.format import format_outcome_stats
-            from hunt_core.expansion.learning import (
-                load_expansion_outcomes,
-                summarize_outcomes,
-            )
-            from hunt_core.expansion.learning.review import pending_review_horizons
-
-            records = load_expansion_outcomes()
-            summary = summarize_outcomes(records)
-            pending = sum(1 for rec in records if pending_review_horizons(rec))
-            await broadcaster.send_html(
-                format_outcome_stats(summary, pending_reviews=pending, records=len(records)),
-                no_split=True,
-            )
-        except Exception as exc:
-            LOG.exception("hunt_expand_stats_failed")
-            await broadcaster.send_html(
-                f"⚠️ /expand stats\n<code>{html.escape(str(exc))}</code>", no_split=True
-            )
-        finally:
-            await broadcaster.close()
-
-    async def _handle_expand_calibrate(self, chat_id: int) -> None:
-        broadcaster = TelegramBroadcaster(self._token, str(chat_id))
-        try:
-            await broadcaster.send_html("⏳ <b>/expand calibrate</b> — rollup block weights…")
-            from hunt_core.expansion.format import format_calibration_report
-            from hunt_core.expansion.learning import write_calibration_rollup
-
-            report = write_calibration_rollup()
-            await broadcaster.send_html(format_calibration_report(report), no_split=True)
-        except Exception as exc:
-            LOG.exception("hunt_expand_calibrate_failed")
-            await broadcaster.send_html(
-                f"⚠️ /expand calibrate\n<code>{html.escape(str(exc))}</code>", no_split=True
-            )
-        finally:
-            await broadcaster.close()
-
-    async def _handle_expand_review(self, chat_id: int) -> None:
-        broadcaster = TelegramBroadcaster(self._token, str(chat_id))
-        try:
-            await broadcaster.send_html("⏳ <b>/expand review</b> — grading outcomes…")
-            from hunt_core.expansion.format import format_review_summary
-            from hunt_core.expansion.learning.review import review_expansion_outcomes
-
-            summary = await review_expansion_outcomes(self._client)
-            await broadcaster.send_html(format_review_summary(summary), no_split=True)
-        except Exception as exc:
-            LOG.exception("hunt_expand_review_failed")
-            await broadcaster.send_html(
-                f"⚠️ /expand review\n<code>{html.escape(str(exc))}</code>", no_split=True
-            )
-        finally:
-            await broadcaster.close()
 
     async def _handle_signal(self, chat_id: int, parts: list[str]) -> None:
         if not parts:
@@ -366,15 +188,43 @@ class HuntTelegramCommands:
             await self._send(chat_id, "⚠️ Укажи символ, например <code>BEATUSDT</code>")
             return
         if self._probe_lock.locked():
-            await self._send(chat_id, "⏳ Другой /signal уже выполняется — подожди.")
+            self._pending_signal = (chat_id, sym, live)
+            await self._send(
+                chat_id,
+                "⏳ Другой /signal уже выполняется — запрос поставлен в очередь, "
+                "выполнится автоматически сразу после.",
+            )
             return
+        await self._run_signal_probe(chat_id, sym, live)
+        pending = self._pending_signal
+        self._pending_signal = None
+        if pending is not None:
+            p_chat_id, p_sym, p_live = pending
+            task = asyncio.create_task(
+                self._run_signal_probe(p_chat_id, p_sym, p_live),
+                name=f"hunt_tg_signal_queued:{p_sym}",
+            )
+            self._dispatch_tasks.add(task)
+            task.add_done_callback(self._dispatch_tasks.discard)
+
+    async def _run_signal_probe(self, chat_id: int, sym: str, live: bool) -> None:
         async with self._probe_lock:
             sym_label = sym.replace("USDT", "-USDT")
             note = "live REST…" if live else "из watch-стора…"
             broadcaster = TelegramBroadcaster(self._token, str(chat_id))
             try:
                 await broadcaster.send_html(f"⏳ <b>/signal {sym_label}</b> — {note}")
-                await deliver_signal_probe(broadcaster, sym, live=live, client=self._client)
+                await asyncio.wait_for(
+                    deliver_signal_probe(broadcaster, sym, live=live, client=self._client),
+                    timeout=_SIGNAL_PROBE_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                LOG.error("hunt_signal_probe_timeout", symbol=sym, timeout_s=_SIGNAL_PROBE_TIMEOUT_S)
+                await broadcaster.send_html(
+                    f"⚠️ /signal {html.escape(sym_label)}\n"
+                    f"таймаут {_SIGNAL_PROBE_TIMEOUT_S:.0f}с — пайплайн Призрака не ответил",
+                    no_split=True,
+                )
             except Exception as exc:
                 LOG.exception("hunt_signal_cmd_failed", symbol=sym)
                 await broadcaster.send_html(
@@ -385,26 +235,6 @@ class HuntTelegramCommands:
             finally:
                 await broadcaster.close()
 
-    async def _handle_candidates(self, chat_id: int, parts: list[str]) -> None:
-        sym = normalize_symbol(parts[0]) if parts else ""
-        state = load_setup_candidates_state()
-        if sym:
-            block = format_symbol_candidates_html(sym, state)
-            if not block:
-                await self._send(
-                    chat_id,
-                    f"ℹ️ Нет paper-истории сетапов для <code>{sym.replace('USDT', '-USDT')}</code>",
-                )
-                return
-            await self._send(chat_id, block)
-            return
-        rollup = state.get("rollup") or {}
-        if not rollup:
-            await self._send(chat_id, "ℹ️ Setup candidates пуст — жди watch tick.")
-            return
-        block = _candidates_rollup_block()
-        await self._send(chat_id, block or "ℹ️ Нет закрытых кандидатов.")
-
     async def _handle_command(self, chat_id: int, text: str) -> None:
         parts = text.strip().split()
         cmd = parts[0].split("@")[0].lower()
@@ -413,30 +243,24 @@ class HuntTelegramCommands:
             await self._handle_signal(chat_id, args)
         elif cmd in {"/analyze", "/an"}:
             await self._handle_analyze(chat_id, args)
-        elif cmd in {"/expand", "/exp"}:
-            await self._handle_expand(chat_id, args)
         elif cmd in {"/signals", "/active"}:
             await self._handle_signals(chat_id, args)
         elif cmd in {"/stats", "/stat"}:
             await self._handle_stats(chat_id)
-        elif cmd in {"/candidates", "/cand"}:
-            await self._handle_candidates(chat_id, args)
         elif cmd in {"/help", "/start"}:
             await self._send(
                 chat_id,
                 "<b>Hunt commands</b>\n"
                 "<code>/signal BTC</code> или просто <code>BTC</code> — 2 сценария + кратко\n"
-                "<code>/signals</code> или <code>/signals BTC ETH</code> — Prizrak + каталог стратегий + tracker\n"
-                "<code>/candidates</code> — paper pre_* из watch\n"
+                "<code>/signals</code> или <code>/signals BTC ETH</code> — снимок watchlist + tracker\n"
                 "<code>/analyze BTC</code> — полный разбор (order flow, стакан, POC)\n"
-                "<code>/expand BTC</code> — PRE-PUMP/PRE-DUMP · "
-                "<code>/expand scan|stats|review|calibrate</code>\n"
                 "<code>/stats</code> — WR, phase matrix, TG воронка, regime, confidence\n"
-                "<code>/candidates [SYM]</code> — paper squeeze/forming/blocked stats\n"
                 "· confirm → полный сигнал\n"
                 "· нет confirm → сценарий + что ждём + watchlist\n"
                 "· отмена сигнала → follow-up с причиной на русском",
             )
+        else:
+            await self._send(chat_id, f"⚠️ Неизвестная команда <code>{cmd}</code>. /help — список.")
 
     def _extract_incoming(self, update: dict[str, Any]) -> tuple[int, int | None, str] | None:
         """message (group/DM) or channel_post (channel admin posts)."""

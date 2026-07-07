@@ -25,7 +25,6 @@ from hunt_core.market.ccxt_guard import (
     is_ccxt_rate_limited,
     liquidation_ws_mode,
 )
-from hunt_core.hunter.detect.intra_bar_state import IntraBarState
 from hunt_core.market.symbols import (
     from_ccxt_symbol,
     to_binance_symbol,
@@ -36,7 +35,7 @@ from hunt_core.params.store import orderflow_use_nq, ws_thresholds
 
 LOG = logging.getLogger("hunt_core.market.streams")
 
-_MAX_SYMBOL_STREAMS = 24
+_MAX_SYMBOL_STREAMS = 100
 _LIQ_BUFFER_MAX = 8_000
 _AGG_BUFFER_MAX = 2_000
 _WS_WATCH_TIMEOUT_S: float = 120.0
@@ -100,7 +99,8 @@ def _liquidation_rollups(
         try:
             qty_val = float(qty)
             price_val = float(price)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as liq_parse_exc:
+            LOG.debug("liquidation_parse_error | sym=%s error=%s", symbol, liq_parse_exc)
             continue
         if qty_val <= 0.0:
             continue
@@ -212,7 +212,6 @@ class HuntCcxtStreams:
     _last_pro_reset: float = 0.0
     _reconnect_task: asyncio.Task[None] | None = field(default=None, repr=False)
     _reconnect_count: int = 0
-    _intra_bar: IntraBarState | None = None
 
     def ws_health_metrics(self) -> dict[str, Any]:
         """Expose WS transport health for cycle heartbeat / integrity checks."""
@@ -414,8 +413,8 @@ class HuntCcxtStreams:
                         "ws_sub_diag | label=%s url=...%s subs=%d futures=%d",
                         label, url[-40:], len(cli.subscriptions), len(cli.futures),
                     )
-            except Exception:
-                pass
+            except Exception as diag_exc:
+                LOG.debug("ws_sub_diag_error | label=%s error=%s", label, diag_exc)
             self._schedule_pro_reconnect()
             # Suspend until the reconnect task cancels us.  Without this sleep the
             # calling task's while-loop would immediately call watch_*() again on the
@@ -602,7 +601,8 @@ class HuntCcxtStreams:
                     bracket_tiers=bracket_tiers,
                 )
                 heatmap = liq_map.heatmap if liq_map else None
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as liq_map_exc:
+                LOG.debug("snapshot_liquidation_map_error | sym=%s error=%s", sym, liq_map_exc)
                 heatmap = None
                 liq_map = None
                 bracket_tiers = None
@@ -816,8 +816,8 @@ class HuntCcxtStreams:
                 get_map_store().record_liquidation(
                     sym, venue=venue, ts_ms=ts_ms, side=side, qty=qty, price=price
                 )
-            except Exception:
-                pass
+            except Exception as map_exc:
+                LOG.debug("liquidation_map_store_error | sym=%s venue=%s error=%s", sym, venue, map_exc)
 
     def _record_trade(self, sym: str, trade: dict[str, Any]) -> None:
         info = trade.get("info") if isinstance(trade.get("info"), dict) else trade
@@ -840,9 +840,6 @@ class HuntCcxtStreams:
                 price=px,
             )
         )
-        ib = self._intra_bar
-        if ib is not None and qty > 0:
-            ib.process_trade(sym, "buy" if is_buy else "sell", qty, ts_ms / 1000.0)
 
     def _on_closed_kline(self, sym: str, candle: list[Any], *, interval: str = _KLINE_INTERVAL) -> None:
         try:
@@ -854,7 +851,8 @@ class HuntCcxtStreams:
                 float(candle[4]),
                 float(candle[5]),
             )
-        except (TypeError, ValueError, IndexError):
+        except (TypeError, ValueError, IndexError) as kline_parse_exc:
+            LOG.debug("on_closed_kline_parse_error | sym=%s error=%s candle=%s", sym, kline_parse_exc, candle[:6] if isinstance(candle, list) else candle)
             return
         if open_ms <= 0 or c <= 0:
             return
@@ -873,9 +871,6 @@ class HuntCcxtStreams:
             self._kline_waiting_15m[sym] = bar
         else:
             self._kline_waiting[sym] = bar
-            ib = self._intra_bar
-            if ib is not None:
-                ib.process_m1_close(sym, c, open_ms / 1000.0)
 
     def _on_ohlcv_update(
         self,
@@ -1316,9 +1311,6 @@ class HuntCcxtStreams:
                     "ws_depth_imbalance": di_top20,
                     "microprice_bias": mp,
                 }
-                ib = self._intra_bar
-                if ib is not None and bid_q is not None and ask_q is not None:
-                    ib.process_orderbook(sym, float(bid_q), float(ask_q))
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
@@ -1736,8 +1728,11 @@ class HuntCcxtStreams:
                     LOG.warning("hunt_ccxt_secondary_liq_err | exchange=%s %s", name, repr(exc)[:100])
 
     async def _watch_secondary_liquidations_mux(self) -> None:
-        """Spawn per-exchange liquidation WS for Bybit / OKX."""
-        liq_venues = ("bybit", "okx")
+        """Spawn per-exchange liquidation WS for every configured secondary that supports
+        it. Bitget included: if its CCXT Pro build lacks watchLiquidations,
+        ``_watch_one_secondary_liquidations`` self-skips with a log — so listing it here
+        is safe and captures real Bitget liquidations when the method is available."""
+        liq_venues = ("bybit", "okx", "bitget")
         tasks: list[asyncio.Task[None]] = []
         for name in configured_secondary_exchanges():
             if name not in liq_venues:

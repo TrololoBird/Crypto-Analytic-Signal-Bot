@@ -48,7 +48,7 @@ def _format_setup_lines(
 ) -> list[str]:
     score_key = "dump_score" if direction == "short" else "long_score"
     phase = str(setup.get("phase") or "—")
-    confirmed = bool(setup.get("confirmed"))
+    confirmed = bool(setup.get("impulse_confirmed"))
     badge = _phase_badge(phase, confirmed, direction=direction)
 
     def _opt_num(val: Any, *, digits: int = 4) -> str:

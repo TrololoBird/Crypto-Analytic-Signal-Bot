@@ -22,7 +22,7 @@ from hunt_core.maps.liquidation import (
     maintenance_rates_from_tiers,
 )
 from hunt_core.market.client import WallCluster
-from hunt_core.maps.forecast import (
+from hunt_core.toolkit.forecast import (
     build_all_forecasts,
     build_dump_forecast,
     build_ignition_forecast,

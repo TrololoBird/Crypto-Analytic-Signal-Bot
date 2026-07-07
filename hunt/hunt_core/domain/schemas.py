@@ -1,35 +1,17 @@
 from __future__ import annotations
 
 
-import hashlib
 import logging
-import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 LOG = logging.getLogger(__name__)
 
-from hunt_core.contract import (
-    DEFAULT_SCALE_WEIGHTS,
-    default_ttl_bars,
-    normalize_scale_weights,
-    resolve_target_rr,
-    valid_until_from,
-    validate_signal_contract,
-)
-
 if TYPE_CHECKING:
     import polars as pl
 
     from .config import BotSettings
-
-SIGNAL_CONTRACT_VIOLATION_PREFIX = "Signal contract violations"
-
-
-def is_signal_contract_violation(exc: BaseException) -> bool:
-    """True when Signal.__post_init__ rejected an invalid trade plan."""
-    return isinstance(exc, ValueError) and str(exc).startswith(SIGNAL_CONTRACT_VIOLATION_PREFIX)
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,356 +265,50 @@ class PreparedSymbol:
             return None
 
 
+
+
+# ── Typed Events ─────────────────────────────────────────────────────────────
+
+
+from typing import Protocol, runtime_checkable
+
+
+@runtime_checkable
+class Event(Protocol):
+    """Typed event protocol — timestamp + symbol for all pipeline events."""
+    timestamp: datetime
+    symbol: str
+
+
 @dataclass(frozen=True, slots=True)
-class Signal:
+class TickProcessed:
+    """Emitted after each symbol tick is fully processed."""
+    timestamp: datetime
+    symbol: str
+    plane: str
+    tick_path: str
+    has_error: bool
+    verdict_action: str
+    fresh_row: dict[str, Any] = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class VerdictProduced:
+    """Emitted when Verdict V2 produces a scenario verdict for a symbol."""
+    timestamp: datetime
+    symbol: str
+    action: str
+    path_type: str
+    confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class SignalEmitted:
+    """Emitted when a signal passes lifecycle and is ready for delivery."""
+    timestamp: datetime
     symbol: str
     setup_id: str
     direction: str
+    event: str
     score: float
-    timeframe: str
-    entry_low: float
-    entry_high: float
-    stop: float
-    take_profit_1: float
-    take_profit_2: float
-    take_profit_3: float | None = None
-    valid_until: datetime | None = None
-    scale_weights: tuple[float, float, float] = DEFAULT_SCALE_WEIGHTS
-    ttl_bars: int | None = None
-    entry_plan_status: str = "valid"
-    reasons: tuple[str, ...] = ()
-    bias_4h: str = "neutral"
-    quote_volume: float | None = None
-    spread_bps: float | None = None
-    atr_pct: float | None = None
-    orderflow_delta_ratio: float | None = None
-    oi_change_pct: float | None = None
-    funding_rate: float | None = None
-    strategy_family: str = "continuation"
-    confirmation_profile: str = "trend_follow"
-    entry_order_type: str = "limit"
-    target_integrity_status: str | None = None
-    single_target_mode: bool = False
-    passed_filters: tuple[str, ...] = ()
-    mark_price: float | None = None
-    volume_ratio: float | None = None  # current volume / 20-bar avg (for analytics companion)
-    adx_1h: float | None = None
-    risk_reward: float | None = None
-    trend_direction: str | None = None
-    trend_score: float | None = None
-    premium_zscore_5m: float | None = None
-    premium_slope_5m: float | None = None
-    ls_ratio: float | None = None
-    microstructure_bias_score: float | None = None
-    microstructure_confidence: float | None = None
-    microstructure_label: str | None = None
-    microstructure_reason: str | None = None
-    microstructure_warnings: tuple[str, ...] = ()
-    btc_bias: str | None = None
-    eth_bias: str | None = None
-    confirmation_count: int | None = None
-    sol_bias: str | None = None
-    xau_bias: str | None = None
-    xag_bias: str | None = None
-    pax_bias: str | None = None
-    entry_tf: str = ""
-    pattern_tf: str = ""
-    context_tfs: tuple[str, ...] = ()
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-    def __post_init__(self) -> None:
-        created_at = self.created_at
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=UTC)
-            object.__setattr__(self, "created_at", created_at)
-        else:
-            created_at = created_at.astimezone(UTC)
-            object.__setattr__(self, "created_at", created_at)
-        scale_weights = normalize_scale_weights(self.scale_weights)
-        object.__setattr__(self, "scale_weights", scale_weights)
-
-        if self.valid_until is None:
-            ttl_bars = (
-                int(self.ttl_bars)
-                if self.ttl_bars is not None
-                else default_ttl_bars(self.setup_id, self.strategy_family, self.timeframe)
-            )
-            object.__setattr__(
-                self,
-                "valid_until",
-                valid_until_from(
-                    created_at=created_at,
-                    setup_id=self.setup_id,
-                    strategy_family=self.strategy_family,
-                    timeframe=self.timeframe,
-                    ttl_bars=ttl_bars,
-                ),
-            )
-            object.__setattr__(self, "ttl_bars", max(1, min(ttl_bars, 96)))
-        elif self.valid_until.tzinfo is None:
-            object.__setattr__(self, "valid_until", self.valid_until.replace(tzinfo=UTC))
-        else:
-            object.__setattr__(self, "valid_until", self.valid_until.astimezone(UTC))
-
-        if self.take_profit_3 is None or not math.isfinite(float(self.take_profit_3)):
-            risk = abs(self.entry_mid - self.stop)
-            rr3 = resolve_target_rr(None)[2]
-            if self.direction == "long":
-                tp3 = self.entry_mid + risk * rr3
-            else:
-                tp3 = self.entry_mid - risk * rr3
-            object.__setattr__(self, "take_profit_3", tp3)
-
-        if self.risk_reward is None:
-            risk = abs(self.entry_mid - self.stop)
-            reward = abs(self.take_profit_1 - self.entry_mid)
-            try:
-                computed = (reward / risk) if risk > 0 else 0.0
-            except ZeroDivisionError:
-                computed = 0.0
-            object.__setattr__(self, "risk_reward", computed)
-        issues = validate_signal_contract(self)
-        if issues:
-            # build_trade_plan (contract.py) now owns the stop clamp — violations
-            # here mean a detector bypassed build_trade_plan entirely.  Log a
-            # warning so it surfaces without killing the analysis cycle; delivery
-            # path will reject on its own contract check if the signal is broken.
-            detail = [f"{issue.field}:{issue.reason}" for issue in issues]
-            LOG.warning(
-                "signal_contract_issues | setup=%s symbol=%s issues=%s",
-                getattr(self, "setup_id", "?"),
-                getattr(self, "symbol", "?"),
-                detail,
-            )
-
-    @property
-    def entry_mid_raw(self) -> float:
-        return (self.entry_low + self.entry_high) / 2.0
-
-    @property
-    def entry_mid(self) -> float:
-        return self.entry_mid_raw
-
-    @property
-    def entry_reference_price(self) -> float:
-        mid = self.entry_mid_raw
-        if (
-            self.mark_price
-            and self.mark_price > 0
-            and mid > 0
-            and abs(mid - self.mark_price) / mid < 0.002
-        ):
-            return self.mark_price
-        return mid
-
-    @property
-    def stop_distance_pct(self) -> float:
-        try:
-            if self.entry_mid <= 0:
-                return 0.0
-            return abs(self.entry_mid - self.stop) / self.entry_mid * 100.0
-        except ZeroDivisionError:
-            return 0.0
-
-    @property
-    def signal_key(self) -> str:
-        return f"{self.symbol}|{self.setup_id}|{self.direction}"
-
-    @property
-    def tracking_id(self) -> str:
-        stamp = self.created_at.astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-        return f"{self.signal_key}|{stamp}"
-
-    @property
-    def tracking_ref(self) -> str:
-        digest = hashlib.sha1(self.tracking_id.encode("utf-8"), usedforsecurity=False).hexdigest()
-        return digest[:8].upper()
-
-    @property
-    def content_hash(self) -> str:
-        """Deterministic hash of symbol + direction + setup + rounded prices.
-
-        Used for dedup (IV.27): signals with identical content_hash within a
-        dedup window are treated as duplicates.
-        """
-        rounded_low = f"{self.entry_low:.2f}"
-        rounded_high = f"{self.entry_high:.2f}"
-        raw = (
-            f"{self.symbol}|{self.direction}|{self.setup_id}|"
-            f"{rounded_low}|{rounded_high}|{self.timeframe}"
-        )
-        return hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
-
-    @property
-    def side(self) -> str:
-        return self.direction
-
-    @property
-    def entry(self) -> float:
-        return self.entry_mid
-
-    @property
-    def sl(self) -> float:
-        return self.stop
-
-    @property
-    def tp1(self) -> float:
-        return self.take_profit_1
-
-    @property
-    def tp2(self) -> float:
-        return self.take_profit_2
-
-    @property
-    def tp3(self) -> float:
-        return float(self.take_profit_3 or 0.0)
-
-    @property
-    def stop_loss(self) -> float:
-        return self.stop
-
-    @property
-    def entry_zone(self) -> tuple[float, float]:
-        return (self.entry_low, self.entry_high)
-
-    @property
-    def valid_until_iso(self) -> str:
-        return self.valid_until.isoformat() if self.valid_until is not None else ""
-
-    @property
-    def scale_weight_pct(self) -> tuple[int, int, int]:
-        # type: ignore[return-value]
-        return tuple(round(weight * 100) for weight in self.scale_weights)
-
-    @property
-    def time_to_expiry_minutes(self) -> float:
-        if self.valid_until is None:
-            return 0.0
-        return max(0.0, (self.valid_until - datetime.now(UTC)).total_seconds() / 60.0)
-
-    @property
-    def target_count(self) -> int:
-        return 1 if self.single_target_mode else 3
-
-    @property
-    def metadata(self) -> dict[str, Any]:
-        return {
-            "tracking_id": self.tracking_id,
-            "tracking_ref": self.tracking_ref,
-            "signal_key": self.signal_key,
-            "timeframe": self.timeframe,
-            "entry_tf": self.entry_tf or self.timeframe,
-            "entry_tf_used": self.entry_tf or self.timeframe,
-            "pattern_tf": self.pattern_tf,
-            "context_tfs": self.context_tfs,
-            "strategy_family": self.strategy_family,
-            "confirmation_profile": self.confirmation_profile,
-            "confirmation_count": self.confirmation_count,
-            "entry_order_type": self.entry_order_type,
-            "target_integrity_status": self.target_integrity_status,
-            "single_target_mode": self.single_target_mode,
-            "entry_plan_status": self.entry_plan_status,
-            "valid_until": self.valid_until_iso,
-            "ttl_bars": self.ttl_bars,
-            "scale_weights": self.scale_weights,
-        }
-
-    def same_target(self, tolerance: float | None = None) -> bool:
-        tol = tolerance
-        if tol is None:
-            anchor = max(
-                abs(self.entry_mid),
-                abs(self.take_profit_1),
-                abs(self.take_profit_2),
-                abs(self.tp3),
-                1.0,
-            )
-            tol = anchor * 1e-8
-        return math.isclose(self.take_profit_1, self.take_profit_2, abs_tol=tol, rel_tol=0.0)
-
-    def to_log_row(self) -> dict[str, Any]:
-        return {
-            "symbol": self.symbol,
-            "setup_id": self.setup_id,
-            "direction": self.direction,
-            "score": round(self.score, 4),
-            "timeframe": self.timeframe,
-            "entry_low": round(self.entry_low, 8),
-            "entry_high": round(self.entry_high, 8),
-            "entry_zone": [round(self.entry_low, 8), round(self.entry_high, 8)],
-            "entry_mid": round(self.entry_mid, 8),
-            "entry_mid_raw": round(self.entry_mid_raw, 8),
-            "entry_reference_price": round(self.entry_reference_price, 8),
-            "stop": round(self.stop, 8),
-            "stop_price": round(self.stop, 8),
-            "stop_loss": round(self.stop_loss, 8),
-            "take_profit_1": round(self.take_profit_1, 8),
-            "take_profit_2": round(self.take_profit_2, 8),
-            "take_profit_3": round(self.tp3, 8),
-            "tp1_price": round(self.take_profit_1, 8),
-            "tp2_price": round(self.take_profit_2, 8),
-            "tp3_price": round(self.tp3, 8),
-            "tp1": round(self.tp1, 8),
-            "tp2": round(self.tp2, 8),
-            "tp3": round(self.tp3, 8),
-            "risk_reward": round(float(self.risk_reward or 0.0), 4),
-            "stop_distance_pct": round(self.stop_distance_pct, 4),
-            "valid_until": self.valid_until_iso,
-            "ttl_bars": self.ttl_bars,
-            "scale_weights": list(self.scale_weights),
-            "bias_4h": self.bias_4h,
-            "quote_volume": self.quote_volume,
-            "spread_bps": self.spread_bps,
-            "atr_pct": self.atr_pct,
-            "orderflow_delta_ratio": self.orderflow_delta_ratio,
-            "oi_change_pct": self.oi_change_pct,
-            "funding_rate": self.funding_rate,
-            "mark_price": self.mark_price,
-            "volume_ratio": self.volume_ratio,
-            "adx_1h": self.adx_1h,
-            "premium_zscore_5m": self.premium_zscore_5m,
-            "premium_slope_5m": self.premium_slope_5m,
-            "ls_ratio": self.ls_ratio,
-            "microstructure_bias_score": self.microstructure_bias_score,
-            "microstructure_confidence": self.microstructure_confidence,
-            "microstructure_label": self.microstructure_label,
-            "microstructure_reason": self.microstructure_reason,
-            "microstructure_warnings": list(self.microstructure_warnings),
-            "btc_bias": self.btc_bias,
-            "eth_bias": self.eth_bias,
-            "sol_bias": self.sol_bias,
-            "xau_bias": self.xau_bias,
-            "xag_bias": self.xag_bias,
-            "pax_bias": self.pax_bias,
-            "strategy_family": self.strategy_family,
-            "confirmation_profile": self.confirmation_profile,
-            "entry_order_type": self.entry_order_type,
-            "target_integrity_status": self.target_integrity_status,
-            "single_target_mode": self.single_target_mode,
-            "passed_filters": list(self.passed_filters),
-            "reasons": list(self.reasons),
-            "created_at": self.created_at.isoformat(),
-            "tracking_id": self.tracking_id,
-            "tracking_ref": self.tracking_ref,
-        }
-
-
-@dataclass(slots=True)
-class PipelineResult:
-    """Result container for signal analysis pipeline.
-
-    Replaces legacy PipelineResult from pipeline.py for backward compatibility.
-    Modern engine uses SignalResult in core/engine/base.py.
-    """
-
-    symbol: str
-    trigger: str
-    event_ts: datetime
-    raw_setups: int
-    candidates: list[Signal] = field(default_factory=list)
-    rejected: list[dict[str, Any]] = field(default_factory=list)
-    delivered: list[Signal] = field(default_factory=list)
-    error: str | None = None
-    status: str | None = None
-    prepared: PreparedSymbol | None = None
-    funnel: dict[str, Any] = field(default_factory=dict)
+    state: str

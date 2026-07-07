@@ -119,7 +119,14 @@ def _decl_check_structure_aligned(
 ) -> Any | None:
     from hunt_core.scanner.gate.delivery import GateResult  # noqa: PLC0415
 
-    _ = setup, lifecycle, delivery_tier, symbol
+    _ = setup, delivery_tier, symbol
+    # Pre-pump/pre-dump by definition: structure hasn't broken yet, so opposite HTF bias is expected.
+    lc = lifecycle if isinstance(lifecycle, dict) else {}
+    phase = str(lc.get("phase") or "")
+    if direction == "long" and phase in {"pre_pump", "accumulation", "breakout_arming"}:
+        return None
+    if direction == "short" and phase in {"pre_dump", "distribution"}:
+        return None
     struct = row.get("structure")
     if not isinstance(struct, dict) or not struct:
         return None
@@ -277,15 +284,18 @@ def _decl_check_playbook(
     delivery_tier: str,
     symbol: str,
 ) -> Any | None:
-    from hunt_core.analysis.playbook_eval import setup_meets_playbook
+    from hunt_core.toolkit.playbook_eval import setup_meets_playbook
     from hunt_core.scanner.gate._ev import legacy_fuel_delivery_enabled
     from hunt_core.scanner.gate.delivery import GateResult  # noqa: PLC0415
 
     _ = lifecycle, delivery_tier, symbol
     if legacy_fuel_delivery_enabled():
         return None
-    # Pre-phase signals use Dual-Gate as authority — skip playbook
-    if setup.get("signal_type") == "pre_phase":
+    # Pre-phase signals use Dual-Gate as authority — skip playbook.
+    # pre_phase_blocked = main fusion gate open but pre_gate (structure/book) failed.
+    # When confirmed=True, main gate authority is sufficient — skip playbook too.
+    _stype = setup.get("signal_type")
+    if _stype == "pre_phase" or (_stype == "pre_phase_blocked" and setup.get("impulse_confirmed")):
         if _pre_phase_rate_ok():
             _bump_pre_phase()
             return None
@@ -363,17 +373,17 @@ def _decl_check_ev_delivery(
     struct = row.get("structure") if isinstance(row.get("structure"), dict) else {}
     resolved = resolve_delivery_ev(setup, direction=dir_lit, row=row, structure=struct)
     ev = resolved.get("ev")
-    p_win = resolved.get("p_win")
-    confirmed = bool(setup.get("confirmed") or setup.get("intrabar_confirmed"))
+    confidence_score = resolved.get("confidence_score")
+    confirmed = bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed"))
     min_ev, min_p = delivery_ev_floors(sym, confirmed=confirmed)
 
     if ev is not None:
         setup["delivery_ev"] = ev
-    if p_win is not None:
-        setup["delivery_p_win"] = p_win
+    if confidence_score is not None:
+        setup["delivery_confidence_score"] = confidence_score
     setup["delivery_ev_source"] = resolved.get("source")
 
-    if ev is None and p_win is None:
+    if ev is None and confidence_score is None:
         return GateResult(
             False,
             "data.ev_missing",
@@ -402,20 +412,20 @@ def _decl_check_ev_delivery(
         if not isinstance(shadow, dict):
             shadow = {}
             setup["ev_shadow"] = shadow
-        if p_win is not None:
-            shadow["p_win"] = p_win
-            shadow["p_win_shadow_only"] = True
+        if confidence_score is not None:
+            shadow["confidence_score"] = confidence_score
+            shadow["confidence_score_shadow_only"] = True
         return None
-    if p_win is None:
-        return GateResult(False, "p_win_missing", "P(win) не вычислен для delivery")
+    if confidence_score is None:
+        return GateResult(False, "confidence_score_missing", "P(win) не вычислен для delivery")
     try:
-        p_f = float(p_win)
+        p_f = float(confidence_score)
     except (TypeError, ValueError):
-        return GateResult(False, "p_win_missing", "P(win) не числовой")
+        return GateResult(False, "confidence_score_missing", "P(win) не числовой")
     if p_f < min_p:
         return GateResult(
             False,
-            "p_win_below_floor",
+            "confidence_score_below_floor",
             f"P(win) {p_f:.2f} < floor {min_p:.2f}",
         )
     return None
@@ -524,7 +534,7 @@ def _decl_check_setup_type(
     _ = row, direction, lifecycle, symbol
     if delivery_tier != "triggered":
         return None
-    if not bool(setup.get("confirmed") or setup.get("intrabar_confirmed")):
+    if not bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed")):
         return None
     st = setup.get("setup_type") or row.get("setup_type")
     if st is None and setup.get("ev_primary") and setup.get("catalog_setup"):
@@ -612,7 +622,7 @@ def _decl_check_delivery_confluence(
     from hunt_core.scanner.gate._quality import check_delivery_confluence  # noqa: PLC0415
 
     _ = delivery_tier
-    if not bool(setup.get("confirmed") or setup.get("intrabar_confirmed")):
+    if not bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed")):
         return None
     return check_delivery_confluence(
         setup,
@@ -635,7 +645,7 @@ def _decl_check_exhaustion_fade(
     from hunt_core.scanner.gate._quality import check_exhaustion_fade  # noqa: PLC0415
 
     _ = delivery_tier
-    if not bool(setup.get("confirmed") or setup.get("intrabar_confirmed")):
+    if not bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed")):
         return None
     return check_exhaustion_fade(
         setup,
@@ -658,7 +668,7 @@ def _decl_check_impulse_long(
     from hunt_core.scanner.gate._quality import check_impulse_long  # noqa: PLC0415
 
     _ = delivery_tier
-    if direction != "long" or not bool(setup.get("confirmed") or setup.get("intrabar_confirmed")):
+    if direction != "long" or not bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed")):
         return None
     return check_impulse_long(
         setup, lifecycle=lifecycle, row=row, symbol=symbol.upper()
@@ -677,7 +687,7 @@ def _decl_check_accumulation_long(
     from hunt_core.scanner.gate._quality import check_accumulation_long  # noqa: PLC0415
 
     _ = delivery_tier
-    if direction != "long" or not bool(setup.get("confirmed") or setup.get("intrabar_confirmed")):
+    if direction != "long" or not bool(setup.get("impulse_confirmed") or setup.get("intrabar_confirmed")):
         return None
     return check_accumulation_long(
         setup, lifecycle=lifecycle, row=row, symbol=symbol.upper()

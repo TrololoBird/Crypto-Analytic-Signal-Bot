@@ -333,6 +333,9 @@ async def refresh_cross_exchange_cache(
 
 
 _PRIMARY = "binance"
+# Max wall-clock lag a venue's order-book snapshot may trail the freshest venue before
+# it's excluded from the cross-book merge (avoids blending stale depth as simultaneous).
+_CROSS_BOOK_STALE_MS = 750.0
 
 
 async def fetch_exchange_order_book(
@@ -347,7 +350,10 @@ async def fetch_exchange_order_book(
     try:
         if exchange == _PRIMARY:
             snap = await client.fetch_order_book_depth_snapshot(bin_sym, limit=limit)
-            return snap if snap.get("bid_price") else None
+            if snap.get("bid_price"):
+                snap["fetched_at_ms"] = time.time() * 1000.0
+                return snap
+            return None
         ccxt_sym = await client._secondary_ccxt_symbol(exchange, bin_sym)  # noqa: SLF001
         if ccxt_sym is None:
             return None
@@ -370,6 +376,7 @@ async def fetch_exchange_order_book(
         snap["exchange"] = exchange
         snap["bids"] = bids
         snap["asks"] = asks
+        snap["fetched_at_ms"] = time.time() * 1000.0
         return snap
     except Exception as exc:
         LOG.warning(
@@ -401,7 +408,31 @@ async def fetch_cross_exchange_book_walls(
             per_ex[ex] = res
     if not per_ex:
         return {"venues": [], "bid_levels": [], "ask_levels": [], "source": "cross_exchange"}
+
+    # Time-alignment (no-degradation rule): the venue fetches complete at different
+    # wall-clock moments (a slow OKX REST can be 1-2s behind a 50ms Binance snapshot).
+    # Merging them as if simultaneous blurs the aggregate wall notional. Drop any venue
+    # whose snapshot is older than _CROSS_BOOK_STALE_MS behind the freshest one, rather
+    # than blend stale depth into a live cross-book.
+    excluded_stale: list[str] = []
+    stamped = {ex: s.get("fetched_at_ms") for ex, s in per_ex.items() if isinstance(s.get("fetched_at_ms"), (int, float))}
+    if len(stamped) >= 2:
+        newest = max(stamped.values())
+        for ex, ts in stamped.items():
+            if newest - float(ts) > _CROSS_BOOK_STALE_MS:
+                excluded_stale.append(ex)
+        for ex in excluded_stale:
+            per_ex.pop(ex, None)
+        if excluded_stale:
+            LOG.info(
+                "cross_book_stale_excluded | symbol=%s excluded=%s kept=%s",
+                symbol, ",".join(excluded_stale), ",".join(per_ex.keys()),
+            )
+    if not per_ex:
+        return {"venues": [], "bid_levels": [], "ask_levels": [], "source": "cross_exchange"}
     merged = aggregate_cross_exchange_walls(per_ex)
+    if excluded_stale:
+        merged["stale_venues_excluded"] = excluded_stale
     from datetime import UTC, datetime
 
     merged["fetched_at"] = datetime.now(UTC).isoformat()

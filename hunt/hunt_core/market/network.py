@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import random
@@ -10,7 +11,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlunparse
 
 import aiohttp
@@ -21,11 +22,16 @@ except ImportError:
     ProxyConnector = None  # type: ignore[misc, assignment]
 
 try:
-    import python_socks
+    import python_socks  # noqa: F401
 except ImportError:
     python_socks = None  # type: ignore[misc, assignment]
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 LOG = logging.getLogger("hunt_core.market.network")
+
+# ── Env var resolution ──────────────────────────────────────────────────────
 
 _PROXY_ENV_KEYS: tuple[str, ...] = (
     "BINANCE_PROXY_URL",
@@ -49,6 +55,9 @@ def resolve_proxy_url(*, config_url: str | None = None, trust_env: bool = True) 
         if value:
             return value
     return None
+
+
+# ── URL helpers ─────────────────────────────────────────────────────────────
 
 
 def proxy_scheme(url: str) -> str:
@@ -78,6 +87,9 @@ def mask_proxy_url(url: str) -> str:
     return f"{scheme}://{host}{port}"
 
 
+# ── aiohttp session helpers ─────────────────────────────────────────────────
+
+
 def create_aiohttp_session(
     *,
     proxy_url: str | None,
@@ -94,7 +106,7 @@ def create_aiohttp_session(
             limit=connector_limit,
             rdns=True,
         )
-        LOG.info("hunt rest proxy | mode=socks url=%s", mask_proxy_url(proxy_url))
+        LOG.debug("hunt rest proxy | mode=socks url=%s", mask_proxy_url(proxy_url))
         return aiohttp.ClientSession(timeout=timeout, connector=socks_connector, trust_env=False)
 
     connector = aiohttp.TCPConnector(
@@ -103,15 +115,12 @@ def create_aiohttp_session(
     )
     use_env = trust_env and not proxy_url
     if proxy_url:
-        LOG.info("hunt rest proxy | mode=http url=%s", mask_proxy_url(proxy_url))
-    session = aiohttp.ClientSession(
+        LOG.debug("hunt rest proxy | mode=http url=%s", mask_proxy_url(proxy_url))
+    return aiohttp.ClientSession(
         timeout=timeout,
         connector=connector,
         trust_env=use_env,
     )
-    if proxy_url:
-        session._binance_explicit_proxy = proxy_url
-    return session
 
 
 async def close_aiohttp_session(session: aiohttp.ClientSession | None) -> None:
@@ -120,19 +129,7 @@ async def close_aiohttp_session(session: aiohttp.ClientSession | None) -> None:
     await session.close()
 
 
-def aiohttp_request_proxy(session: aiohttp.ClientSession, proxy_url: str | None) -> str | None:
-    if proxy_url and not is_socks_proxy(proxy_url):
-        return proxy_url
-    explicit = getattr(session, "_binance_explicit_proxy", None)
-    if isinstance(explicit, str) and explicit:
-        return explicit
-    return None
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-
-LOG = logging.getLogger("hunt_core.market.network")
+# ── Ban / circuit breaker ───────────────────────────────────────────────────
 
 _CIRCUIT_BREAKER_MAX_FAILURES = 5
 _MAX_BACKOFF_SECONDS = 3600.0
@@ -159,6 +156,9 @@ class BanDetectionPolicy:
             if exc.__class__.__name__ == "TimeoutError":
                 return True
         return False
+
+
+# ── Proxy pool ──────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -212,7 +212,7 @@ class ProxyPool:
 
     def _backoff_duration(self, failures: int) -> float:
         base = min(_MAX_BACKOFF_SECONDS, self.cooldown_seconds * (2 ** (failures - 1)))
-        return base + random.uniform(0, base * 0.1)  # type: ignore[no-any-return]
+        return base + random.uniform(0, base * 0.1)
 
     def mark_failed(self, url: str, reason: str) -> str | None:
         if url in self.urls:
@@ -347,6 +347,9 @@ def _dedupe_urls(urls: list[str]) -> list[str]:
     return out
 
 
+# ── Error detection ─────────────────────────────────────────────────────────
+
+
 def is_proxy_transport_error(exc: BaseException) -> bool:
     name = exc.__class__.__name__
     if name in {"ProxyConnectionError", "ProxyTimeoutError", "ProxyError"}:
@@ -362,47 +365,74 @@ def is_proxy_transport_error(exc: BaseException) -> bool:
     return any(marker in message for marker in markers)
 
 
+# ── Lightweight proxy health check ──────────────────────────────────────────
 
-LOG = logging.getLogger("hunt_core.market.network")
-
-_LOCAL_CANDIDATES = (
-    "socks5://127.0.0.1:7890",
-    "socks5://127.0.0.1:7891",
-    "socks5://127.0.0.1:10808",
-    "socks5://127.0.0.1:1080",
-    "socks5://127.0.0.1:9050",
-    "http://127.0.0.1:7890",
-    "http://127.0.0.1:8080",
+_BINANCE_PING_ENDPOINTS = (
+    "https://api.binance.com/api/v3/ping",
+    "https://fapi.binance.com/fapi/v1/ping",
+    "https://api.binance.com/sapi/v1/ping",
 )
-_PROBE_TIMEOUT = aiohttp.ClientTimeout(total=12.0, connect=8.0)
-_PROBE_CONCURRENCY = 12
-_CCXT_PROBE_TIMEOUT_MS = 12_000
-_CCXT_PROBE_LOAD_S = 14.0
-_AUTO_DISCOVER_CAP_S = 120.0
-_MAX_PUBLIC_CANDIDATES = 800
-_MIN_SYMBOLS = 100
-_MAX_WORKING = 12
-# CCXT load_markets screen before bulk public-proxy discovery.
-_SCREEN_CONCURRENCY = 80
-_SCREEN_KEEP = 24
+
+_LIGHT_PROBE_TIMEOUT = aiohttp.ClientTimeout(total=8.0, connect=6.0)
+_LIGHT_PROBE_CONCURRENCY = 60
+_FAST_CHECK_TIMEOUT_S = 2.0
 
 
-async def _quick_proxy_screen(url: str, sem: asyncio.Semaphore) -> str | None:
-    """Reachability screen via CCXT load_markets — same transport as hunt REST."""
-    async with sem:
+async def _tcp_check(host: str, port: int, *, timeout_s: float = _FAST_CHECK_TIMEOUT_S) -> bool:
+    """Quick TCP connect check — faster than full HTTP ping for local probes."""
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port),
+            timeout=timeout_s,
+        )
+        writer.close()
+        await writer.wait_closed()
+        return True
+    except (OSError, asyncio.TimeoutError):
+        return False
+
+
+async def _lightweight_ping(proxy_url: str | None, *, timeout_s: float = 8.0) -> tuple[bool, float]:
+    """Fast proxy check via Binance ping endpoint. Returns (ok, latency_ms)."""
+    # Fast TCP pre-check for local addresses
+    if proxy_url:
+        parsed = urlparse(proxy_url)
+        host = parsed.hostname or ""
+        port = parsed.port or 0
+        if host in ("127.0.0.1", "localhost", "::1") and port:
+            if not await _tcp_check(host, port):
+                return False, 0.0
+
+    timeout = aiohttp.ClientTimeout(total=timeout_s, connect=min(3.0, timeout_s * 0.5))
+    primary = _BINANCE_PING_ENDPOINTS[0]
+    try:
+        session = create_aiohttp_session(
+            proxy_url=proxy_url,
+            trust_env=False,
+            timeout=timeout,
+            connector_limit=1,
+        )
         try:
-            return url if await _probe_ccxt_markets(url) else None
+            started = time.monotonic()
+            request_kwargs: dict[str, Any] = {"timeout": timeout}
+            if proxy_url and not is_socks_proxy(proxy_url):
+                request_kwargs["proxy"] = proxy_url
+            async with session.get(primary, **request_kwargs) as resp:
+                if resp.status != 200:
+                    return False, 0.0
+                latency = (time.monotonic() - started) * 1000.0
+                return True, latency
         except Exception:
-            return None
-
-
-async def filter_working_proxies(urls: list[str]) -> list[str]:
-    """Re-probe configured proxies at hunt startup — CCXT ``load_markets`` (canonical)."""
-    return await filter_working_proxies_ccxt(urls)
+            pass
+        finally:
+            await close_aiohttp_session(session)
+    except Exception:
+        pass
+    return False, 0.0
 
 
 async def _probe_ccxt_markets(proxy_url: str | None) -> bool:
-    """Probe via CCXT — same transport as hunt market plane."""
+    """Probe via CCXT — same transport as hunt market plane. Heavy (14s timeout)."""
     from hunt_core.market.factory import close_exchange_async, create_async_binance_future
 
     ex = create_async_binance_future(
@@ -414,124 +444,144 @@ async def _probe_ccxt_markets(proxy_url: str | None) -> bool:
         await asyncio.wait_for(ex.load_markets(), timeout=_CCXT_PROBE_LOAD_S)
         ok = len(ex.markets) > _MIN_SYMBOLS
         if ok:
-            LOG.info(
+            LOG.debug(
                 "hunt proxy ccxt ok | url=%s markets=%d",
                 mask_proxy_url(proxy_url or "direct"),
                 len(ex.markets),
             )
         return ok
     except (TimeoutError, asyncio.TimeoutError):
-        LOG.debug(
-            "hunt proxy ccxt timeout | url=%s",
-            mask_proxy_url(proxy_url or "direct"),
-        )
+        LOG.debug("hunt proxy ccxt timeout | url=%s", mask_proxy_url(proxy_url or "direct"))
         return False
     except Exception as exc:
-        LOG.debug(
-            "hunt proxy ccxt fail | url=%s err=%s",
-            mask_proxy_url(proxy_url or "direct"),
-            type(exc).__name__,
-        )
+        LOG.debug("hunt proxy ccxt fail | url=%s err=%s", mask_proxy_url(proxy_url or "direct"), type(exc).__name__)
         return False
     finally:
         await close_exchange_async(ex, label="probe_ccxt_markets")
 
 
-async def filter_working_proxies_ccxt(urls: list[str]) -> list[str]:
-    """Probe proxies with CCXT ``load_markets`` — matches hunt REST transport."""
-    if not urls:
-        return []
-    sem = asyncio.Semaphore(min(4, len(urls)))
-
-    async def _one(url: str) -> str | None:
-        async with sem:
-            return url if await _probe_ccxt_markets(url) else None
-
-    results = await asyncio.gather(*[_one(u) for u in urls])
-    return [u for u in results if u]
+# ── WARP / local auto-detection ─────────────────────────────────────────────
 
 
-async def probe_ccxt_direct() -> bool:
-    """True when CCXT can load Binance USD-M markets without proxy."""
-    return await _probe_ccxt_markets(None)
+async def detect_local_proxies() -> list[str]:
+    """Auto-detect local proxy services: WARP, Clash, sing-box, etc."""
+    found: list[str] = []
 
+    # Check env/config first
+    env_url = resolve_proxy_url(config_url=None, trust_env=True)
+    if env_url:
+        ok, _ = await _lightweight_ping(env_url)
+        if ok:
+            found.append(env_url)
 
-async def auto_discover_proxies(*, include_public: bool = False) -> list[str]:
-    """Return working proxy URLs for hunt CCXT plane."""
-    try:
-        return await asyncio.wait_for(
-            _auto_discover_proxies_impl(include_public=include_public),
-            timeout=_AUTO_DISCOVER_CAP_S,
-        )
-    except TimeoutError:
-        LOG.warning("hunt_proxy_auto_discover_timeout | cap_s=%.0f", _AUTO_DISCOVER_CAP_S)
-        return []
+    local_checks = [
+        # warp-socks
+        ("socks5", "127.0.0.1", 40000),
+        ("socks5", "127.0.0.1", 40001),
+        # Clash / Mihomo / sing-box SOCKS
+        ("socks5", "127.0.0.1", 7890),
+        ("socks5", "127.0.0.1", 7891),
+        ("socks5", "127.0.0.1", 9091),
+        # Clash / Mihomo HTTP
+        ("http", "127.0.0.1", 7890),
+        ("http", "127.0.0.1", 8080),
+        # v2ray / xray
+        ("socks5", "127.0.0.1", 1080),
+        ("socks5", "127.0.0.1", 10808),
+        ("socks5", "127.0.0.1", 1081),
+        # Tor
+        ("socks5", "127.0.0.1", 9050),
+    ]
 
-
-async def _auto_discover_proxies_impl(*, include_public: bool = False) -> list[str]:
-    working: list[str] = []
-
-    if await _probe_ccxt_markets(None):
-        LOG.info("hunt direct binance access works")
-
-    env_proxy = resolve_proxy_url(config_url=None, trust_env=True)
-    if env_proxy and await _probe_ccxt_markets(env_proxy) and env_proxy not in working:
-        working.append(env_proxy)
-
-    for candidate in _LOCAL_CANDIDATES:
-        if candidate in working:
+    for scheme, host, port in local_checks:
+        url = f"{scheme}://{host}:{port}"
+        if url in found:
             continue
-        if await _probe_ccxt_markets(candidate):
-            working.append(candidate)
-        if len(working) >= _MAX_WORKING:
-            return working
+        ok, _ = await _lightweight_ping(url)
+        if ok:
+            found.append(url)
 
-    if not include_public:
-        return working
-
-    raw_candidates = await _fetch_public_candidates()
-    if not raw_candidates:
-        return working
-
-    # CCXT load_markets screen on public proxy candidates (canonical hunt transport).
-    screen_sem = asyncio.Semaphore(_SCREEN_CONCURRENCY)
-    screened = await asyncio.gather(
-        *[_quick_proxy_screen(u, screen_sem) for u in raw_candidates]
-    )
-    survivors = [u for u in screened if u][:_SCREEN_KEEP]
-    LOG.info(
-        "hunt proxy screen | candidates=%d reachable=%d",
-        len(raw_candidates),
-        len(survivors),
-    )
-
-    for url in survivors:
-        if url not in working:
-            working.append(url)
-        if len(working) >= _MAX_WORKING:
-            break
-    return working
+    return found
 
 
-# Free public proxy lists (github raw — no auth). (url, default_scheme). Many sources so a
-# usable subset survives the Binance reachability screen even though most entries are dead.
+# ── Proxy source lists ──────────────────────────────────────────────────────
+
+_LOCAL_CANDIDATES = (
+    "socks5://127.0.0.1:7890",
+    "socks5://127.0.0.1:7891",
+    "socks5://127.0.0.1:10808",
+    "socks5://127.0.0.1:1080",
+    "socks5://127.0.0.1:9050",
+    "http://127.0.0.1:7890",
+    "http://127.0.0.1:8080",
+)
+
+_PROBE_TIMEOUT = aiohttp.ClientTimeout(total=12.0, connect=8.0)
+_PROBE_CONCURRENCY = 12
+_CCXT_PROBE_TIMEOUT_MS = 12_000
+_CCXT_PROBE_LOAD_S = 14.0
+_AUTO_DISCOVER_CAP_S = 120.0
+_MAX_PUBLIC_CANDIDATES = 1200
+_MIN_SYMBOLS = 100
+_MAX_WORKING = 20
+_SCREEN_CONCURRENCY = 80
+_SCREEN_KEEP = 24
+
+# Free public proxy lists (github raw — no auth).
 _PUBLIC_PROXY_SOURCES: tuple[tuple[str, str], ...] = (
+    # Proxifly (multi-protocol, updated every 5 min)
     ("https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt", "socks5"),
+    ("https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks4/data.txt", "socks4"),
     ("https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt", "http"),
+    ("https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/https/data.txt", "https"),
+    # TheSpeedX
     ("https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt", "socks5"),
     ("https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt", "socks4"),
     ("https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt", "http"),
+    # hookzof
     ("https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt", "socks5"),
+    # monosans
     ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt", "socks5"),
     ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt", "http"),
+    ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt", "socks4"),
+    # jetkai
     ("https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-socks5.txt", "socks5"),
+    ("https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-socks4.txt", "socks4"),
+    ("https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt", "http"),
+    # ProxyScrape
+    ("https://api.proxyscrape.com/v4/free-proxy-list/get?request=get_proxies&protocol=socks5&proxy_format=ipport&format=text&timeout=10000", "socks5"),
+    ("https://api.proxyscrape.com/v4/free-proxy-list/get?request=get_proxies&protocol=socks4&proxy_format=ipport&format=text&timeout=10000", "socks4"),
+    ("https://api.proxyscrape.com/v4/free-proxy-list/get?request=get_proxies&protocol=http&proxy_format=ipport&format=text&timeout=10000", "http"),
+    # OpenProxyList
+    ("https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5.txt", "socks5"),
+    ("https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS4.txt", "socks4"),
+    ("https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTP.txt", "http"),
+    # mmpx12
+    ("https://raw.githubusercontent.com/mmpx12/proxy-list/master/socks5.txt", "socks5"),
+    ("https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt", "http"),
+    # sunn9577
+    ("https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies/socks5.txt", "socks5"),
+    ("https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies/socks4.txt", "socks4"),
+    ("https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies/http.txt", "http"),
+    # Rdavydov
+    ("https://raw.githubusercontent.com/rdavydov/proxy-list/main/proxies/socks5.txt", "socks5"),
+    ("https://raw.githubusercontent.com/rdavydov/proxy-list/main/proxies/http.txt", "http"),
+    # prxylist
+    ("https://raw.githubusercontent.com/prxylist/Proxy-List/main/socks5.txt", "socks5"),
+    ("https://raw.githubusercontent.com/prxylist/Proxy-List/main/http.txt", "http"),
+    # Spys.me
+    ("https://spys.me/socks.txt", "socks5"),
+    ("https://spys.me/proxy.txt", "http"),
+    # proxylists.net (via proxifly mirror)
+    ("https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/RU/data.txt", "http"),
 )
 
 
 async def _fetch_public_candidates() -> list[str]:
     merged: list[str] = []
     seen: set[str] = set()
-    async with aiohttp.ClientSession(timeout=_PROBE_TIMEOUT) as session:
+    timeout = aiohttp.ClientTimeout(total=10.0, connect=8.0)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         for url, default_scheme in _PUBLIC_PROXY_SOURCES:
             try:
                 async with session.get(url) as resp:
@@ -556,19 +606,261 @@ def _parse_host_port_lines(text: str, *, default_scheme: str = "socks5") -> list
         if "://" in stripped:
             out.append(normalize_proxy_url(stripped))
             continue
+        # ip:port
         if re.match(r"^\d{1,3}(\.\d{1,3}){3}:\d+$", stripped):
-            # Trust the source's known protocol (lists are protocol-specific).
+            out.append(f"{default_scheme}://{stripped}")
+            continue
+        # hostname:port
+        if re.match(r"^[a-zA-Z0-9.-]+:\d+$", stripped) and " " not in stripped:
             out.append(f"{default_scheme}://{stripped}")
     return out
 
 
-def write_proxies_to_config(path: Path, urls: list[str], *, direct_ok: bool = False) -> None:
-    """Update ``[bot.network]`` in config.toml with discovered proxies.
+# ── Screening (lightweight ping) ────────────────────────────────────────────
 
-    HuntSettings roots config under the top-level ``[bot]`` table
-    (``load_settings``: ``bot_raw = parsed.get("bot")``), so the canonical section
-    read back is ``[bot.network]`` → ``proxy_url`` / ``proxy_urls``.
+
+async def _tcp_screen(url: str, sem: asyncio.Semaphore) -> str | None:
+    """Fast TCP connect check — no HTTP overhead."""
+    async with sem:
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname or ""
+            port = parsed.port or 0
+            if host and port:
+                ok = await _tcp_check(host, port, timeout_s=3.0)
+                return url if ok else None
+        except Exception:
+            pass
+        return None
+
+
+async def _light_screen(url: str, sem: asyncio.Semaphore) -> str | None:
+    """Fast proxy reachability via Binance ping."""
+    async with sem:
+        ok, _ = await _lightweight_ping(url)
+        return url if ok else None
+
+
+async def filter_working_proxies(urls: list[str]) -> list[str]:
+    """Re-probe configured proxies at hunt startup — lightweight ping."""
+    return await filter_working_proxies_ccxt(urls)
+
+
+async def filter_working_proxies_ccxt(urls: list[str]) -> list[str]:
+    """Probe proxies with CCXT ``load_markets`` — matches hunt REST transport."""
+    if not urls:
+        return []
+    sem = asyncio.Semaphore(min(4, len(urls)))
+
+    async def _one(url: str) -> str | None:
+        async with sem:
+            return url if await _probe_ccxt_markets(url) else None
+
+    results = await asyncio.gather(*[_one(u) for u in urls])
+    return [u for u in results if u]
+
+
+async def probe_ccxt_direct() -> bool:
+    """True when CCXT can load Binance USD-M markets without proxy."""
+    return await _probe_ccxt_markets(None)
+
+
+# ── Persistent proxy cache ──────────────────────────────────────────────────
+
+_PROXY_CACHE_PATH = Path("data") / "proxy_cache.json"
+
+
+def _proxy_cache_path() -> Path:
+    from hunt_core.paths import DATA
+    return DATA / "proxy_cache.json"
+
+
+def proxy_cache_load() -> dict[str, dict]:
+    """Load persistent proxy cache. Returns {url: {latency_ms, last_ok, successes, ...}}."""
+    p = _proxy_cache_path()
+    if not p.exists():
+        return {}
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            return raw
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def proxy_cache_save(cache: dict[str, dict]) -> None:
+    """Save persistent proxy cache."""
+    p = _proxy_cache_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(cache, indent=2, default=str), encoding="utf-8")
+        tmp.replace(p)
+    except OSError:
+        LOG.exception("proxy_cache_save_failed")
+
+
+def proxy_cache_mark_ok(url: str, latency_ms: float) -> None:
+    cache = proxy_cache_load()
+    entry = cache.get(url, {})
+    entry["last_ok"] = time.time()
+    if latency_ms > 0:
+        entry["latency_ms"] = latency_ms
+    entry["successes"] = entry.get("successes", 0) + 1
+    entry["protocol"] = proxy_scheme(url)
+    cache[url] = entry
+    now = time.time()
+    stale = [k for k, v in cache.items() if now - v.get("last_ok", 0) > 172800]
+    for k in stale:
+        cache.pop(k, None)
+    proxy_cache_save(cache)
+
+
+def proxy_cache_get_working() -> list[tuple[str, float]]:
+    """Return (url, latency_ms) sorted by latency, only entries <30 min old."""
+    cache = proxy_cache_load()
+    now = time.time()
+    viable: list[tuple[str, float]] = []
+    for url, entry in cache.items():
+        last = entry.get("last_ok", 0)
+        if now - last < 1800 and entry.get("successes", 0) > 0:
+            viable.append((url, entry.get("latency_ms", 9999)))
+    viable.sort(key=lambda x: x[1])
+    return viable
+
+
+# ── Auto-discovery ──────────────────────────────────────────────────────────
+
+
+async def _quick_proxy_screen(url: str, sem: asyncio.Semaphore) -> str | None:
+    """Reachability screen via CCXT load_markets — same transport as hunt REST."""
+    async with sem:
+        try:
+            return url if await _probe_ccxt_markets(url) else None
+        except Exception:
+            return None
+
+
+async def auto_discover_proxies(*, include_public: bool = False) -> list[str]:
+    """Return working proxy URLs for hunt CCXT plane.
+
+    Strategy: direct-first — if CCXT can reach Binance without a proxy,
+    skip discovery entirely. Only look for proxies when direct access fails.
+
+    Screening: lightweight ping (fast) → CCXT load_markets (heavy).
     """
+    try:
+        return await asyncio.wait_for(
+            _auto_discover_proxies_impl(include_public=include_public),
+            timeout=_AUTO_DISCOVER_CAP_S,
+        )
+    except TimeoutError:
+        LOG.warning("hunt_proxy_auto_discover_timeout | cap_s=%.0f", _AUTO_DISCOVER_CAP_S)
+        return []
+
+
+async def _auto_discover_proxies_impl(*, include_public: bool = False) -> list[str]:
+    # Phase 0: if direct access works, skip proxy discovery entirely
+    if await probe_ccxt_direct():
+        LOG.info("hunt proxy direct ok | skip_discovery")
+        return []
+
+    working: list[str] = []
+    seen: set[str] = set()
+
+    # Phase 1: cached proxies (fastest path)
+    cached = proxy_cache_get_working()
+    for url, lat in cached:
+        if url not in seen:
+            seen.add(url)
+            ok, _ = await _lightweight_ping(url)
+            if ok:
+                working.append(url)
+
+    # Phase 2: local proxies
+    local = await detect_local_proxies()
+    for url in local:
+        if url not in seen:
+            seen.add(url)
+            if await _probe_ccxt_markets(url):
+                working.append(url)
+        if len(working) >= _MAX_WORKING:
+            return working
+
+    # Phase 3: env var proxy
+    env_proxy = resolve_proxy_url(config_url=None, trust_env=True)
+    if env_proxy and env_proxy not in seen:
+        seen.add(env_proxy)
+        if await _probe_ccxt_markets(env_proxy):
+            working.append(env_proxy)
+    if len(working) >= _MAX_WORKING:
+        return working
+
+    # Phase 4: local candidates
+    for candidate in _LOCAL_CANDIDATES:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if await _probe_ccxt_markets(candidate):
+            working.append(candidate)
+        if len(working) >= _MAX_WORKING:
+            return working
+
+    if not include_public:
+        return working
+
+    # Phase 5: public proxy lists
+    raw_candidates = await _fetch_public_candidates()
+    if not raw_candidates:
+        return working
+
+    # Fast TCP pre-screen: just check if host:port is reachable
+    screen_sem = asyncio.Semaphore(_SCREEN_CONCURRENCY)
+    tcp_results = await asyncio.gather(
+        *[_tcp_screen(u, screen_sem) for u in raw_candidates],
+    )
+    tcp_survivors = [u for u in tcp_results if u]
+
+    LOG.info(
+        "hunt proxy tcp screen | candidates=%d survivors=%d",
+        len(raw_candidates),
+        len(tcp_survivors),
+    )
+
+    if not tcp_survivors:
+        return working
+
+    # CCXT load_markets screen on TCP survivors
+    ccxt_sem = asyncio.Semaphore(min(40, len(tcp_survivors)))
+    screened = await asyncio.gather(
+        *[_quick_proxy_screen(u, ccxt_sem) for u in tcp_survivors],
+    )
+    survivors = [u for u in screened if u][:_SCREEN_KEEP]
+
+    LOG.info(
+        "hunt proxy ccxt screen | tcp_survivors=%d reachable=%d",
+        len(tcp_survivors),
+        len(survivors),
+    )
+
+    for url in survivors:
+        if url not in seen:
+            seen.add(url)
+            working.append(url)
+            _, lat = await _lightweight_ping(url)
+            proxy_cache_mark_ok(url, lat or 50.0)
+        if len(working) >= _MAX_WORKING:
+            break
+
+    return working
+
+
+# ── Config writer ───────────────────────────────────────────────────────────
+
+
+def write_proxies_to_config(path: Path, urls: list[str], *, direct_ok: bool = False) -> None:
+    """Update ``[bot.network]`` in config.toml with discovered proxies."""
     text = path.read_text(encoding="utf-8")
     block = _render_network_block(urls, direct_ok=direct_ok)
     pattern = re.compile(r"(?:#[^\n]*\n)*\[bot\.network\].*?(?=\n\[|\Z)", re.DOTALL)
@@ -597,11 +889,82 @@ def _render_network_block(urls: list[str], *, direct_ok: bool) -> str:
     lines.append("]")
     return "\n".join(lines)
 
+
+# ── Background proxy refresh daemon ─────────────────────────────────────────
+
+
+async def run_proxy_refresh_daemon(
+    *,
+    interval_s: float = 900.0,
+    config_path: Path | None = None,
+) -> None:
+    """Periodically refresh the proxy pool in background."""
+    from hunt_core.runtime.state import should_stop
+
+    LOG.info("proxy_refresh_daemon_started interval_s=%.0f", interval_s)
+    while not should_stop():
+        try:
+            LOG.info("proxy_refresh_starting")
+            urls = await auto_discover_proxies(include_public=True)
+            if urls:
+                LOG.info("proxy_refresh_found count=%d", len(urls))
+                # Update cache for all found proxies
+                for url in urls:
+                    _, lat = await _lightweight_ping(url)
+                    if lat > 0:
+                        proxy_cache_mark_ok(url, lat)
+
+                # Optionally update config
+                if config_path and config_path.is_file():
+                    write_proxies_to_config(config_path, urls, direct_ok=True)
+
+            # Re-check existing cached proxies
+            cached = proxy_cache_get_working()
+            LOG.info("proxy_refresh_complete working=%d cached=%d", len(urls), len(cached))
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            LOG.exception("proxy_refresh_error")
+        # Sleep in small increments for responsive shutdown
+        deadline = time.monotonic() + interval_s
+        while time.monotonic() < deadline and not should_stop():
+            await asyncio.sleep(5.0)
+
+    LOG.info("proxy_refresh_daemon_stopped")
+
+
+# ── Convenience: quick discover + save ─────────────────────────────────────
+
+
+async def discover_and_persist(
+    config_path: Path,
+    *,
+    include_public: bool = True,
+) -> list[str]:
+    """Discover working proxies, persist to cache, write to config."""
+    urls = await auto_discover_proxies(include_public=include_public)
+    if urls:
+        for url in urls:
+            _, lat = await _lightweight_ping(url)
+            if lat > 0:
+                proxy_cache_mark_ok(url, lat)
+        if config_path.is_file():
+            write_proxies_to_config(config_path, urls, direct_ok=True)
+    return urls
+
+
 __all__ = [
     "BanDetectionPolicy",
     "ProxyPool",
+    "detect_local_proxies",
+    "discover_and_persist",
     "filter_working_proxies",
     "filter_working_proxies_ccxt",
     "is_proxy_transport_error",
     "probe_ccxt_direct",
+    "proxy_cache_load",
+    "proxy_cache_save",
+    "proxy_cache_mark_ok",
+    "proxy_cache_get_working",
+    "run_proxy_refresh_daemon",
 ]

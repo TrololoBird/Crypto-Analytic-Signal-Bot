@@ -141,12 +141,13 @@ def _naked_poc(
     *,
     lookback: int,
     current_price: float,
+    buckets: int = 60,
 ) -> float | None:
     """POC from prior period untested by current price."""
     if poc is None or work.height < lookback + 5:
         return None
     prior = work.head(max(0, work.height - lookback))
-    prior_poc, _, _ = volume_profile_levels(prior, buckets=20)
+    prior_poc, _, _ = volume_profile_levels(prior, buckets=buckets)
     if prior_poc is None:
         return None
     touched = False
@@ -206,7 +207,7 @@ def build_period_profile(
         lookback=None,
         buckets=buckets,
     )
-    naked = _naked_poc(work, poc, lookback=lookback, current_price=current_price)
+    naked = _naked_poc(work, poc, lookback=lookback, current_price=current_price, buckets=buckets)
     migration = _poc_migration(prior_poc, poc)
 
     return PeriodProfile(

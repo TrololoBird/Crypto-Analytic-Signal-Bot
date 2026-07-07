@@ -370,9 +370,9 @@ def audit_kline_staleness(
     if interval_ms is None:
         return []
     if now_ms is None:
-        from datetime import UTC, datetime
+        from hunt_core import clock
 
-        now_ms = int(datetime.now(UTC).timestamp() * 1000)
+        now_ms = int(clock.now_ms())
 
     idx = -2 if df.height >= 2 else -1
     time_col = next((c for c in ("close_time", "time", "open_time") if c in df.columns), None)
