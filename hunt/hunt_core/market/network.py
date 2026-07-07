@@ -664,49 +664,63 @@ async def _fetch_public_candidates() -> list[str]:
     merged: list[str] = []
     seen: set[str] = set()
     timeout = aiohttp.ClientTimeout(total=10.0, connect=8.0)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        for url, default_scheme in _PUBLIC_PROXY_SOURCES:
-            try:
-                async with session.get(url) as resp:
-                    if resp.status != 200:
-                        continue
-                    text = await resp.text()
-            except Exception:
-                continue
-            for item in _parse_host_port_lines(text, default_scheme=default_scheme):
-                if item not in seen:
-                    seen.add(item)
-                    merged.append(item)
-    return merged[:_MAX_PUBLIC_CANDIDATES]
+    lock = asyncio.Lock()
 
-
-async def _scrape_web_proxy_lists() -> list[str]:
-    """Scrape proxy list websites (HTML-based, more curated than GitHub lists)."""
-    _WEB_SOURCES: tuple[str, ...] = (
-        "https://free-proxy-list.net/",
-        "https://www.sslproxies.org/",
-        "https://www.us-proxy.org/",
-        "https://www.proxy-list.download/api/v1/get?type=http",
-        "https://www.proxy-list.download/api/v1/get?type=https",
-        "https://www.proxy-list.download/api/v1/get?type=socks5",
-    )
-    merged: list[str] = []
-    seen: set[str] = set()
-    timeout = aiohttp.ClientTimeout(total=12.0, connect=8.0)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        for url in _WEB_SOURCES:
-            try:
-                async with session.get(url, headers={"User-Agent": "curl/8.0"}) as resp:
+    async def _fetch_one(src_url: str, scheme: str) -> None:
+        nonlocal merged, seen
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as sess:
+                async with sess.get(src_url) as resp:
                     if resp.status != 200:
-                        continue
+                        return
                     text = await resp.text()
-            except Exception:
-                continue
-            items = _parse_host_port_lines(text, default_scheme="http")
+        except Exception:
+            return
+        items = _parse_host_port_lines(text, default_scheme=scheme)
+        async with lock:
             for item in items:
                 if item not in seen:
                     seen.add(item)
                     merged.append(item)
+
+    await asyncio.gather(
+        *[_fetch_one(url, s) for url, s in _PUBLIC_PROXY_SOURCES],
+        return_exceptions=True,
+    )
+    return merged[:_MAX_PUBLIC_CANDIDATES]
+
+
+async def _scrape_web_proxy_lists() -> list[str]:
+    """Scrape proxy list websites concurrently — fast fail on timeout."""
+    _WEB_SOURCES: tuple[str, str] = (
+        ("https://free-proxy-list.net/", "http"),
+        ("https://www.sslproxies.org/", "http"),
+        ("https://www.us-proxy.org/", "http"),
+        ("https://www.proxy-list.download/api/v1/get?type=http", "http"),
+        ("https://www.proxy-list.download/api/v1/get?type=https", "https"),
+        ("https://www.proxy-list.download/api/v1/get?type=socks5", "socks5"),
+    )
+    merged: list[str] = []
+    seen: set[str] = set()
+    timeout = aiohttp.ClientTimeout(total=8.0, connect=6.0)
+
+    async def _fetch_one(url: str, scheme: str) -> None:
+        nonlocal merged, seen
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, headers={"User-Agent": "Mozilla/5.0"}) as resp:
+                    if resp.status != 200:
+                        return
+                    text = await resp.text()
+        except Exception:
+            return
+        items = _parse_host_port_lines(text, default_scheme=scheme)
+        for item in items:
+            if item not in seen:
+                seen.add(item)
+                merged.append(item)
+
+    await asyncio.gather(*[_fetch_one(url, s) for url, s in _WEB_SOURCES], return_exceptions=True)
     return merged[:_MAX_PUBLIC_CANDIDATES]
 
 
