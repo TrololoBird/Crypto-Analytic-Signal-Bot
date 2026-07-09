@@ -94,6 +94,8 @@ class HuntCcxtClient:
         self._markets_loaded = False
         self._klines_cache: dict[tuple[str, str, int], tuple[float, pl.DataFrame]] = {}
         self._klines_locks: dict[tuple[str, str, int], asyncio.Lock] = {}
+        self._ohlcv_list_cache: dict[tuple[str, str, int], tuple[float, list[list[Any]]]] = {}
+        self._ohlcv_list_locks: dict[tuple[str, str, int], asyncio.Lock] = {}
         self._ticker_24h_cache: tuple[float, list[dict[str, float | str]]] | None = None
         self._exchange_info_cache: tuple[float, list[SymbolMeta]] | None = None
         self._open_interest_cache: dict[str, tuple[float, float]] = {}
@@ -621,6 +623,8 @@ class HuntCcxtClient:
         limit: int = 500,
     ) -> list[list[Any]]:
         await self.load_markets()
+        if not self._ccxt_has(self._ex, "fetchOHLCV"):
+            raise ccxt.NotSupported(f"fetchOHLCV unavailable on {self._ex.id}")
         ccxt_sym = self._ccxt_sym(symbol)
         rows = await self._rest_call(
             lambda: self._ex.fetch_ohlcv(
@@ -633,6 +637,31 @@ class HuntCcxtClient:
             weight=10,
         )
         return list(rows)
+
+    async def fetch_ohlcv_list_cached(
+        self, symbol: str, interval: str, *, limit: int = 500
+    ) -> list[list[Any]]:
+        """Interval-aware cached list OHLCV — the hot-path variant.
+
+        The scanner and pinned analyst re-scan every cycle; without caching each
+        cycle re-fetched 5 TFs × N symbols via weight-10 klines, the dominant REST
+        sink that earned the 418 IP ban. TTLs are per-interval (see ``_CACHE_TTL``
+        ``klines_*``): a 1d bar is stable for an hour, only 5m needs frequent refresh.
+        A single-flight lock coalesces concurrent scanners onto one fetch."""
+        key = (self._bin_sym(symbol), interval, int(limit))
+        ttl = float(_CACHE_TTL.get(f"klines_{interval}", 60))
+        now = time.monotonic()
+        cached = self._ohlcv_list_cache.get(key)
+        if cached is not None and now - cached[0] < ttl:
+            return cached[1]
+        lock = self._ohlcv_list_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            cached = self._ohlcv_list_cache.get(key)
+            if cached is not None and time.monotonic() - cached[0] < ttl:
+                return cached[1]
+            rows = await self.fetch_ohlcv_list(symbol, interval, limit=limit)
+            self._ohlcv_list_cache[key] = (time.monotonic(), rows)
+            return rows
 
     async def fetch_klines(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
         await self.load_markets()
@@ -868,13 +897,11 @@ class HuntCcxtClient:
         if self._cache_fresh(cached, _CACHE_TTL["metric_series"]):
             return cached[1]  # type: ignore[index]
         await self.load_markets()
-        payload = await self._direct_binance_fetch(
+        payload = await self._fapi_call(
             lambda: self._ex.fetch_open_interest_history(
                 self._ccxt_sym(sym), timeframe=period, limit=int(limit)
             ),
             context=f"oi_history_raw:{sym}:{period}",
-            weight=1,
-            method="fetchOpenInterestHistory",
         )
         rows = [x for x in payload if isinstance(x, dict)] if isinstance(payload, list) else []
         if rows:

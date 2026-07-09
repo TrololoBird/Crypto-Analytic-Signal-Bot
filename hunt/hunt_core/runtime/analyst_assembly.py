@@ -192,8 +192,13 @@ async def assemble_analyst_tick(
                 if tf_name in prizrak_ohlcv_by_tf:
                     continue
                 try:
+                    # Fetch ≥130 bars: candidate/structure logic slices raw[-lookback:]
+                    # (tier.lookback_bars=60 for meso) so this does NOT change their
+                    # behaviour, but interest-zone detection needs ~120 bars to see BOTH
+                    # the support-below and resistance-above structural boxes.
+                    fetch_limit = max(int(tier.lookback_bars), 130)
                     bars = await safe_fetch(
-                        client.fetch_ohlcv_list(sym, tf_name, limit=tier.lookback_bars),
+                        client.fetch_ohlcv_list_cached(sym, tf_name, limit=fetch_limit),
                         context=f"prizrak_ohlcv_{tf_name}",
                     )
                 except Exception as exc:
@@ -371,12 +376,43 @@ async def send_analyst_change_telegram(
         qblock = format_queue_telegram(row.get("signal_queue"))
         if qblock:
             blocks.extend(["", qblock])
-    result = await broadcaster.send_html("\n".join(blocks), no_split=True)
+    result = await broadcaster.send_html("\n".join(blocks))
     if result.status == "sent":
         LOG.info("analyst_pinned_tg_sent", symbol=sym, message_id=result.message_id, plane="deep")
         return True
     LOG.warning("analyst_pinned_tg_failed", symbol=sym, status=result.status, reason=result.reason)
     return False
+
+
+def _prizrak_row_variants(row: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:
+    """Expand a pinned row into one lifecycle variant per Prizrak setup_kind.
+
+    Prizrak produces 0..N independent candidates per tick (``prizrak_signals``);
+    each setup_kind (level_core / pp_break / trap_flip / level_intraday_scalp /
+    zone_target_deep …) is a distinct thesis and should get its own Telegram
+    message — the lifecycle spine dedups by setup_id so re-runs don't spam. Each
+    variant is a shallow copy of the row with ``prizrak_summary`` swapped to the
+    strongest candidate of that setup_kind. Falls back to the row as-is when
+    there are no candidates (single-summary behavior preserved).
+    """
+    sigs = row.get("prizrak_signals")
+    if not isinstance(sigs, list) or len(sigs) <= 1:
+        summary = row.get("prizrak_summary") if isinstance(row.get("prizrak_summary"), dict) else {}
+        return [(row, str(summary.get("setup_kind") or "deep"))]
+    best_by_kind: dict[str, dict[str, Any]] = {}
+    for c in sigs:
+        if not isinstance(c, dict):
+            continue
+        kind = str(c.get("setup_kind") or "deep")
+        cur = best_by_kind.get(kind)
+        if cur is None or float(c.get("strength") or 0) > float(cur.get("strength") or 0):
+            best_by_kind[kind] = c
+    variants: list[tuple[dict[str, Any], str]] = []
+    for kind, cand in best_by_kind.items():
+        variant = dict(row)
+        variant["prizrak_summary"] = cand
+        variants.append((variant, kind))
+    return variants
 
 
 async def analyst_pinned_loop(
@@ -414,9 +450,12 @@ async def analyst_pinned_loop(
                 # Lifecycle spine is the SOLE emission gate — dedup/cooldown/silence all live in
                 # process_lifecycle_tick. No legacy fingerprint pre-gate: it would suppress real
                 # forming→activated advances (price entering the zone without a fingerprint flip).
-                transition = emitter.preview_deep_row(row)
-                if transition.event != "none":
-                    lifecycle_candidates.append((row, transition))
+                # A7: one lifecycle candidate per Prizrak setup_kind (independent
+                # signals), not just the single best summary.
+                for variant, kind in _prizrak_row_variants(row):
+                    transition = emitter.preview_deep_row(variant)
+                    if transition.event != "none":
+                        lifecycle_candidates.append((variant, transition, kind))
             except Exception:
                 LOG.exception("analyst_pinned_loop_symbol_failed", symbol=sym)
 
@@ -424,22 +463,28 @@ async def analyst_pinned_loop(
             from hunt_core.prizrak.arbiter import deep_cooldown_ok, mark_deep_sent
 
             queue = load_signal_queue()
-            rows_only = [r for r, _ in lifecycle_candidates]
+            rows_only = [r for r, _, _ in lifecycle_candidates]
             if v2cfg.signal_queue_tg_batch and len(lifecycle_candidates) > 1:
+                # Batch mode: collapse to a single hero message (config-controlled,
+                # unchanged). Multi-emission (one message per setup_kind) is the
+                # non-batch path below.
                 hero = pick_hero_row(rows_only, queue)
-                to_send = [(hero, tr) for r, tr in lifecycle_candidates if r is hero] if hero else lifecycle_candidates[:1]
+                to_send = [(hero, tr, k) for r, tr, k in lifecycle_candidates if r is hero] if hero else lifecycle_candidates[:1]
             else:
                 to_send = lifecycle_candidates
-            for row, transition in to_send:
+            for row, transition, kind in to_send:
                 sym = str(row.get("symbol") or "").upper()
-                if deep_cooldown_ok(sym):
+                # Per-(symbol, setup_kind) cooldown so distinct theses on one
+                # symbol each get through, but the same thesis can't spam.
+                cooldown_key = f"{sym}:{kind}"
+                if deep_cooldown_ok(cooldown_key):
                     if await emitter.emit_deep(
                         broadcaster,
                         row,
                         cycle_peers=rows_only,
                         transition=transition,
                     ):
-                        mark_deep_sent(sym)
+                        mark_deep_sent(cooldown_key)
         try:
             await asyncio.sleep(max(30.0, interval))
         except asyncio.CancelledError:

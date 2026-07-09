@@ -156,7 +156,7 @@ def normalize_scale_weights(
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-LOG = logging.getLogger("bot.contracts")
+LOG = logging.getLogger("hunt_core.contract")
 
 
 

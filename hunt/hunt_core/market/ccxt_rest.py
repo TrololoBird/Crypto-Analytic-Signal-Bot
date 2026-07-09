@@ -13,6 +13,8 @@ from typing import Any, Callable, TypeVar
 import ccxt
 
 from hunt_core.market.rate_limit import (
+    REST_REQUESTS_PER_MIN,
+    REST_WEIGHT_HEADER_STOP,
     REST_WEIGHT_PACE_LIMIT,
     SlidingWindowRateLimiter,
     WeightBudgetManager,
@@ -24,6 +26,24 @@ from hunt_core.market.capacity import (
 from hunt_core.market.ccxt_guard import CcxtGuard, is_ccxt_ip_ban, is_ccxt_rate_limited
 
 LOG = logging.getLogger("hunt_core.market.ccxt_rest")
+
+# ── Process-global shared budgets ────────────────────────────────────────────
+# Binance limits are per-IP. Every HuntCcxtClient (scanner, pinned analyst,
+# /signal probe) egresses through the SAME IP, so they MUST pace against ONE set
+# of budgets — a per-client gate lets concurrent subsystems each pace to their own
+# 1500 and collectively blow the 2400/min cap → 418 IP ban. These module-level
+# singletons are shared by every gate instance (see HuntCcxtRestGate field defaults).
+_GLOBAL_WEIGHT_BUDGET = WeightBudgetManager(
+    max_weight=REST_WEIGHT_PACE_LIMIT, window_seconds=60.0
+)
+_GLOBAL_REQUEST_BUDGET = SlidingWindowRateLimiter(
+    max_requests=REST_REQUESTS_PER_MIN, window_seconds=60.0
+)
+_GLOBAL_FAPI_BUDGET = SlidingWindowRateLimiter(
+    max_requests=BINANCE_FAPI_DATA_PACE_5M, window_seconds=300.0
+)
+_GLOBAL_GUARD = CcxtGuard()  # ban/pause state is IP-wide → shared across clients
+_GLOBAL_SECONDARY_BUDGETS: dict[str, SlidingWindowRateLimiter] = {}
 
 T = TypeVar("T")
 
@@ -54,21 +74,13 @@ def _header_used_weight(headers: Any) -> int | None:
 class HuntCcxtRestGate:
     """Pace REST weight and record 418/429 pauses — no mid-tick proxy swap."""
 
-    guard: CcxtGuard = field(default_factory=CcxtGuard)
-    weight_budget: WeightBudgetManager = field(
-        default_factory=lambda: WeightBudgetManager(
-            max_weight=REST_WEIGHT_PACE_LIMIT,
-            window_seconds=60.0,
-        )
-    )
-    fapi_budget: SlidingWindowRateLimiter = field(
-        default_factory=lambda: SlidingWindowRateLimiter(
-            max_requests=BINANCE_FAPI_DATA_PACE_5M,
-            window_seconds=300.0,
-        )
-    )
+    # Shared process-global budgets by default — one per-IP budget for ALL clients.
+    guard: CcxtGuard = field(default_factory=lambda: _GLOBAL_GUARD)
+    weight_budget: WeightBudgetManager = field(default_factory=lambda: _GLOBAL_WEIGHT_BUDGET)
+    request_budget: SlidingWindowRateLimiter = field(default_factory=lambda: _GLOBAL_REQUEST_BUDGET)
+    fapi_budget: SlidingWindowRateLimiter = field(default_factory=lambda: _GLOBAL_FAPI_BUDGET)
     _secondary_budgets: dict[str, SlidingWindowRateLimiter] = field(
-        default_factory=dict,
+        default_factory=lambda: _GLOBAL_SECONDARY_BUDGETS,
         repr=False,
     )
     pending_proxy_failover: bool = False
@@ -87,6 +99,7 @@ class HuntCcxtRestGate:
 
     async def acquire_fapi(self, *, label: str) -> None:
         await self.await_pause()
+        await self.request_budget.acquire(label=f"req:fapi:{label}")
         await self.fapi_budget.acquire(label=f"fapi:{label}")
 
     async def acquire_secondary(self, exchange: str, *, label: str) -> None:
@@ -98,6 +111,7 @@ class HuntCcxtRestGate:
     async def acquire_binance_weight(self, *, weight: int, label: str) -> None:
         """Pace uncategorized Binance calls (direct ``_ex.fetch_*`` without invoke)."""
         await self.await_pause()
+        await self.request_budget.acquire(label=f"req:{label}")
         await self.weight_budget.acquire(weight=max(1, int(weight)), label=label)
 
     async def await_pause(self, *, cap_s: float = 120.0) -> float:
@@ -118,6 +132,16 @@ class HuntCcxtRestGate:
         used = _header_used_weight(headers)
         if used is not None:
             self.weight_budget.force_floor(used)
+            if used >= REST_WEIGHT_HEADER_STOP:
+                # Server-reported weight is near the 2400 cap. A concurrent burst can
+                # overshoot the local estimate before responses return, so trust the
+                # exchange counter and back off NOW (grows if used stays high).
+                self.guard.extend_pause(2.0)
+                LOG.warning(
+                    "hunt_ccxt_weight_header_stop | used_weight_1m=%d cap=%d",
+                    used,
+                    REST_WEIGHT_HEADER_STOP,
+                )
 
     async def invoke_fapi(
         self,
@@ -127,6 +151,7 @@ class HuntCcxtRestGate:
         context: str,
     ) -> T:
         await self.await_pause()
+        await self.request_budget.acquire(label=f"req:fapi:{context}")
         await self.fapi_budget.acquire(label=f"fapi:{context}")
         try:
             result = factory()
@@ -147,6 +172,7 @@ class HuntCcxtRestGate:
         weight: int = 5,
     ) -> T:
         await self.await_pause()
+        await self.request_budget.acquire(label=f"req:{context}")
         await self.weight_budget.acquire(weight=max(1, int(weight)), label=context)
         try:
             result = factory()
@@ -167,6 +193,7 @@ class HuntCcxtRestGate:
         context: str,
     ) -> T:
         await self.await_pause()
+        await self.request_budget.acquire(label=f"req:{exchange_name}:{context}")
         await self._secondary_budget(exchange_name).acquire(
             label=f"{exchange_name}:{context}",
         )

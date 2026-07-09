@@ -67,7 +67,7 @@ from .prepare_frame import (
     min_required_bars,
 )
 
-LOG = structlog.get_logger("bot.features.prepare")
+LOG = structlog.get_logger("hunt_core.features.prepare")
 
 # Frame-level indicator cache - LRU with unique frame-window keys.
 # ---------------------------------------------------------------------------
@@ -641,7 +641,7 @@ def prepare_symbol(
 
     Returns None if there is insufficient historical data.
     """
-    _log = logging.getLogger("bot.features")
+    _log = logging.getLogger("hunt_core.features.prepare")
 
     sym = universe_symbol.symbol
 

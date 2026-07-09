@@ -44,6 +44,7 @@ except ImportError:
     _HAS_AIogram = False
     BufferedInputFile = None  # type: ignore[misc, assignment]
     TelegramRetryAfter = None
+    AiogramAPIError = Exception
 
 # tenacity for retries
 try:
@@ -60,8 +61,8 @@ except ImportError:
     HAS_TENACITY = False
 
 
-LOG = structlog.get_logger("bot.messaging")
-RETRY_LOG = logging.getLogger("bot.messaging")
+LOG = structlog.get_logger("hunt_core.deliver.telegram")
+RETRY_LOG = logging.getLogger("hunt_core.deliver.telegram")
 P = ParamSpec("P")
 R = TypeVar("R")
 NETWORK_RETRIES = 3
@@ -294,7 +295,7 @@ class TelegramBroadcaster:
                 )
             try:
                 if no_split and len(text) > TELEGRAM_CHUNK_LIMIT:
-                    text = text[: TELEGRAM_CHUNK_LIMIT - 12].rstrip() + "\n…"
+                    text = _balance_html_fragment(text[: TELEGRAM_CHUNK_LIMIT - 12].rstrip()) + "\n…"
                 parts = [text] if no_split else _split_telegram_text(text)
                 sent_message_id: int | None = None
                 for idx, part in enumerate(parts):
@@ -452,7 +453,7 @@ class TelegramBroadcaster:
             )
             self._record_send_success(message_hash)
             LOG.info("telegram message sent", chars=len(text), preview=_message_preview(text))
-        except DEFENSIVE_EXC as exc:
+        except (*DEFENSIVE_EXC, AiogramAPIError) as exc:
             error_str = str(exc).lower()
             if (
                 "too long" in error_str
@@ -495,7 +496,7 @@ class TelegramBroadcaster:
                 parse_mode="HTML",
                 disable_web_page_preview=True,
             )
-        except DEFENSIVE_EXC as exc:
+        except (*DEFENSIVE_EXC, AiogramAPIError) as exc:
             error_str = str(exc).lower()
             # Message not modified is OK
             if "not modified" in error_str or "message is not modified" in error_str:
@@ -650,6 +651,62 @@ class TelegramBroadcaster:
             LOG.info("telegram bot session closed")
 
 
+# Telegram supports only a small set of inline tags (b/i/code/pre/u/s/a/…), all
+# properly nested. When we truncate or hard-split HTML we can land in the middle
+# of a <i>…</i> span; the resulting chunk has an unclosed tag and Telegram rejects
+# it with "Can't find end tag corresponding to start tag ...". These helpers make
+# every emitted chunk tag-balanced.
+_HTML_TAG_RE = re.compile(r"<(/?)([a-zA-Z]+)(?:\s[^>]*)?>")
+
+
+def _strip_partial_tag_tail(fragment: str) -> str:
+    """Drop a trailing ``<…`` that was cut before its closing ``>``."""
+    lt = fragment.rfind("<")
+    if lt != -1 and fragment.find(">", lt) == -1:
+        return fragment[:lt].rstrip()
+    return fragment
+
+
+def _open_tag_stack(fragment: str) -> list[str]:
+    """Tag names still open at the end of ``fragment`` (proper nesting assumed)."""
+    stack: list[str] = []
+    for closing, raw_name in _HTML_TAG_RE.findall(fragment):
+        name = raw_name.lower()
+        if closing:
+            if stack and stack[-1] == name:
+                stack.pop()
+            elif name in stack:  # tolerate minor mis-nesting
+                stack.remove(name)
+        else:
+            stack.append(name)
+    return stack
+
+
+def _close_open_tags(fragment: str) -> tuple[str, list[str]]:
+    """Strip a dangling partial tag, then return (balanced_fragment, tags_left_open)."""
+    safe = _strip_partial_tag_tail(fragment)
+    stack = _open_tag_stack(safe)
+    balanced = safe + "".join(f"</{name}>" for name in reversed(stack))
+    return balanced, stack
+
+
+def _balance_html_fragment(fragment: str) -> str:
+    """Remove a dangling partial tag and append closers for any still-open tags."""
+    return _close_open_tags(fragment)[0]
+
+
+def _rebalance_parts(parts: list[str]) -> list[str]:
+    """Close tags left open at each chunk boundary and reopen them in the next chunk."""
+    if len(parts) <= 1:
+        return parts
+    out: list[str] = []
+    carry: list[str] = []
+    for part in parts:
+        balanced, carry = _close_open_tags("".join(f"<{name}>" for name in carry) + part)
+        out.append(balanced)
+    return out
+
+
 def _split_telegram_text(text: str, *, limit: int = TELEGRAM_CHUNK_LIMIT) -> list[str]:
     """Split HTML message into Telegram-safe chunks (paragraph-aware + hard split)."""
     if len(text) <= limit:
@@ -688,7 +745,7 @@ def _split_telegram_text(text: str, *, limit: int = TELEGRAM_CHUNK_LIMIT) -> lis
             parts.extend(_hard_split(block))
     if chunk:
         parts.extend(_hard_split(chunk))
-    return parts or _hard_split(text[:limit])
+    return _rebalance_parts(parts or _hard_split(text[:limit]))
 
 
 def _message_preview(text: str, *, limit: int = TELEGRAM_LOG_PREVIEW_LIMIT) -> str:

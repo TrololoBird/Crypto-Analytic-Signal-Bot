@@ -21,6 +21,16 @@ REST_WEIGHT_PACE_LIMIT = 1500  # proactive cap - stay below Binance 2400/min wit
 REST_WEIGHT_HARD_LIMIT = 2200
 REST_WEIGHT_CRITICAL_LIMIT = 2350
 
+# Binance's 418 -1003 "Way too many requests" is a request-RATE WAF ban, distinct
+# from the 2400/min weight budget: a flood of many low-weight calls (funding/OI/
+# basis = weight 1 each) passes the weight pacer yet trips the WAF. Cap raw request
+# COUNT too. Binance fapi IP request soft-limit is ~1200/min; pace under it.
+REST_REQUESTS_PER_MIN = 1000
+# When the server-reported x-mbx-used-weight-1m header exceeds this, proactively
+# pause — a concurrent burst can overshoot the local estimate before responses
+# return, so trust the exchange's own counter as a hard backstop.
+REST_WEIGHT_HEADER_STOP = 2000
+
 
 class SlidingWindowRateLimiter:
     """Sliding-window limiter for request-count quotas (e.g. /futures/data/*)."""
