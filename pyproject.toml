@@ -38,7 +38,7 @@ Repository = "https://github.com/TrololoBird/Crypto-Analytic-Signal-Bot"
 Issues = "https://github.com/TrololoBird/Crypto-Analytic-Signal-Bot/issues"
 
 [project.optional-dependencies]
-dev = ["ruff==0.15.16", "mypy>=2.1.0", "pre-commit>=4.6.0"]
+dev = ["ruff==0.16.3", "mypy>=2.1.0", "pre-commit>=4.6.0"]
 live = [
     "fastapi>=0.136.3",
     "uvicorn[standard]>=0.48.0",
